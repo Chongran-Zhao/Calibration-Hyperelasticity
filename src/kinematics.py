@@ -4,120 +4,124 @@ import numpy as np
 class Kinematics:
     """
     Kinematics class for hyperelastic materials.
-    Calculates stresses based on the Strain Energy Density (Psi).
+    Calculates stresses using the Chain Rule method.
+    Separates scalar derivatives (physics) from tensor assembly (geometry).
     """
 
     def __init__(self, energy_function, param_names, model_type='invariant'):
         """
         Args:
             energy_function: Function from material_models.
-            param_names: List of parameter names as strings (e.g., ['C1', 'C2']).
+            param_names: List of parameter names.
             model_type: 'invariant' or 'stretch'.
         """
         self.energy_function = energy_function
         self.model_type = model_type
-        
-        # 1. Generate SymPy symbols for parameters
-        self.param_symbols = {name: sp.Symbol(name) for name in param_names}
         self.param_names_ordered = param_names
-        self.param_symbols_ordered = [self.param_symbols[name] for name in param_names]
+        
+        # 1. Generate Parameter Symbols
+        self.param_symbols = {name: sp.Symbol(name) for name in param_names}
+        self.param_symbols_list = [self.param_symbols[name] for name in param_names]
 
-        # 2. Define Kinematic Symbols
-        # F is the input Matrix Symbol (for lambdify input)
-        self.F_sym = sp.MatrixSymbol('F', 3, 3)
-        self.F_mat = sp.Matrix(self.F_sym) 
-        
-        # --- CRITICAL FIX FOR DERIVATIVE ---
-        # To differentiate Psi w.r.t C, C must be composed of independent symbols first.
-        # We cannot differentiate w.r.t an expression like (F.T * F).
-        
-        # Define a temporary auxiliary C matrix with independent components
-        self.C_aux = sp.Matrix(3, 3, lambda i, j: sp.Symbol(f'C_aux_{i}{j}'))
-        
-        # 3. Construct Energy Expression (Psi) using C_aux
+        # 2. Prepare Derivatives based on Model Type
         if model_type == 'invariant':
-            # Calculate invariants from the auxiliary C
-            I1 = sp.trace(self.C_aux)
-            I2 = 0.5 * (I1**2 - sp.trace(self.C_aux * self.C_aux))
-            
-            try:
-                self.psi_expr = energy_function(I1, self.param_symbols)
-            except TypeError:
-                self.psi_expr = energy_function(I1, I2, self.param_symbols)
-                
+            self._prepare_invariant_derivatives()
         elif model_type == 'stretch':
-            # Assume diagonal C for simple differentiation of stretches
-            l1 = sp.sqrt(self.C_aux[0, 0])
-            l2 = sp.sqrt(self.C_aux[1, 1])
-            l3 = sp.sqrt(self.C_aux[2, 2])
-            self.psi_expr = energy_function(l1, l2, l3, self.param_symbols)
+            self._prepare_stretch_derivatives()
         else:
             raise ValueError("Unsupported model_type. Use 'invariant' or 'stretch'.")
 
-        # 4. Compute S_hyper symbolic using C_aux
-        # S = 2 * d(Psi) / dC
-        # Now we can differentiate because C_aux components are simple symbols
-        S_aux = 2 * self._diff_matrix(self.psi_expr, self.C_aux)
-
-        # 5. Substitute C_aux back with (F.T * F)
-        # This expresses S in terms of our input F, which is what we need for calculation
-        C_calc = self.F_mat.T * self.F_mat
+    def _prepare_invariant_derivatives(self):
+        """
+        Pre-calculates scalar derivatives dPsi/dI1 and dPsi/dI2.
+        """
+        # Define scalar symbols for invariants
+        I1, I2 = sp.symbols('I1 I2')
         
-        # Create a substitution dictionary: {C_aux_00: (F.T*F)[0,0], ...}
-        replacements = {self.C_aux[i, j]: C_calc[i, j] for i in range(3) for j in range(3)}
+        # Get Energy Expression Psi(I1, I2)
+        # Try calling with (I1, params), fallback to (I1, I2, params)
+        try:
+            psi_expr = self.energy_function(I1, self.param_symbols)
+        except TypeError:
+            psi_expr = self.energy_function(I1, I2, self.param_symbols)
+            
+        # Symbolic Differentiation (Scalar level, very fast)
+        dPsi_dI1_sym = sp.diff(psi_expr, I1)
+        dPsi_dI2_sym = sp.diff(psi_expr, I2)
         
-        # Perform substitution
-        self.S_hyper_sym = S_aux.subs(replacements)
+        # Compile functions
+        # Inputs: (I1_val, I2_val, p1, p2...)
+        inputs = [I1, I2] + self.param_symbols_list
+        self.calc_dPsi_dI1 = sp.lambdify(inputs, dPsi_dI1_sym, modules='numpy')
+        self.calc_dPsi_dI2 = sp.lambdify(inputs, dPsi_dI2_sym, modules='numpy')
 
-        # 6. Compile the function
-        self.calc_S_hyper_fast = sp.lambdify(
-            [self.F_sym] + self.param_symbols_ordered, 
-            self.S_hyper_sym, 
-            modules='numpy'
-        )
-
-    def _diff_matrix(self, scalar_func, matrix_var):
+    def _prepare_stretch_derivatives(self):
         """
-        Differentiates a scalar function w.r.t each component of a matrix.
+        Pre-calculates scalar derivatives dPsi/dlambda_i.
         """
-        rows, cols = matrix_var.shape
-        res = sp.zeros(rows, cols)
-        for i in range(rows):
-            for j in range(cols):
-                res[i, j] = sp.diff(scalar_func, matrix_var[i, j])
-        return res
-
-    def print_model_info(self):
-        """
-        Prints detailed information about the material model,
-        including parameters and the symbolic energy expression.
-        """
-        model_name = self.energy_function.__name__
-        num_params = len(self.param_names_ordered)
-
-        print("="*60)
-        print(f" Material Model Information")
-        print("="*60)
-        print(f" Model Name      : {model_name}")
-        print(f" Model Type      : {self.model_type.capitalize()}")
-        print(f" Parameter Count : {num_params}")
-        print(f" Parameters      : {self.param_names_ordered}")
-        print("-" * 60)
-        print(f" Symbolic Energy Expression (Psi):")
-
-        # Use SymPy's pretty printer for mathematical rendering
-        sp.pprint(self.psi_expr, use_unicode=True)
-        print("="*60 + "\n")
+        # Define symbols for principal stretches
+        l1, l2, l3 = sp.symbols('lambda_1 lambda_2 lambda_3')
+        
+        # Get Energy Expression Psi(l1, l2, l3)
+        psi_expr = self.energy_function(l1, l2, l3, self.param_symbols)
+        
+        # Derivatives
+        dPsi_dl1_sym = sp.diff(psi_expr, l1)
+        dPsi_dl2_sym = sp.diff(psi_expr, l2)
+        dPsi_dl3_sym = sp.diff(psi_expr, l3)
+        
+        # Compile functions
+        inputs = [l1, l2, l3] + self.param_symbols_list
+        self.calc_dPsi_dl1 = sp.lambdify(inputs, dPsi_dl1_sym, modules='numpy')
+        self.calc_dPsi_dl2 = sp.lambdify(inputs, dPsi_dl2_sym, modules='numpy')
+        self.calc_dPsi_dl3 = sp.lambdify(inputs, dPsi_dl3_sym, modules='numpy')
 
     def get_2nd_PK_stress(self, F, params):
-        p_values = [params[name] for name in self.param_names_ordered]
-        S_hyper = np.array(self.calc_S_hyper_fast(F, *p_values))
+        """
+        Computes S using analytic tensor formulas.
+        """
+        # Unpack parameter values
+        p_vals = [params[name] for name in self.param_names_ordered]
         
-        # Solve for p (Sigma_33 = 0)
+        if self.model_type == 'invariant':
+            # 1. Calculate Kinematics
+            C = F.T @ F
+            I1 = np.trace(C)
+            C2 = C @ C
+            I2 = 0.5 * (I1**2 - np.trace(C2))
+            
+            # 2. Evaluate Scalar Response Coefficients
+            # Handle cases where derivatives return scalar 0 (not array)
+            psi1 = self.calc_dPsi_dI1(I1, I2, *p_vals)
+            psi2 = self.calc_dPsi_dI2(I1, I2, *p_vals)
+            
+            # 3. Assemble Stress Tensor (Standard Formula)
+            # S_iso = 2 * ( (dPsi/dI1 + I1*dPsi/dI2)*I - dPsi/dI2*C )
+            Identity = np.eye(3)
+            S_hyper = 2.0 * ((psi1 + I1 * psi2) * Identity - psi2 * C)
+            
+        elif self.model_type == 'stretch':
+            # Assumes F is diagonal (Principal Stretches) for simplicity in calibration
+            # If F is not diagonal, eigenvalues would be needed.
+            l1, l2, l3 = F[0,0], F[1,1], F[2,2]
+            
+            # Evaluate derivatives
+            s1 = self.calc_dPsi_dl1(l1, l2, l3, *p_vals)
+            s2 = self.calc_dPsi_dl2(l1, l2, l3, *p_vals)
+            s3 = self.calc_dPsi_dl3(l1, l2, l3, *p_vals)
+            
+            # S_i = (1/lambda_i) * dPsi/dlambda_i
+            # Avoid divide by zero check handled by data validity
+            S_hyper = np.diag([s1/l1, s2/l2, s3/l3])
+            
+        # --- Incompressibility Handling (Common for both) ---
+        # Solve for p using sigma_33 = 0 condition
+        # Sigma_hyper = F * S_hyper * F.T
         Sigma_hyper = F @ S_hyper @ F.T
-        p = Sigma_hyper[2, 2] 
+        p = Sigma_hyper[2, 2]
         
-        C = F.T @ F
+        # S_total = S_hyper - p * C^-1
+        C = F.T @ F # Recompute or reuse
         C_inv = np.linalg.inv(C)
         S_total = S_hyper - p * C_inv
         
@@ -125,10 +129,9 @@ class Kinematics:
 
     def get_1st_PK_stress(self, F, params):
         S = self.get_2nd_PK_stress(F, params)
-        P = F @ S
-        return P
+        return F @ S
 
     def get_Cauchy_stress(self, F, params):
         S = self.get_2nd_PK_stress(F, params)
-        Sigma = F @ S @ F.T
-        return Sigma
+        return F @ S @ F.T
+# EOF
