@@ -1,5 +1,6 @@
 # Personal files
 .DS_store
+output/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
