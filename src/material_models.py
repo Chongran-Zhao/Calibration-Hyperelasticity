@@ -33,7 +33,8 @@ class MaterialModels:
         formula_str=r"Psi = C1 * (I1 - 3)",
         param_names=["C1"],
         initial_guess=[0.5],
-        bounds=[(0.0, None)]
+        # Safe Bound: C1 > 0
+        bounds=[(1e-6, None)]
     )
     def NeoHookean(I1, params):
         """Neo-Hookean Model"""
@@ -46,7 +47,8 @@ class MaterialModels:
         formula_str=r"Psi = C1 * (I1 - 3) + C2 * (I2 - 3)",
         param_names=["C1", "C2"],
         initial_guess=[0.5, 0.1],
-        bounds=[(None, None), (None, None)]
+        # Safe Bound: C1 > 0. C2 allowed to be flexible or 0
+        bounds=[(1e-6, None), (None, None)]
     )
     def MooneyRivlin(I1, I2, params):
         """Mooney-Rivlin Model"""
@@ -59,7 +61,8 @@ class MaterialModels:
         formula_str=r"Psi = C1*(I1-3) + C2*(I1-3)^2 + C3*(I1-3)^3",
         param_names=["C1", "C2", "C3"],
         initial_guess=[0.5, -0.01, 0.001],
-        bounds=[(0.0, None), (None, None), (None, None)]
+        # Safe Bound: C1 > 0. Higher order terms C2, C3 can be negative.
+        bounds=[(1e-6, None), (None, None), (None, None)]
     )
     def Yeoh(I1, params):
         """Yeoh Model (3rd Order)"""
@@ -74,7 +77,8 @@ class MaterialModels:
         formula_str=r"Psi = mu * N * [ lambda_r * beta + ln( beta / sinh(beta) ) ]",
         param_names=["mu", "N"],
         initial_guess=[0.4, 10.0],
-        bounds=[(0.01, None), (1.0, None)]
+        # Safe Bound: mu > 0, N >= 1.0 (approximated, driver handles dynamic N limit)
+        bounds=[(1e-6, None), (1.0, None)]
     )
     def ArrudaBoyce(I1, params):
         """Arruda-Boyce (8-Chain) Model"""
@@ -93,7 +97,8 @@ class MaterialModels:
         formula_str=r"Psi = Sum [ (mu_i / alpha_i) * (lambda_1^alpha_i + ... - 3) ]",
         param_names=["mu", "alpha"],
         initial_guess=[0.5, 2.0],
-        bounds=[(None, None), (None, None)]
+        # Safe Bound: mu > 0
+        bounds=[(1e-6, None), (None, None)]
     )
     def Ogden(lambda_1, lambda_2, lambda_3, params):
         """Ogden Model (1-term default)"""
@@ -114,12 +119,6 @@ class MaterialModels:
         """
         Factory method to generate a specific Hill model function based on a generalized strain.
         This handles the parameter naming (C1, m1, n1 etc.) and metadata dynamically.
-        
-        Args:
-            strain_name (str): Name of the strain in GeneralizedStrains (e.g., 'Seth-Hill').
-            
-        Returns:
-            function: A fully configured model function ready for Kinematics/Driver.
         """
         if strain_name not in STRAIN_CONFIGS:
             raise ValueError(f"Unknown strain configuration: {strain_name}")
@@ -130,39 +129,34 @@ class MaterialModels:
         strain_defaults = config['defaults']
         strain_bounds = config['bounds']
         
-        # 2. Construct Full Parameter List (assuming N=1 term for driver simplicity)
-        # Structure: C1 (modulus) + Strain Parameters with suffix '1'
+        # 2. Construct Full Parameter List
         full_param_names = ['C1'] + [f"{p}1" for p in strain_params]
         full_initial_guess = [10.0] + strain_defaults
-        full_bounds = [(0.0, None)] + strain_bounds
+        
+        # 3. Construct Full Bounds
+        # Enforce C1 > 0 using a small epsilon
+        full_bounds = [(1e-6, None)] + strain_bounds
 
-        # 3. Define the Closure Function
+        # 4. Define the Closure Function
         def Hill_Dynamic(lambda_1, lambda_2, lambda_3, params):
             """Dynamically generated Hill Model"""
-            # Extract Modulus
             C = params['C1']
             
-            # Extract Strain Params (e.g., m1 -> m)
-            # We map 'm' (needed by strain func) to params['m1'] (from optimizer)
             current_params = {}
             for p_base in strain_params:
                 p_key = f"{p_base}1"
                 current_params[p_base] = params[p_key]
             
-            # Get Strain Function
-            # Handle naming mismatch: Config keys may have hyphens (e.g., "Seth-Hill"),
-            # but Python method names do not (e.g., "SethHill").
             method_name = strain_name.replace("-", "")
             strain_func = getattr(GeneralizedStrains, method_name)
             
-            # Compute Energy
             E1 = strain_func(lambda_1, current_params)
             E2 = strain_func(lambda_2, current_params)
             E3 = strain_func(lambda_3, current_params)
             
             return C * (E1**2 + E2**2 + E3**2)
 
-        # 4. Attach Metadata manually (mimicking @register_model)
+        # 5. Attach Metadata manually
         Hill_Dynamic.__name__ = f"Hill_{strain_name}"
         Hill_Dynamic.model_type = 'stretch_based'
         Hill_Dynamic.category = 'phenomenological'
