@@ -32,16 +32,41 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Source+Serif+4:wght@600;700&display=swap');
 
     :root {
+        color-scheme: light dark;
         --bg-1: #f6f7fb;
         --bg-2: #eef2ff;
         --ink-1: #101828;
         --ink-2: #475467;
+        --ink-3: #667085;
         --brand-1: #3b82f6;
         --brand-2: #06b6d4;
-        --card: rgba(255, 255, 255, 0.7);
+        --card: rgba(255, 255, 255, 0.72);
         --card-border: rgba(16, 24, 40, 0.08);
         --shadow: 0 12px 30px rgba(16, 24, 40, 0.08);
         --radius: 16px;
+        --sidebar-bg: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+        --sidebar-ink: #e2e8f0;
+        --sidebar-muted: #94a3b8;
+        --link: var(--brand-1);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --bg-1: #0b1220;
+            --bg-2: #111827;
+            --ink-1: #e5e7eb;
+            --ink-2: #cbd5f5;
+            --ink-3: #94a3b8;
+            --brand-1: #60a5fa;
+            --brand-2: #22d3ee;
+            --card: rgba(15, 23, 42, 0.78);
+            --card-border: rgba(148, 163, 184, 0.12);
+            --shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+            --sidebar-bg: linear-gradient(180deg, #0b0f1a 0%, #0f172a 100%);
+            --sidebar-ink: #dbeafe;
+            --sidebar-muted: #94a3b8;
+            --link: #93c5fd;
+        }
     }
 
     html, body, [class*="css"], .stMarkdown, .stText, p, h1, h2, h3, h4, h5, h6, li, span, label, div, button, input, textarea, select {
@@ -50,9 +75,28 @@ st.markdown("""
 
     body {
         background: radial-gradient(1100px 600px at 10% 0%, var(--bg-2), transparent 60%),
-                    radial-gradient(900px 500px at 90% 10%, #e0f2fe, transparent 60%),
-                    linear-gradient(180deg, #ffffff, var(--bg-1));
+                    radial-gradient(900px 500px at 90% 10%, color-mix(in srgb, var(--bg-2) 70%, transparent), transparent 60%),
+                    linear-gradient(180deg, color-mix(in srgb, var(--bg-2) 30%, transparent), var(--bg-1));
         color: var(--ink-1);
+    }
+
+    [data-testid="stAppViewContainer"] {
+        color: var(--ink-1);
+    }
+    [data-testid="stAppViewContainer"] .stMarkdown,
+    [data-testid="stAppViewContainer"] .stText,
+    [data-testid="stAppViewContainer"] p,
+    [data-testid="stAppViewContainer"] li,
+    [data-testid="stAppViewContainer"] span,
+    [data-testid="stAppViewContainer"] label {
+        color: var(--ink-1);
+    }
+    [data-testid="stAppViewContainer"] .stCaption,
+    [data-testid="stAppViewContainer"] [data-testid="stCaption"] {
+        color: var(--ink-3);
+    }
+    [data-testid="stAppViewContainer"] a {
+        color: var(--brand-1);
     }
 
     .block-container {
@@ -75,9 +119,9 @@ st.markdown("""
     .hero {
         padding: 1.2rem 1.6rem 0.6rem 1.6rem;
         border-radius: 20px;
-        background: linear-gradient(120deg, #f0f9ff 0%, #eef2ff 45%, #ecfeff 100%);
-        border: 1px solid rgba(59, 130, 246, 0.18);
-        box-shadow: 0 18px 40px rgba(2, 132, 199, 0.12);
+        background: linear-gradient(120deg, color-mix(in srgb, var(--bg-2) 55%, #ffffff) 0%, var(--bg-2) 45%, color-mix(in srgb, var(--bg-2) 40%, #ffffff) 100%);
+        border: 1px solid color-mix(in srgb, var(--brand-1) 30%, transparent);
+        box-shadow: 0 18px 40px color-mix(in srgb, var(--brand-1) 20%, transparent);
         margin-bottom: 1.6rem;
     }
 
@@ -94,6 +138,27 @@ st.markdown("""
         font-size: 1rem;
     }
 
+    .author-bar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.8rem;
+        padding: 0.2rem 0.4rem 0.9rem 0.4rem;
+        color: var(--ink-2);
+        font-size: 0.95rem;
+    }
+    .author-name {
+        font-weight: 600;
+        color: var(--ink-1);
+    }
+    .author-item a {
+        color: var(--link);
+        text-decoration: none;
+    }
+    .author-item a:hover {
+        text-decoration: underline;
+    }
+
     .pill-row {
         display: flex;
         flex-wrap: wrap;
@@ -102,8 +167,8 @@ st.markdown("""
     }
 
     .pill {
-        background: #ffffff;
-        border: 1px solid rgba(16, 24, 40, 0.08);
+        background: color-mix(in srgb, var(--card) 90%, transparent);
+        border: 1px solid var(--card-border);
         border-radius: 999px;
         padding: 0.3rem 0.75rem;
         font-size: 0.85rem;
@@ -112,10 +177,17 @@ st.markdown("""
 
     .stTextInput input, .stNumberInput input, .stSelectbox div[data-baseweb="select"] {
         border-radius: 10px !important;
-        border: 1px solid rgba(16, 24, 40, 0.08) !important;
-        background: rgba(255, 255, 255, 0.9) !important;
+        border: 1px solid var(--card-border) !important;
+        background: color-mix(in srgb, var(--card) 80%, transparent) !important;
         padding-top: 0.45rem !important;
         padding-bottom: 0.45rem !important;
+        color: var(--ink-1) !important;
+    }
+    .stTextInput input::placeholder {
+        color: var(--ink-3) !important;
+    }
+    .stSelectbox div[data-baseweb="select"] span {
+        color: var(--ink-1) !important;
     }
 
     .stButton > button {
@@ -141,19 +213,24 @@ st.markdown("""
         font-weight: 700 !important;
         margin-top: 0.2rem !important;
         margin-bottom: 1rem !important;
-        border-bottom: 1px solid rgba(16, 24, 40, 0.08);
+        border-bottom: 1px solid var(--card-border);
         padding-bottom: 0.4rem;
     }
 
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
-        color: #f8fafc;
+        background: var(--sidebar-bg);
+        color: var(--sidebar-ink);
     }
-    [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] p {
-        color: #e2e8f0;
+    [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] label, [data-testid="stSidebar"] span, [data-testid="stSidebar"] li {
+        color: var(--sidebar-ink);
+    }
+    [data-testid="stSidebar"] .stCaption,
+    [data-testid="stSidebar"] [data-testid="stCaption"] {
+        color: var(--sidebar-muted);
     }
     [data-testid="stSidebar"] a {
-        color: #7dd3fc;
+        color: var(--link);
     }
 
     @keyframes fadeUp {
@@ -268,19 +345,17 @@ def reset_run():
 # ==========================================
 
 # Title & Author Info
-with st.sidebar:
-    st.header("About")
-    st.markdown("""
-    **Chongran Zhao** 📧 chongranzhao@outlook.com  
-    🌐 [chongran-zhao.github.io](https://chongran-zhao.github.io)
-    """)
-    st.markdown("---")
 
 col_icon, col_title = st.columns([0.08, 0.92])
 with col_icon:
     st.image("https://img.icons8.com/ios-filled/100/000000/dna-helix.png", width=50)
 with col_title:
     st.markdown("""
+    <div class="author-bar">
+        <div class="author-name">Chongran Zhao</div>
+        <div class="author-item">📧 chongranzhao@outlook.com</div>
+        <div class="author-item">🌐 <a href="https://chongran-zhao.github.io" target="_blank" rel="noopener">chongran-zhao.github.io</a></div>
+    </div>
     <div class="hero">
         <div class="hero-title">Hyperelastic Calibration</div>
         <div class="hero-subtitle">Parallel spring networks, data-driven fitting, and fast predictive curves.</div>
@@ -413,7 +488,7 @@ for i in range(int(num_springs)):
                     on_change=reset_model_confirmation
                 )
         else:
-            with c2: st.empty()
+            pass
         
         # --- Instantiate ---
         if m_type == "Hill":
@@ -465,7 +540,6 @@ for i in range(int(num_springs)):
         execution_network.add_model(func, branch_name)
     else:
         all_springs_valid = False
-        with c2: st.empty()
         with c3: st.info("👈 Select model type")
     
     if i < int(num_springs) - 1:
@@ -475,7 +549,6 @@ if not all_springs_valid:
     st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
-st.write("")
 st.markdown('</div>', unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
@@ -495,9 +568,6 @@ with col_opt1:
     )
 
 with col_opt2:
-    st.write("") 
-    st.write("") # Alignment
-    
     if not st.session_state['run_triggered']:
         if st.button("🚀 Start Calibration", use_container_width=True, type="primary"):
             st.session_state['run_triggered'] = True
@@ -513,7 +583,6 @@ st.markdown('</div>', unsafe_allow_html=True)
 # -----------------------------------------------------------------------------
 if st.session_state['run_triggered']:
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.write("")
     st.markdown("## 📊 Analysis Results")
     
     # Calibration Run
@@ -586,7 +655,6 @@ if st.session_state['run_triggered']:
                     except:
                         new_param_values.append(val)
                 
-            st.write("")
             st.markdown("### Prediction Mode")
             with st.container():
                 # Check for unused data
@@ -605,10 +673,8 @@ if st.session_state['run_triggered']:
                 else:
                     st.caption("No additional data available for this author.")
 
-                st.write("")
                 overlay_option = st.checkbox("Overlay on Calibration", value=True)
-                
-                st.write("")
+
                 if st.button("⚡ Update Prediction", use_container_width=True):
                     st.session_state['optimized_params_vec'] = new_param_values
                     st.session_state['prediction_triggered'] = True
