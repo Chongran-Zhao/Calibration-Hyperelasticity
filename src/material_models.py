@@ -1,157 +1,189 @@
 import sympy as sp
-from generalized_strains import GeneralizedStrains
+from generalized_strains import GeneralizedStrains, STRAIN_CONFIGS
 from utils import inv_Langevin_Kroger
 
 # =============================================================================
-# Global Model Formula Dictionary
+# Decorator for Model Tagging & Configuration
 # =============================================================================
-MODEL_FORMULAS = {
-    # Invariant Models
-    "NeoHookean": r"Psi = C1 * (I1 - 3)",
-    "MooneyRivlin": r"Psi = C1 * (I1 - 3) + C2 * (I2 - 3)",
-    "Yeoh": r"Psi = C1*(I1-3) + C2*(I1-3)^2 + C3*(I1-3)^3",
-    "ArrudaBoyce": (
-        r"Psi = mu * N * [ lambda_r * beta + ln( beta / sinh(beta) ) ]" + "\n" +
-        r"      where lambda_r = sqrt(I1 / 3N), beta = L^(-1)(lambda_r)" + "\n" +
-        r"      (Using Kroger's Pade approximation for inverse Langevin)"
-    ),
-    
-    # Stretch-Based Models
-    "Ogden": r"Psi = Sum [ (mu_i / alpha_i) * (lambda_1^alpha_i + lambda_2^alpha_i + lambda_3^alpha_i - 3) ]",
-    "Hill": r"Psi = Sum [ C_i * ( E(lambda_1)^2 + E(lambda_2)^2 + E(lambda_3)^2 ) ] (Generalized Strain Energy)"
-}
-
-def print_model_formula(model_name):
-    """
-    Prints a clean, human-readable LaTeX-like formula for the model.
-    This replaces the individual print_info methods in classes.
-    """
-    print("-" * 60)
-    print(f"Model Formula ({model_name}):")
-    print(MODEL_FORMULAS.get(model_name, "No formula display available for this model."))
-    print("-" * 60)
-
+def register_model(model_type, category, formula_str="", param_names=None, initial_guess=None, bounds=None):
+    def decorator(func):
+        func.model_type = model_type
+        func.category = category
+        func.formula = formula_str
+        func.param_names = param_names if param_names else []
+        func.initial_guess = initial_guess if initial_guess else []
+        func.bounds = bounds if bounds else []
+        return func
+    return decorator
 
 # =============================================================================
-# Model Classes
+# Unified Material Models Class
 # =============================================================================
+class MaterialModels:
+    """
+    Unified collection of hyperelastic material models.
+    """
 
-class InvariantModels:
-    """
-    Hyperelastic models based on invariants (I1, I2).
-    Inputs are SymPy symbols for invariants and a dictionary for parameters.
-    Assumes incompressibility (J=1).
-    """
+    # --- Invariant Based Models ---
 
     @staticmethod
+    @register_model(
+        model_type='invariant_based', 
+        category='phenomenological',
+        formula_str=r"Psi = C1 * (I1 - 3)",
+        param_names=["C1"],
+        initial_guess=[0.5],
+        bounds=[(0.0, None)]
+    )
     def NeoHookean(I1, params):
-        """
-        Neo-Hookean Model.
-        Psi = C1 * (I1 - 3)
-        """
+        """Neo-Hookean Model"""
         return params['C1'] * (I1 - 3)
 
     @staticmethod
+    @register_model(
+        model_type='invariant_based', 
+        category='phenomenological',
+        formula_str=r"Psi = C1 * (I1 - 3) + C2 * (I2 - 3)",
+        param_names=["C1", "C2"],
+        initial_guess=[0.5, 0.1],
+        bounds=[(None, None), (None, None)]
+    )
     def MooneyRivlin(I1, I2, params):
-        """
-        Mooney-Rivlin Model.
-        Psi = C1 * (I1 - 3) + C2 * (I2 - 3)
-        """
+        """Mooney-Rivlin Model"""
         return params['C1'] * (I1 - 3) + params['C2'] * (I2 - 3)
 
     @staticmethod
+    @register_model(
+        model_type='invariant_based', 
+        category='phenomenological',
+        formula_str=r"Psi = C1*(I1-3) + C2*(I1-3)^2 + C3*(I1-3)^3",
+        param_names=["C1", "C2", "C3"],
+        initial_guess=[0.5, -0.01, 0.001],
+        bounds=[(0.0, None), (None, None), (None, None)]
+    )
     def Yeoh(I1, params):
-        """
-        Yeoh Model (3rd order).
-        Psi = C1*(I1-3) + C2*(I1-3)^2 + C3*(I1-3)^3
-        """
+        """Yeoh Model (3rd Order)"""
         return (params['C1'] * (I1 - 3) + 
                 params['C2'] * (I1 - 3)**2 + 
                 params['C3'] * (I1 - 3)**3)
 
     @staticmethod
+    @register_model(
+        model_type='invariant_based', 
+        category='micromechanical',
+        formula_str=r"Psi = mu * N * [ lambda_r * beta + ln( beta / sinh(beta) ) ]",
+        param_names=["mu", "N"],
+        initial_guess=[0.4, 10.0],
+        bounds=[(0.01, None), (1.0, None)]
+    )
     def ArrudaBoyce(I1, params):
-        """
-        Arruda-Boyce (8-chain model) using Kröger's approximation.
-        
-        Psi = mu * N * [ lambda_r * beta + ln( beta / sinh(beta) ) ]
-        where:
-          N: Number of rigid links (N_chain)
-          lambda_r = sqrt( I1 / (3N) )
-          beta = inv_Langevin(lambda_r)
-        """
+        """Arruda-Boyce (8-Chain) Model"""
         mu = params['mu']
-        N = params['N'] # Corresponds to N_chain
-        
-        # 1. Calculate relative average network stretch (lambda_r)
-        # lambda_r = sqrt( I1 / (3N) )
+        N = params['N'] 
         lambda_r = sp.sqrt(I1 / (3.0 * N))
-        
-        # 2. Calculate beta using the helper from utils.py
         beta = inv_Langevin_Kroger(lambda_r)
-        
-        # 3. Calculate Energy Density
-        psi_chain = lambda_r * beta + sp.log(beta / sp.sinh(beta))
-        Psi = mu * N * psi_chain
-        
-        return Psi
+        return mu * N * (lambda_r * beta + sp.log(beta / sp.sinh(beta)))
 
-
-class StretchBasedModels:
-    """
-    Hyperelastic models based on principal stretches (lambda_1, lambda_2, lambda_3).
-    Assumes incompressibility (lambda_1 * lambda_2 * lambda_3 = 1).
-    """
+    # --- Stretch Based Models ---
 
     @staticmethod
+    @register_model(
+        model_type='stretch_based', 
+        category='phenomenological',
+        formula_str=r"Psi = Sum [ (mu_i / alpha_i) * (lambda_1^alpha_i + ... - 3) ]",
+        param_names=["mu", "alpha"],
+        initial_guess=[0.5, 2.0],
+        bounds=[(None, None), (None, None)]
+    )
     def Ogden(lambda_1, lambda_2, lambda_3, params):
-        """
-        Ogden Model (N-terms).
-        Psi = sum( (mu_i / alpha_i) * (lambda_1^alpha_i + lambda_2^alpha_i + lambda_3^alpha_i - 3) )
-        """
+        """Ogden Model (1-term default)"""
         mus = params['mu']
         alphas = params['alpha']
+        if not isinstance(mus, (list, tuple)): mus = [mus]
+        if not isinstance(alphas, (list, tuple)): alphas = [alphas]
         
         psi = 0
-        # mus and alphas should be lists of symbols
         for mu, alpha in zip(mus, alphas):
             psi += (mu / alpha) * (lambda_1**alpha + lambda_2**alpha + lambda_3**alpha - 3)
-            
         return psi
 
+    # --- Hill Model Factory ---
+
     @staticmethod
-    def Hill(lambda_1, lambda_2, lambda_3, params):
+    def create_hill_model(strain_name):
         """
-        Smart Generalized Hill Model.
-        Automatically constructs energy based on grouped parameters.
-        """
-        psi = 0
+        Factory method to generate a specific Hill model function based on a generalized strain.
+        This handles the parameter naming (C1, m1, n1 etc.) and metadata dynamically.
         
-        for strain_type, p_dict in params.items():
-            if not hasattr(GeneralizedStrains, strain_type):
-                raise ValueError(f"Unknown strain type: {strain_type}")
+        Args:
+            strain_name (str): Name of the strain in GeneralizedStrains (e.g., 'Seth-Hill').
             
-            strain_func = getattr(GeneralizedStrains, strain_type)
+        Returns:
+            function: A fully configured model function ready for Kinematics/Driver.
+        """
+        if strain_name not in STRAIN_CONFIGS:
+            raise ValueError(f"Unknown strain configuration: {strain_name}")
             
-            if 'C' not in p_dict:
-                raise ValueError(f"Missing coefficient 'C' for {strain_type}")
+        # 1. Retrieve Config
+        config = STRAIN_CONFIGS[strain_name]
+        strain_params = config['params'] # e.g., ['m']
+        strain_defaults = config['defaults']
+        strain_bounds = config['bounds']
+        
+        # 2. Construct Full Parameter List (assuming N=1 term for driver simplicity)
+        # Structure: C1 (modulus) + Strain Parameters with suffix '1'
+        full_param_names = ['C1'] + [f"{p}1" for p in strain_params]
+        full_initial_guess = [10.0] + strain_defaults
+        full_bounds = [(0.0, None)] + strain_bounds
+
+        # 3. Define the Closure Function
+        def Hill_Dynamic(lambda_1, lambda_2, lambda_3, params):
+            """Dynamically generated Hill Model"""
+            # Extract Modulus
+            C = params['C1']
             
-            C_list = p_dict['C']
-            num_terms = len(C_list)
+            # Extract Strain Params (e.g., m1 -> m)
+            # We map 'm' (needed by strain func) to params['m1'] (from optimizer)
+            current_params = {}
+            for p_base in strain_params:
+                p_key = f"{p_base}1"
+                current_params[p_base] = params[p_key]
             
-            param_keys = [k for k in p_dict.keys() if k != 'C']
+            # Get Strain Function
+            # Handle naming mismatch: Config keys may have hyphens (e.g., "Seth-Hill"),
+            # but Python method names do not (e.g., "SethHill").
+            method_name = strain_name.replace("-", "")
+            strain_func = getattr(GeneralizedStrains, method_name)
             
-            for i in range(num_terms):
-                C = C_list[i]
-                current_params = {}
-                for key in param_keys:
-                    current_params[key] = p_dict[key][i]
-                
-                E1 = strain_func(lambda_1, current_params)
-                E2 = strain_func(lambda_2, current_params)
-                E3 = strain_func(lambda_3, current_params)
-                
-                psi += C * (E1**2 + E2**2 + E3**2)
-                
-        return psi
-# EOF
+            # Compute Energy
+            E1 = strain_func(lambda_1, current_params)
+            E2 = strain_func(lambda_2, current_params)
+            E3 = strain_func(lambda_3, current_params)
+            
+            return C * (E1**2 + E2**2 + E3**2)
+
+        # 4. Attach Metadata manually (mimicking @register_model)
+        Hill_Dynamic.__name__ = f"Hill_{strain_name}"
+        Hill_Dynamic.model_type = 'stretch_based'
+        Hill_Dynamic.category = 'phenomenological'
+        Hill_Dynamic.formula = f"Psi = C * (E_{strain_name}^2 + ...)"
+        Hill_Dynamic.param_names = full_param_names
+        Hill_Dynamic.initial_guess = full_initial_guess
+        Hill_Dynamic.bounds = full_bounds
+        
+        return Hill_Dynamic
+
+def print_model_info(model_func):
+    """Helper to print model details from tags."""
+    name = model_func.__name__
+    m_type = getattr(model_func, 'model_type', 'Unknown')
+    cat = getattr(model_func, 'category', 'Unknown')
+    formula = getattr(model_func, 'formula', 'No formula')
+    params = getattr(model_func, 'param_names', [])
+    
+    print("-" * 60)
+    print(f"Model: {name}")
+    print(f"Type: {m_type} | Category: {cat}")
+    print(f"Parameters: {params}")
+    print(f"Formula: {formula}")
+    print("-" * 60)
