@@ -1,13 +1,13 @@
 # Hyperelastic Material Calibration Framework
 
-A Python-based framework for calibrating hyperelastic material constitutive models against experimental data. This tool utilizes symbolic differentiation (via SymPy) to automatically derive stress tensors, ensuring mathematical accuracy and flexibility for various material models.
+A Python-based framework for calibrating hyperelastic material constitutive models against experimental data. This tool utilizes symbolic differentiation (via SymPy) to automatically derive stress tensors, ensuring mathematical accuracy and flexibility for various material models. The primary interface is a modern Streamlit GUI.
 
 ## ✨ Key Features
 
 - **Symbolic Kinematics**: Automatically derives Second Piola-Kirchhoff ($S$), First Piola-Kirchhoff ($P$), and Cauchy ($\sigma$) stress tensors from strain energy density functions.
 - **Multi-Mode Fitting**: Supports simultaneous fitting of Uniaxial Tension (UT), Equibiaxial Tension (ET), and Pure Shear (PS) data.
 - **Extensive Model Library**: Includes built-in support for Neo-Hookean, Mooney-Rivlin, Yeoh, Arruda-Boyce, Ogden, Gent, and Hill-type generalized strain models.
-- **Visual Feedback**: Features a real-time progress bar with loss tracking and produces publication-quality plots using Times New Roman fonts.
+- **Modern GUI**: Interactive Streamlit interface for model configuration, optimization, and prediction.
 - **Model Introspection**: Prints the exact symbolic mathematical expression of the energy density function being used.
 
 ## 📂 Project Structure
@@ -31,8 +31,8 @@ Calibration-Hyperelasticity/
 │   └── plotting.py          # Visualization tools
 │
 ├── output/                  # Generated results (Plots and JSON)
-├── driver.py                # Main entry point script
-├── requirements.txt         # Python dependencies
+├── calibration_gui.py       # Streamlit GUI entry point
+├── requirement.txt          # Python dependencies
 └── README.md                # This documentation
 ```
 
@@ -68,18 +68,18 @@ venv\Scripts\activate
 
 ### 3. Install Dependencies
 
-Install the required Python packages listed in `requirements.txt`:
+Install the required Python packages listed in `requirement.txt`:
 
 ```
-pip install -r requirements.txt
+pip install -r requirement.txt
 ```
 
 ### 4. Verify Installation
 
-To ensure everything is set up correctly, run the main driver script. If the installation is successful, you will see the material model information printed and a progress bar starting.
+To ensure everything is set up correctly, launch the Streamlit GUI.
 
 ```
-python driver.py
+streamlit run calibration_gui.py
 ```
 
 ## 📖 Usage Guide
@@ -103,42 +103,13 @@ Place your experimental data in the `data/` directory. You should create a subfo
 ...
 ```
 
-### 2. Configure the Driver
+### 2. Configure in the GUI
 
-Open `driver.py` to configure the material model and data sources.
-
-**Select Data:** Modify the `data_configs` list to point to your data files:
-
-```
-data_configs = [
-    {'author': 'MyMaterial', 'mode': 'UT'},
-    {'author': 'MyMaterial', 'mode': 'ET'},
-]
-```
-
-**Select Model:** Change the `model_function`, `param_names`, and `initial_guess`:
-
-```
-# Example: Switching to Arruda-Boyce
-from material_models import InvariantModels
-
-model_function = InvariantModels.ArrudaBoyce
-param_names = ['mu', 'lambda_m']
-initial_guess = [0.5, 3.0] # Adjust based on expected material properties
-```
+Open the app and configure datasets, spring models, and initial guesses directly in the interface.
 
 ### 3. Run the Calibration
 
-Execute the main script:
-
-```
-python driver.py
-```
-
-**Runtime Output:**
-
-- The script will print the symbolic energy expression of the selected model.
-- A progress bar will show the fitting status and the current Sum of Squared Errors (SSE).
+Press **Start Calibration** to run the optimization and review fitted parameters and plots.
 
 ### 4. Analyze Results
 
@@ -162,7 +133,7 @@ def MyNewModel(I1, params):
     return params['C1'] * (I1 - 3)**2
 ```
 
-You can then reference `InvariantModels.MyNewModel` in `driver.py`. The kinematic solver handles the derivative derivations automatically.
+You can then reference your model in the GUI. The kinematic solver handles the derivative derivations automatically.
 
 ## 📝 Notes
 

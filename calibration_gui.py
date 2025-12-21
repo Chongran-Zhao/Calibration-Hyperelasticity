@@ -26,59 +26,141 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS: Modern, Clean, and Fancy (System Theme Compatible)
+# Custom CSS: Modern, Academic, and Fancy (System Theme Compatible)
 st.markdown("""
     <style>
-    /* 1. Global Font */
-    html, body, [class*="css"], .stMarkdown, .stText, p, h1, h2, h3, h4, h5, h6, li, span, label, div, button, input, textarea, select {
-        font-family: "Source Sans Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Source+Serif+4:wght@600;700&display=swap');
+
+    :root {
+        --bg-1: #f6f7fb;
+        --bg-2: #eef2ff;
+        --ink-1: #101828;
+        --ink-2: #475467;
+        --brand-1: #3b82f6;
+        --brand-2: #06b6d4;
+        --card: rgba(255, 255, 255, 0.7);
+        --card-border: rgba(16, 24, 40, 0.08);
+        --shadow: 0 12px 30px rgba(16, 24, 40, 0.08);
+        --radius: 16px;
     }
 
-    /* 2. Container Spacing & Layout */
+    html, body, [class*="css"], .stMarkdown, .stText, p, h1, h2, h3, h4, h5, h6, li, span, label, div, button, input, textarea, select {
+        font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif !important;
+    }
+
+    body {
+        background: radial-gradient(1100px 600px at 10% 0%, var(--bg-2), transparent 60%),
+                    radial-gradient(900px 500px at 90% 10%, #e0f2fe, transparent 60%),
+                    linear-gradient(180deg, #ffffff, var(--bg-1));
+        color: var(--ink-1);
+    }
+
     .block-container {
-        padding-top: 2rem !important;
+        padding-top: 2.2rem !important;
         padding-bottom: 4rem !important;
-        max_width: 1200px !important;
+        max-width: 1200px !important;
     }
-    
-    /* 3. Section Styling (Cards) */
-    /* Note: Streamlit containers don't support direct CSS classes easily, 
-       so we style generic elements or use st.markdown divs in code. */
-    
-    /* 4. Input Fields */
+
+    .section-card {
+        background: var(--card);
+        border: 1px solid var(--card-border);
+        border-radius: var(--radius);
+        padding: 1.4rem 1.6rem;
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(10px);
+        margin-bottom: 1.6rem;
+        animation: fadeUp 0.4s ease-out both;
+    }
+
+    .hero {
+        padding: 1.2rem 1.6rem 0.6rem 1.6rem;
+        border-radius: 20px;
+        background: linear-gradient(120deg, #f0f9ff 0%, #eef2ff 45%, #ecfeff 100%);
+        border: 1px solid rgba(59, 130, 246, 0.18);
+        box-shadow: 0 18px 40px rgba(2, 132, 199, 0.12);
+        margin-bottom: 1.6rem;
+    }
+
+    .hero-title {
+        font-family: "Source Serif 4", Georgia, serif !important;
+        font-weight: 700 !important;
+        letter-spacing: -0.4px;
+        margin-bottom: 0.4rem;
+        font-size: 2.2rem;
+    }
+
+    .hero-subtitle {
+        color: var(--ink-2);
+        font-size: 1rem;
+    }
+
+    .pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 0.8rem;
+    }
+
+    .pill {
+        background: #ffffff;
+        border: 1px solid rgba(16, 24, 40, 0.08);
+        border-radius: 999px;
+        padding: 0.3rem 0.75rem;
+        font-size: 0.85rem;
+        color: var(--ink-2);
+    }
+
     .stTextInput input, .stNumberInput input, .stSelectbox div[data-baseweb="select"] {
-        border-radius: 8px !important;
-        padding-top: 0.4rem !important;
-        padding-bottom: 0.4rem !important;
+        border-radius: 10px !important;
+        border: 1px solid rgba(16, 24, 40, 0.08) !important;
+        background: rgba(255, 255, 255, 0.9) !important;
+        padding-top: 0.45rem !important;
+        padding-bottom: 0.45rem !important;
     }
-    
-    /* 5. Buttons */
+
     .stButton > button {
-        border-radius: 8px !important;
+        border-radius: 12px !important;
         font-weight: 600 !important;
         transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        padding: 0.5rem 1.2rem !important;
+        padding: 0.55rem 1.3rem !important;
+        background: linear-gradient(135deg, var(--brand-1), var(--brand-2)) !important;
+        border: none !important;
+        color: white !important;
     }
     .stButton > button:hover {
         transform: translateY(-1px);
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        box-shadow: 0 8px 16px rgba(2, 132, 199, 0.2);
     }
-    
-    /* 6. Headers */
+
     h1 {
         font-weight: 800 !important;
         letter-spacing: -0.5px;
-        margin-bottom: 1.5rem !important;
+        margin-bottom: 1.2rem !important;
     }
     h2 {
         font-weight: 700 !important;
-        margin-top: 2rem !important;
+        margin-top: 0.2rem !important;
         margin-bottom: 1rem !important;
-        border-bottom: 1px solid #eee;
-        padding-bottom: 0.5rem;
+        border-bottom: 1px solid rgba(16, 24, 40, 0.08);
+        padding-bottom: 0.4rem;
     }
-    
-    /* 7. Hide Streamlit Branding */
+
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+        color: #f8fafc;
+    }
+    [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] p {
+        color: #e2e8f0;
+    }
+    [data-testid="stSidebar"] a {
+        color: #7dd3fc;
+    }
+
+    @keyframes fadeUp {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
@@ -196,9 +278,20 @@ with st.sidebar:
 
 col_icon, col_title = st.columns([0.08, 0.92])
 with col_icon:
-    st.image("https://img.icons8.com/ios-filled/100/000000/dna-helix.png", width=50) 
+    st.image("https://img.icons8.com/ios-filled/100/000000/dna-helix.png", width=50)
 with col_title:
-    st.title("Hyperelastic Calibration")
+    st.markdown("""
+    <div class="hero">
+        <div class="hero-title">Hyperelastic Calibration</div>
+        <div class="hero-subtitle">Parallel spring networks, data-driven fitting, and fast predictive curves.</div>
+        <div class="pill-row">
+            <div class="pill">Nonlinear mechanics</div>
+            <div class="pill">Model selection</div>
+            <div class="pill">Optimization</div>
+            <div class="pill">Prediction</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
 # STEP 1: STRATEGY (Implicitly Fixed)
@@ -208,6 +301,7 @@ with col_title:
 # -----------------------------------------------------------------------------
 # STEP 2: DATA
 # -----------------------------------------------------------------------------
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
 st.header("1. Experimental Data")
 datasets = get_available_datasets()
 data_config_valid = False
@@ -256,12 +350,14 @@ if datasets:
         else:
             st.info("👈 Choose a dataset to start.")
 
+st.markdown('</div>', unsafe_allow_html=True)
 if not data_config_valid:
     st.stop()
 
 # -----------------------------------------------------------------------------
 # STEP 3: MODEL
 # -----------------------------------------------------------------------------
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
 st.header("2. Model Architecture")
 
 col_num, _ = st.columns([1, 4]) 
@@ -275,6 +371,7 @@ with col_num:
 
 if num_springs == 0:
     st.info("Add springs to configure the network.")
+    st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
 model_options = ["Select..."] + get_model_list()
@@ -375,13 +472,16 @@ for i in range(int(num_springs)):
         st.markdown("<hr style='margin: 0.5rem 0; border-top: 1px dashed #eee;'>", unsafe_allow_html=True)
 
 if not all_springs_valid:
+    st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
 st.write("")
+st.markdown('</div>', unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
 # STEP 4: EXECUTION
 # -----------------------------------------------------------------------------
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
 st.header("3. Optimization")
 
 col_opt1, col_opt2 = st.columns([1, 1])
@@ -406,11 +506,13 @@ with col_opt2:
         if st.button("🔄 Reset Analysis", use_container_width=True):
             reset_run()
             st.rerun()
+st.markdown('</div>', unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
 # RESULTS
 # -----------------------------------------------------------------------------
 if st.session_state['run_triggered']:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.write("")
     st.markdown("## 📊 Analysis Results")
     
@@ -596,3 +698,4 @@ if st.session_state['run_triggered']:
             ax.set_title("Experimental vs Model Response", pad=15)
             
             st.pyplot(fig)
+    st.markdown('</div>', unsafe_allow_html=True)
