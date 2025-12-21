@@ -118,7 +118,8 @@ class MaterialModels:
     def create_hill_model(strain_name):
         """
         Factory method to generate a specific Hill model function based on a generalized strain.
-        This handles the parameter naming (C1, m1, n1 etc.) and metadata dynamically.
+        This handles the parameter naming (mu, m1, n1 etc.) and metadata dynamically.
+        Changed C1 -> mu for consistency.
         """
         if strain_name not in STRAIN_CONFIGS:
             raise ValueError(f"Unknown strain configuration: {strain_name}")
@@ -130,17 +131,19 @@ class MaterialModels:
         strain_bounds = config['bounds']
         
         # 2. Construct Full Parameter List
-        full_param_names = ['C1'] + [f"{p}1" for p in strain_params]
+        # Changed C1 -> mu
+        full_param_names = ['mu'] + [f"{p}1" for p in strain_params]
         full_initial_guess = [10.0] + strain_defaults
         
         # 3. Construct Full Bounds
-        # Enforce C1 > 0 using a small epsilon
+        # Enforce mu > 0 using a small epsilon
         full_bounds = [(1e-6, None)] + strain_bounds
 
         # 4. Define the Closure Function
         def Hill_Dynamic(lambda_1, lambda_2, lambda_3, params):
             """Dynamically generated Hill Model"""
-            C = params['C1']
+            # Changed C1 -> mu
+            C = params['mu']
             
             current_params = {}
             for p_base in strain_params:
@@ -160,7 +163,7 @@ class MaterialModels:
         Hill_Dynamic.__name__ = f"Hill_{strain_name}"
         Hill_Dynamic.model_type = 'stretch_based'
         Hill_Dynamic.category = 'phenomenological'
-        Hill_Dynamic.formula = f"Psi = C * (E_{strain_name}^2 + ...)"
+        Hill_Dynamic.formula = f"Psi = mu * (E_{strain_name}^2 + ...)"
         Hill_Dynamic.param_names = full_param_names
         Hill_Dynamic.initial_guess = full_initial_guess
         Hill_Dynamic.bounds = full_bounds
