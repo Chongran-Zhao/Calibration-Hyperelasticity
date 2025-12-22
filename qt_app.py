@@ -41,6 +41,7 @@ os.environ.setdefault("XDG_CACHE_HOME", str(cache_root))
 
 import matplotlib
 matplotlib.use("QtAgg")
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
@@ -118,19 +119,21 @@ class LatexLabel(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self._latex_image_data = None
+        self.setMinimumHeight(40)
 
     def set_latex(self, latex):
-        fig = Figure(figsize=(3.5, 0.45), dpi=150)
+        fig = Figure(figsize=(4.5, 0.6), dpi=150)
         ax = fig.add_axes([0, 0, 1, 1])
         ax.axis("off")
-        ax.text(0.0, 0.5, f"${latex}$", fontsize=10, va="center", ha="left")
-        canvas = FigureCanvas(fig)
+        ax.text(0.0, 0.5, f"${latex}$", fontsize=11, va="center", ha="left")
+        canvas = FigureCanvasAgg(fig)
         canvas.draw()
         width, height = fig.get_size_inches() * fig.get_dpi()
         image = canvas.buffer_rgba()
-        qimg = matplotlib.backends.backend_qtagg.FigureCanvasQTAgg(canvas).buffer_rgba()
         from PySide6.QtGui import QImage, QPixmap
-        qimage = QImage(image, int(width), int(height), QImage.Format_RGBA8888)
+        self._latex_image_data = bytes(image)
+        qimage = QImage(self._latex_image_data, int(width), int(height), QImage.Format_RGBA8888)
         self.setPixmap(QPixmap.fromImage(qimage))
 
 
@@ -253,7 +256,7 @@ class SpringWidget(QGroupBox):
             col = (idx % 3) * 2
             label = QLabel(name)
             edit = QLineEdit()
-            edit.setPlaceholderText(f"{float(default):.4g}")
+            edit.setText(f"{float(default):.4g}")
             self.params_layout.addWidget(label, row, col)
             self.params_layout.addWidget(edit, row, col + 1)
             self.param_edits.append((name, edit, default))
@@ -354,7 +357,7 @@ class MainWindow(QMainWindow):
         self.reference_label.setOpenExternalLinks(True)
         layout.addWidget(self.reference_label)
 
-        self.preview_canvas = MatplotlibCanvas(width=7, height=2.2)
+        self.preview_canvas = MatplotlibCanvas(width=6.5, height=2.0)
         layout.addWidget(self.preview_canvas)
 
         self.data_box.setLayout(layout)
@@ -404,7 +407,7 @@ class MainWindow(QMainWindow):
         self.loss_label = QLabel("Final Loss: -")
         layout.addWidget(self.loss_label)
 
-        self.results_canvas = MatplotlibCanvas(width=7, height=4)
+        self.results_canvas = MatplotlibCanvas(width=6.5, height=3.4)
         layout.addWidget(self.results_canvas)
 
         self.results_box.setLayout(layout)
