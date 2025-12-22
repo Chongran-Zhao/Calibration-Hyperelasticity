@@ -1,6 +1,7 @@
 import os
 import sys
 import tempfile
+import re
 from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Optional
@@ -310,6 +311,7 @@ class SpringWidget(QGroupBox):
         self.strain_combo.currentTextChanged.connect(self._on_model_changed)
         self.ogden_terms.valueChanged.connect(self._on_model_changed)
         self.param_edits = []
+        self._param_prefix = f"{self.model_combo.currentText()}_{self.index}_"
 
     def _clear_params(self):
         while self.params_layout.count():
@@ -318,6 +320,23 @@ class SpringWidget(QGroupBox):
             if widget:
                 widget.deleteLater()
         self.param_edits = []
+
+    def _format_param_label(self, name):
+        if self._param_prefix and name.startswith(self._param_prefix):
+            name = name[len(self._param_prefix):]
+        match = re.match(r"^([A-Za-z]+)(\d+)$", name)
+        if match:
+            base, idx = match.groups()
+            if base.lower() == "mu":
+                return f"&mu;<sub>{idx}</sub>"
+            if base.lower() == "alpha":
+                return f"&alpha;<sub>{idx}</sub>"
+            return f"{base}<sub>{idx}</sub>"
+        if name.lower() == "mu":
+            return "&mu;"
+        if name.lower() == "alpha":
+            return "&alpha;"
+        return name
 
     def _on_model_changed(self):
         model_name = self.model_combo.currentText()
@@ -355,16 +374,22 @@ class SpringWidget(QGroupBox):
             self.strain_formula_title.setVisible(False)
             self.strain_formula_label.clear()
 
+        self._param_prefix = f"{model_name}_{self.index}_"
         temp_net = ParallelNetwork()
         temp_net.add_model(func, f"{model_name}_{self.index}")
         for idx, (name, default) in enumerate(zip(temp_net.param_names, temp_net.initial_guess)):
             row = idx
             col = 0
-            label = QLabel(name)
+            label = QLabel()
+            label.setTextFormat(Qt.RichText)
+            label.setText(self._format_param_label(name))
             edit = QLineEdit()
             text_value = f"{float(default):.4g}"
             edit.setText(text_value)
             edit.setPlaceholderText(text_value)
+            edit.setMinimumWidth(140)
+            edit.setMinimumHeight(26)
+            edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             self.params_layout.addWidget(label, row, col)
             self.params_layout.addWidget(edit, row, col + 1)
             self.param_edits.append((name, edit, default))
