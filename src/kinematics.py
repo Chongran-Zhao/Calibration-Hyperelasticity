@@ -97,7 +97,6 @@ class Kinematics:
             s3 = self.calc_dPsi_dl3(l1, l2, l3, *p_vals)
             
             S_hyper = np.diag([s1/l1, s2/l2, s3/l3])
-            
         Sigma_hyper = F @ S_hyper @ F.T
         p = Sigma_hyper[2, 2]
         

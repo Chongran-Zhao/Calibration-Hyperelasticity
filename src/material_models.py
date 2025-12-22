@@ -1,5 +1,5 @@
 import sympy as sp
-from generalized_strains import GeneralizedStrains, STRAIN_CONFIGS
+from generalized_strains import GeneralizedStrains, STRAIN_CONFIGS, STRAIN_FORMULAS
 from utils import inv_Langevin_Kroger
 
 # =============================================================================
@@ -30,7 +30,7 @@ class MaterialModels:
     @register_model(
         model_type='invariant_based', 
         category='phenomenological',
-        formula_str=r"Psi = C1 * (I1 - 3)",
+        formula_str=r"\Psi = C_1 (I_1 - 3)",
         param_names=["C1"],
         initial_guess=[0.5],
         # Safe Bound: C1 > 0
@@ -44,7 +44,7 @@ class MaterialModels:
     @register_model(
         model_type='invariant_based', 
         category='phenomenological',
-        formula_str=r"Psi = C1 * (I1 - 3) + C2 * (I2 - 3)",
+        formula_str=r"\Psi = C_1 (I_1 - 3) + C_2 (I_2 - 3)",
         param_names=["C1", "C2"],
         initial_guess=[0.5, 0.1],
         # Safe Bound: C1 > 0. C2 allowed to be flexible or 0
@@ -58,7 +58,7 @@ class MaterialModels:
     @register_model(
         model_type='invariant_based', 
         category='phenomenological',
-        formula_str=r"Psi = C1*(I1-3) + C2*(I1-3)^2 + C3*(I1-3)^3",
+        formula_str=r"\Psi = C_1 (I_1 - 3) + C_2 (I_1 - 3)^2 + C_3 (I_1 - 3)^3",
         param_names=["C1", "C2", "C3"],
         initial_guess=[0.5, -0.01, 0.001],
         # Safe Bound: C1 > 0. Higher order terms C2, C3 can be negative.
@@ -74,7 +74,7 @@ class MaterialModels:
     @register_model(
         model_type='invariant_based', 
         category='micromechanical',
-        formula_str=r"Psi = mu * N * [ lambda_r * beta + ln( beta / sinh(beta) ) ]",
+        formula_str=r"\Psi = \mu N \left[\lambda_r \beta + \ln\left(\beta / \sinh(\beta)\right)\right]",
         param_names=["mu", "N"],
         initial_guess=[0.4, 10.0],
         # Safe Bound: mu > 0, N >= 1.0 (approximated, driver handles dynamic N limit)
@@ -94,7 +94,7 @@ class MaterialModels:
     @register_model(
         model_type='stretch_based', 
         category='phenomenological',
-        formula_str=r"Psi = Sum [ (mu_i / alpha_i) * (lambda_1^alpha_i + ... - 3) ]",
+        formula_str=r"\Psi = \sum_i \frac{\mu_i}{\alpha_i}\left(\lambda_1^{\alpha_i} + \lambda_2^{\alpha_i} + \lambda_3^{\alpha_i} - 3\right)",
         param_names=["mu", "alpha"],
         initial_guess=[0.5, 2.0],
         # Safe Bound: mu > 0
@@ -111,6 +111,54 @@ class MaterialModels:
         for mu, alpha in zip(mus, alphas):
             psi += (mu / alpha) * (lambda_1**alpha + lambda_2**alpha + lambda_3**alpha - 3)
         return psi
+
+    @staticmethod
+    def create_ogden_model(n_terms):
+        """
+        Factory method to generate an Ogden model with n_terms.
+        For n_terms == 1, use (mu, alpha). Otherwise use (mu1, alpha1, ...).
+        """
+        n_terms = int(n_terms)
+        if n_terms < 1:
+            raise ValueError("Ogden model must have at least one term.")
+
+        if n_terms == 1:
+            param_names = ["mu", "alpha"]
+            initial_guess = [-0.5, -2.0]
+            bounds = [(None, -1e-6), (None, -1e-6)]
+        else:
+            param_names = []
+            initial_guess = []
+            bounds = []
+            for i in range(1, n_terms + 1):
+                param_names.extend([f"mu{i}", f"alpha{i}"])
+                if i == 1:
+                    initial_guess.extend([-0.5, -2.0])
+                    bounds.extend([(None, -1e-6), (None, -1e-6)])
+                else:
+                    initial_guess.extend([0.5 / i, 2.0 * i])
+                    bounds.extend([(1e-6, None), (1e-6, None)])
+
+        def Ogden_Dynamic(lambda_1, lambda_2, lambda_3, params):
+            psi = 0
+            for i in range(1, n_terms + 1):
+                mu_key = "mu" if n_terms == 1 else f"mu{i}"
+                alpha_key = "alpha" if n_terms == 1 else f"alpha{i}"
+                mu = params[mu_key]
+                alpha = params[alpha_key]
+                psi += (mu / alpha) * (lambda_1**alpha + lambda_2**alpha + lambda_3**alpha - 3)
+            return psi
+
+        Ogden_Dynamic.__name__ = f"Ogden_{n_terms}term"
+        Ogden_Dynamic.model_type = 'stretch_based'
+        Ogden_Dynamic.category = 'phenomenological'
+        Ogden_Dynamic.formula = rf"\Psi = \sum_{{i=1}}^{{{n_terms}}} \frac{{\mu_i}}{{\alpha_i}}\left(\lambda_1^{{\alpha_i}} + \lambda_2^{{\alpha_i}} + \lambda_3^{{\alpha_i}} - 3\right)"
+        Ogden_Dynamic.param_names = param_names
+        Ogden_Dynamic.initial_guess = initial_guess
+        Ogden_Dynamic.bounds = bounds
+
+        return Ogden_Dynamic
+
 
     # --- Hill Model Factory ---
 
@@ -163,7 +211,8 @@ class MaterialModels:
         Hill_Dynamic.__name__ = f"Hill_{strain_name}"
         Hill_Dynamic.model_type = 'stretch_based'
         Hill_Dynamic.category = 'phenomenological'
-        Hill_Dynamic.formula = f"Psi = mu * (E_{strain_name}^2 + ...)"
+        Hill_Dynamic.formula = rf"\Psi = \mu \sum_{{i=1}}^3 E_{{{strain_name}}}(\lambda_i)^2"
+        Hill_Dynamic.strain_formula = STRAIN_FORMULAS.get(strain_name, "")
         Hill_Dynamic.param_names = full_param_names
         Hill_Dynamic.initial_guess = full_initial_guess
         Hill_Dynamic.bounds = full_bounds

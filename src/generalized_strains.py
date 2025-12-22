@@ -76,3 +76,14 @@ STRAIN_CONFIGS = {
         "bounds": [(0.01, 20.0), (0.01, 20.0)] 
     }
 }
+
+# =============================================================================
+# Generalized Strain LaTeX Formulas
+# =============================================================================
+STRAIN_FORMULAS = {
+    "Seth-Hill": r"E(\lambda) = \frac{1}{m}\left(\lambda^m - 1\right)",
+    "Hencky": r"E(\lambda) = \ln(\lambda)",
+    "Curnier-Rakotomanana": r"E(\lambda) = \frac{1}{m+n}\left(\lambda^m - \lambda^{-n}\right)",
+    "Curnier-Zysset": r"E(\lambda) = \frac{2+m}{8}\lambda^2 - \frac{2-m}{8}\lambda^{-2} - \frac{m}{4}",
+    "Darijani-Naghdabadi": r"E(\lambda) = \frac{1}{m+n}\left(e^{m(\lambda-1)} - e^{n(\lambda^{-1}-1)}\right)"
+}

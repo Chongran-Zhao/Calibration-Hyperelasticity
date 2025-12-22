@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from utils import get_deformation_gradient, get_stress_component
+from utils import get_deformation_gradient, get_stress_components
 
 # Global Configuration
 plt.rcParams["font.family"] = "Times New Roman"
@@ -12,9 +12,11 @@ def calculate_r2(exp_stress, model_stress):
     Helper to calculate R^2 (Coefficient of Determination).
     R^2 = 1 - (SS_res / SS_tot)
     """
-    ss_res = np.sum((exp_stress - model_stress)**2)
-    mean_exp = np.mean(exp_stress)
-    ss_tot = np.sum((exp_stress - mean_exp)**2)
+    exp_flat = np.array(exp_stress).ravel()
+    model_flat = np.array(model_stress).ravel()
+    ss_res = np.sum((exp_flat - model_flat)**2)
+    mean_exp = np.mean(exp_flat)
+    ss_tot = np.sum((exp_flat - mean_exp)**2)
     
     # Avoid division by zero for constant data (though unlikely for stress-strain)
     if ss_tot < 1e-12:
@@ -36,8 +38,8 @@ def plot_comparison(experimental_data, kinematics_solver, fitted_params, title="
     """
     plt.figure(figsize=(10, 7))
     
-    markers = {'UT': 'o', 'ET': 's', 'PS': '^'}
-    colors = {'UT': 'blue', 'ET': 'red', 'PS': 'green'}
+    markers = {'UT': 'o', 'ET': 's', 'PS': '^', 'BT': 'D'}
+    colors = {'UT': 'blue', 'ET': 'red', 'PS': 'green', 'BT': 'purple'}
     
     for dataset in experimental_data:
         mode = dataset['mode']
@@ -45,32 +47,62 @@ def plot_comparison(experimental_data, kinematics_solver, fitted_params, title="
         exp_stretch = dataset['stretch']
         exp_stress = dataset['stress_exp']
         f_list = dataset['F_list'] # Tensors at experimental points
+        stress_type = dataset.get('stress_type', 'PK1')
         
         # --- 1. Calculate R^2 for this dataset ---
         # We need model predictions exactly at the experimental stretch points
         model_stress_at_exp = []
         for F in f_list:
-            P_tensor = kinematics_solver.get_1st_PK_stress(F, fitted_params)
-            val = get_stress_component(P_tensor, mode)
-            model_stress_at_exp.append(val)
+            if stress_type == 'cauchy':
+                stress_tensor = kinematics_solver.get_Cauchy_stress(F, fitted_params)
+            else:
+                stress_tensor = kinematics_solver.get_1st_PK_stress(F, fitted_params)
+            comps = get_stress_components(stress_tensor, mode)
+            if np.ndim(exp_stress) == 1:
+                model_stress_at_exp.append(comps[0])
+            else:
+                model_stress_at_exp.append(comps[:exp_stress.shape[1]])
         model_stress_at_exp = np.array(model_stress_at_exp)
         
         r2 = calculate_r2(exp_stress, model_stress_at_exp)
         
         # --- 2. Plot Experimental Data (Scatter) ---
         # Add R^2 to the label
-        label_text = f"Exp: {tag} ($R^2={r2:.3f}$)"
+        stress_label = "Cauchy" if stress_type == "cauchy" else "Nominal"
+        label_text = f"Exp: {tag} ({stress_label}, $R^2={r2:.3f}$)"
         
-        plt.scatter(
-            exp_stretch, 
-            exp_stress, 
-            label=label_text, 
-            marker=markers.get(mode, 'o'), 
-            facecolors='none', 
-            edgecolors=colors.get(mode, 'black'),
-            s=60,
-            zorder=2
-        )
+        if np.ndim(exp_stress) == 1:
+            plt.scatter(
+                exp_stretch,
+                exp_stress,
+                label=label_text,
+                marker=markers.get(mode, 'o'),
+                facecolors='none',
+                edgecolors=colors.get(mode, 'black'),
+                s=60,
+                zorder=2
+            )
+        else:
+            plt.scatter(
+                exp_stretch,
+                exp_stress[:, 0],
+                label=f"{label_text} P11",
+                marker=markers.get(mode, 'o'),
+                facecolors='none',
+                edgecolors=colors.get(mode, 'black'),
+                s=60,
+                zorder=2
+            )
+            plt.scatter(
+                exp_stretch,
+                exp_stress[:, 1],
+                label=f"{label_text} P22",
+                marker=markers.get(mode, '^'),
+                facecolors='none',
+                edgecolors=colors.get(mode, 'black'),
+                s=60,
+                zorder=2
+            )
         
         # --- 3. Plot Model Prediction (Smooth Line) ---
         # Generate smooth stretch range for better visualization
@@ -79,21 +111,39 @@ def plot_comparison(experimental_data, kinematics_solver, fitted_params, title="
         smooth_stretch = np.linspace(1.0, max_lam * 1.05, 100)
         
         model_stress_smooth = []
+        model_stress_smooth_2 = []
         for lam in smooth_stretch:
-            F_smooth = get_deformation_gradient(lam, mode)
-            P_tensor = kinematics_solver.get_1st_PK_stress(F_smooth, fitted_params)
-            val = get_stress_component(P_tensor, mode)
-            model_stress_smooth.append(val)
-            
+            if mode == 'BT':
+                lam2 = float(dataset['stretch_secondary'][0])
+                F_smooth = get_deformation_gradient((lam, lam2), mode)
+            else:
+                F_smooth = get_deformation_gradient(lam, mode)
+            if stress_type == 'cauchy':
+                stress_tensor = kinematics_solver.get_Cauchy_stress(F_smooth, fitted_params)
+            else:
+                stress_tensor = kinematics_solver.get_1st_PK_stress(F_smooth, fitted_params)
+            comps = get_stress_components(stress_tensor, mode)
+            model_stress_smooth.append(comps[0])
+            if len(comps) > 1:
+                model_stress_smooth_2.append(comps[1])
+
         plt.plot(
-            smooth_stretch, 
-            model_stress_smooth, 
-            color=colors.get(mode, 'black'), 
-            linestyle='-', 
+            smooth_stretch,
+            model_stress_smooth,
+            color=colors.get(mode, 'black'),
+            linestyle='-',
             linewidth=2,
-            # label=f"Fit: {mode}", # Optional: suppress fit label to keep legend cleaner
             zorder=1
         )
+        if model_stress_smooth_2:
+            plt.plot(
+                smooth_stretch,
+                model_stress_smooth_2,
+                color=colors.get(mode, 'black'),
+                linestyle='--',
+                linewidth=2,
+                zorder=1
+            )
 
     plt.xlabel(r"Stretch $\lambda$ [-]")
     plt.ylabel("Nominal Stress $P$ [MPa]")

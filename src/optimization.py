@@ -1,6 +1,6 @@
 import numpy as np
-from scipy.optimize import minimize, differential_evolution
-from utils import get_stress_component
+from scipy.optimize import minimize
+from utils import get_stress_components
 from tqdm import tqdm
 
 class MaterialOptimizer:
@@ -20,8 +20,9 @@ class MaterialOptimizer:
         self.ss_tot_list = []
         for dataset in self.data:
             stress_exp = dataset['stress_exp']
-            mean_stress = np.mean(stress_exp)
-            ss_tot = np.sum((stress_exp - mean_stress)**2)
+            stress_flat = np.array(stress_exp).ravel()
+            mean_stress = np.mean(stress_flat)
+            ss_tot = np.sum((stress_flat - mean_stress)**2)
             
             if ss_tot < 1e-12:
                 ss_tot = 1.0 
@@ -39,15 +40,21 @@ class MaterialOptimizer:
         for i, dataset in enumerate(self.data):
             mode = dataset['mode']
             f_list = dataset['F_list']
+            stress_type = dataset.get('stress_type', 'PK1')
             stress_exp = dataset['stress_exp']
             ss_tot = self.ss_tot_list[i]
             
             model_stresses = []
             for F in f_list:
-                # Use kinematic solver to get P_11 etc.
-                P_tensor = self.solver.get_1st_PK_stress(F, params_dict)
-                val = get_stress_component(P_tensor, mode)
-                model_stresses.append(val)
+                if stress_type == 'cauchy':
+                    stress_tensor = self.solver.get_Cauchy_stress(F, params_dict)
+                else:
+                    stress_tensor = self.solver.get_1st_PK_stress(F, params_dict)
+                components = get_stress_components(stress_tensor, mode)
+                if np.ndim(stress_exp) == 1:
+                    model_stresses.append(components[0])
+                else:
+                    model_stresses.append(components[:stress_exp.shape[1]])
             
             model_stresses = np.array(model_stresses)
             
@@ -78,7 +85,7 @@ class MaterialOptimizer:
                     bar_format="{l_bar}{bar}| {n_fmt} [{elapsed}, {rate_fmt}{postfix}]")
         
         # Callback wrapper for local minimizers (minimize)
-        def callback_minimize(xk):
+        def callback_minimize(xk, *args):
             pbar.set_postfix(Loss=f"{self._current_loss:.6f}")
             pbar.update(1)
 
@@ -88,56 +95,42 @@ class MaterialOptimizer:
             pbar.update(1)
 
         result = None
-        
-        try:
-            if method == 'Differential Evolution':
-                # Global Optimization
-                # DE requires finite bounds. Fill None with heuristic large range.
-                safe_bounds = []
-                if bounds:
-                    for i, b in enumerate(bounds):
-                        low = b[0] if b[0] is not None else 0.001
-                        high = b[1] if b[1] is not None else 100.0 # Heuristic upper bound
-                        safe_bounds.append((low, high))
-                else:
-                    # Fallback if absolutely no bounds given
-                    safe_bounds = [(0.001, 100.0)] * len(initial_guess)
+        supported_methods = {'L-BFGS-B', 'trust-constr', 'CG', 'Newton-CG'}
 
-                result = differential_evolution(
-                    func=self._objective_function,
-                    bounds=safe_bounds,
-                    callback=callback_de,
-                    maxiter=100,      # Max generations
-                    popsize=15,       # Population size multiplier
-                    disp=False,
-                    polish=True       # Polish with L-BFGS-B at the end
-                )
-                
-            else:
-                # Local Minimization (L-BFGS-B, Nelder-Mead, Powell, TNC, SLSQP)
-                # Some methods (Nelder-Mead) technically don't support bounds in older Scipy,
-                # but 'minimize' wrapper usually handles it or warns.
-                
-                # Filter bounds for methods that support them
-                supports_bounds = ['L-BFGS-B', 'TNC', 'SLSQP', 'Powell']
-                use_bounds = bounds if method in supports_bounds else None
-                
-                result = minimize(
-                    fun=self._objective_function,
-                    x0=initial_guess,
-                    method=method,
-                    bounds=use_bounds,
-                    callback=callback_minimize,
-                    options={'maxiter': 2000, 'disp': False}
-                )
+        def numeric_grad(xk):
+            eps = 1e-6
+            grad = np.zeros_like(xk, dtype=float)
+            for j in range(len(xk)):
+                x_fwd = np.array(xk, dtype=float)
+                x_bwd = np.array(xk, dtype=float)
+                x_fwd[j] += eps
+                x_bwd[j] -= eps
+                grad[j] = (self._objective_function(x_fwd) - self._objective_function(x_bwd)) / (2.0 * eps)
+            return grad
+
+        try:
+            if method not in supported_methods:
+                raise ValueError(f"Unsupported method: {method}")
+
+            use_bounds = bounds if method in {'L-BFGS-B', 'trust-constr'} else None
+            jac = numeric_grad if method == 'Newton-CG' else None
+
+            result = minimize(
+                fun=self._objective_function,
+                x0=initial_guess,
+                method=method,
+                bounds=use_bounds,
+                jac=jac,
+                callback=callback_minimize,
+                options={'maxiter': 2000, 'disp': False}
+            )
 
         except Exception as e:
-            # Catch any numerical errors (e.g. during Jacobian calc) and return a failed state
             print(f"\nOptimization Error: {e}")
             from scipy.optimize import OptimizeResult
             result = OptimizeResult(success=False, message=str(e), fun=self._current_loss, x=initial_guess)
-        
+
         finally:
             pbar.close()
-        
+
         return result

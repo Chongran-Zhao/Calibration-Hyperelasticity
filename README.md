@@ -1,6 +1,12 @@
 # Hyperelastic Material Calibration
 
-## Launch
+## Install (macOS App)
+
+```
+brew install --cask Chongran-Zhao/hyperelastic/hyperelastic-calibration
+```
+
+## Launch (Python)
 
 1) Install dependencies:
 ```
@@ -9,5 +15,5 @@ pip install -r requirement.txt
 
 2) Run the GUI:
 ```
-streamlit run calibration_gui.py
+python qt_app.py
 ```
