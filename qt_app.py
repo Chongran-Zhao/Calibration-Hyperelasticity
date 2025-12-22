@@ -433,7 +433,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Hyperelastic Calibration (Desktop)")
-        self.setMinimumSize(1200, 800)
+        self.setMinimumSize(1400, 900)
         os.environ["CALIBRATION_DATA_DIR"] = os.path.join(base_dir, "data")
         self.step_names = ["Experimental Data", "Model Architecture", "Optimization", "Results"]
         self.current_step = 0
@@ -515,6 +515,7 @@ class MainWindow(QMainWindow):
             self.step_names[2]: opt_section,
             self.step_names[3]: results_section,
         }
+        self._update_section_visibility()
         self.scroll.setWidget(container)
         return self.scroll
 
@@ -806,6 +807,7 @@ class MainWindow(QMainWindow):
         step_name = self.step_names[index]
         widget = self.section_widgets.get(step_name)
         if widget:
+            self._update_section_visibility()
             self.scroll.ensureWidgetVisible(widget, 0, 20)
 
     def _set_step(self, index):
@@ -818,7 +820,14 @@ class MainWindow(QMainWindow):
         step_name = self.step_names[index]
         widget = self.section_widgets.get(step_name)
         if widget:
+            self._update_section_visibility()
             self.scroll.ensureWidgetVisible(widget, 0, 20)
+
+    def _update_section_visibility(self):
+        for idx, step_name in enumerate(self.step_names):
+            widget = self.section_widgets.get(step_name)
+            if widget:
+                widget.setVisible(idx == self.current_step)
 
     def _on_spring_config_changed(self):
         springs = [self.spring_container.itemAt(i).widget() for i in range(self.spring_container.count())]
