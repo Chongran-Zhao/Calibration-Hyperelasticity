@@ -806,7 +806,7 @@ class MainWindow(QMainWindow):
         self.opt_next_btn.setEnabled(True)
         self.latest_optimizer = optimizer
         self.latest_result = result
-        self.latest_network = optimizer.solver.network
+        self.latest_network = optimizer.solver.energy_function
         self._populate_calibration_params(optimizer.param_names, result.x)
         self._populate_prediction_params(optimizer.param_names, result.x)
         self._refresh_prediction_modes()
@@ -826,6 +826,10 @@ class MainWindow(QMainWindow):
         widget = self.section_widgets.get(step_name)
         if widget:
             self._update_section_visibility()
+            if step_name == "Prediction":
+                if self.latest_result is not None and self.latest_optimizer is not None:
+                    self._populate_prediction_params(self.latest_optimizer.param_names, self.latest_result.x)
+                self._refresh_prediction_modes()
             self.scroll.ensureWidgetVisible(widget, 0, 20)
 
     def _set_step(self, index):
@@ -839,6 +843,10 @@ class MainWindow(QMainWindow):
         widget = self.section_widgets.get(step_name)
         if widget:
             self._update_section_visibility()
+            if step_name == "Prediction":
+                if self.latest_result is not None and self.latest_optimizer is not None:
+                    self._populate_prediction_params(self.latest_optimizer.param_names, self.latest_result.x)
+                self._refresh_prediction_modes()
             self.scroll.ensureWidgetVisible(widget, 0, 20)
 
     def _update_section_visibility(self):
