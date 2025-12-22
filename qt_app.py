@@ -120,21 +120,35 @@ class LatexLabel(QLabel):
         super().__init__(parent)
         self.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self._latex_image_data = None
-        self.setMinimumHeight(40)
+        self.setMinimumHeight(48)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def set_latex(self, latex):
-        fig = Figure(figsize=(4.5, 0.6), dpi=150)
+        if not latex:
+            self.clear()
+            self._latex_image_data = None
+            return
+        fig = Figure(figsize=(5.2, 0.7), dpi=150)
         ax = fig.add_axes([0, 0, 1, 1])
         ax.axis("off")
-        ax.text(0.0, 0.5, f"${latex}$", fontsize=11, va="center", ha="left")
+        ax.text(0.0, 0.5, f"${latex}$", fontsize=12, va="center", ha="left")
         canvas = FigureCanvasAgg(fig)
         canvas.draw()
         width, height = fig.get_size_inches() * fig.get_dpi()
         image = canvas.buffer_rgba()
         from PySide6.QtGui import QImage, QPixmap
         self._latex_image_data = bytes(image)
-        qimage = QImage(self._latex_image_data, int(width), int(height), QImage.Format_RGBA8888)
+        qimage = QImage(
+            self._latex_image_data,
+            int(width),
+            int(height),
+            int(width) * 4,
+            QImage.Format_RGBA8888,
+        )
         self.setPixmap(QPixmap.fromImage(qimage))
+        self.setMinimumHeight(int(height))
+        fig.clear()
+        matplotlib.pyplot.close(fig)
 
 
 @dataclass
@@ -177,13 +191,19 @@ class SpringWidget(QGroupBox):
         self.index = index
         self.model_combo = QComboBox()
         self.model_combo.addItems(["Select..."] + get_model_list())
+        self.strain_label = QLabel("Strain")
         self.strain_combo = QComboBox()
         self.strain_combo.addItems(list(STRAIN_CONFIGS.keys()))
         self.strain_combo.setEnabled(False)
+        self.strain_combo.setVisible(False)
+        self.strain_label.setVisible(False)
+        self.ogden_label = QLabel("Ogden terms")
         self.ogden_terms = QSpinBox()
         self.ogden_terms.setRange(1, 6)
         self.ogden_terms.setValue(1)
         self.ogden_terms.setEnabled(False)
+        self.ogden_terms.setVisible(False)
+        self.ogden_label.setVisible(False)
 
         self.formula_label = LatexLabel()
         self.strain_formula_label = LatexLabel()
@@ -192,8 +212,8 @@ class SpringWidget(QGroupBox):
         layout = QVBoxLayout()
         form = QFormLayout()
         form.addRow("Model", self.model_combo)
-        form.addRow("Strain", self.strain_combo)
-        form.addRow("Ogden terms", self.ogden_terms)
+        form.addRow(self.strain_label, self.strain_combo)
+        form.addRow(self.ogden_label, self.ogden_terms)
         layout.addLayout(form)
 
         params_box = QGroupBox("Parameters")
@@ -224,8 +244,14 @@ class SpringWidget(QGroupBox):
 
     def _on_model_changed(self):
         model_name = self.model_combo.currentText()
-        self.strain_combo.setEnabled(model_name == "Hill")
-        self.ogden_terms.setEnabled(model_name == "Ogden")
+        is_hill = model_name == "Hill"
+        is_ogden = model_name == "Ogden"
+        self.strain_combo.setEnabled(is_hill)
+        self.strain_combo.setVisible(is_hill)
+        self.strain_label.setVisible(is_hill)
+        self.ogden_terms.setEnabled(is_ogden)
+        self.ogden_terms.setVisible(is_ogden)
+        self.ogden_label.setVisible(is_ogden)
         self._clear_params()
 
         if model_name == "Select...":
@@ -357,7 +383,8 @@ class MainWindow(QMainWindow):
         self.reference_label.setOpenExternalLinks(True)
         layout.addWidget(self.reference_label)
 
-        self.preview_canvas = MatplotlibCanvas(width=6.5, height=2.0)
+        self.preview_canvas = MatplotlibCanvas(width=7.6, height=2.7)
+        self.preview_canvas.setMinimumHeight(220)
         layout.addWidget(self.preview_canvas)
 
         self.data_box.setLayout(layout)
@@ -387,7 +414,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
 
         self.method_combo = QComboBox()
-        self.method_combo.addItems(["L-BFGS-B", "trust-constr", "CG", "Newton-CG"])
+        self.method_combo.addItems(["L-BFGS-B"])
         layout.addWidget(self.method_combo)
 
         self.run_button = QPushButton("Start Calibration")
@@ -407,7 +434,8 @@ class MainWindow(QMainWindow):
         self.loss_label = QLabel("Final Loss: -")
         layout.addWidget(self.loss_label)
 
-        self.results_canvas = MatplotlibCanvas(width=6.5, height=3.4)
+        self.results_canvas = MatplotlibCanvas(width=7.2, height=3.8)
+        self.results_canvas.setMinimumHeight(280)
         layout.addWidget(self.results_canvas)
 
         self.results_box.setLayout(layout)

@@ -6,6 +6,12 @@
 brew install --cask Chongran-Zhao/hyperelastic/hyperelastic-calibration
 ```
 
+## Update (macOS App)
+
+```
+brew update && brew upgrade --cask hyperelastic-calibration
+```
+
 ## Launch (Python)
 
 1) Install dependencies:
