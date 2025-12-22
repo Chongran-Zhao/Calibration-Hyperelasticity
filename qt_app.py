@@ -435,7 +435,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Hyperelastic Calibration (Desktop)")
         self.setMinimumSize(1400, 900)
         os.environ["CALIBRATION_DATA_DIR"] = os.path.join(base_dir, "data")
-        self.step_names = ["Experimental Data", "Model Architecture", "Optimization", "Results"]
+        self.step_names = ["Experimental Data", "Model Architecture", "Optimization", "Prediction"]
         self.current_step = 0
         self.section_widgets = {}
         self.latest_optimizer = None
@@ -502,18 +502,18 @@ class MainWindow(QMainWindow):
         data_section = self._build_data_section()
         model_section = self._build_model_section()
         opt_section = self._build_optimization_section()
-        results_section = self._build_results_section()
+        prediction_section = self._build_prediction_section()
         layout.addWidget(data_section)
         layout.addWidget(model_section)
         layout.addWidget(opt_section)
-        layout.addWidget(results_section)
+        layout.addWidget(prediction_section)
         layout.addStretch()
 
         self.section_widgets = {
             self.step_names[0]: data_section,
             self.step_names[1]: model_section,
             self.step_names[2]: opt_section,
-            self.step_names[3]: results_section,
+            self.step_names[3]: prediction_section,
         }
         self._update_section_visibility()
         self.scroll.setWidget(container)
@@ -590,7 +590,29 @@ class MainWindow(QMainWindow):
         self.opt_status = QLabel("")
         layout.addWidget(self.opt_status)
 
-        self.opt_next_btn = QPushButton("Next: Results")
+        self.calib_results_box = QGroupBox("Calibration Results")
+        calib_layout = QHBoxLayout()
+        self.calib_params_box = QGroupBox("Optimized Parameters")
+        params_layout = QVBoxLayout()
+        self.calib_params_area = QScrollArea()
+        self.calib_params_area.setWidgetResizable(True)
+        self.calib_params_widget = QWidget()
+        self.calib_params_layout = QVBoxLayout(self.calib_params_widget)
+        self.calib_params_layout.setSpacing(8)
+        self.calib_params_layout.addStretch()
+        self.calib_params_area.setWidget(self.calib_params_widget)
+        params_layout.addWidget(self.calib_params_area)
+        self.calib_params_box.setLayout(params_layout)
+        calib_layout.addWidget(self.calib_params_box, 1)
+
+        self.calib_canvas = MatplotlibCanvas(width=7.2, height=3.8)
+        self.calib_canvas.setMinimumHeight(280)
+        calib_layout.addWidget(self.calib_canvas, 2)
+        self.calib_results_box.setLayout(calib_layout)
+        self.calib_results_box.setVisible(False)
+        layout.addWidget(self.calib_results_box)
+
+        self.opt_next_btn = QPushButton("Next: Prediction")
         self.opt_next_btn.setEnabled(False)
         self.opt_next_btn.clicked.connect(lambda: self._set_step(3))
         layout.addWidget(self.opt_next_btn, alignment=Qt.AlignRight)
@@ -598,52 +620,44 @@ class MainWindow(QMainWindow):
         self.opt_box.setLayout(layout)
         return self.opt_box
 
-    def _build_results_section(self):
-        self.results_box = QGroupBox("4. Results")
+    def _build_prediction_section(self):
+        self.prediction_box = QGroupBox("4. Prediction")
         layout = QHBoxLayout()
 
         left_panel = QVBoxLayout()
-        self.loss_label = QLabel("Final Loss: -")
-        left_panel.addWidget(self.loss_label)
+        self.prediction_params_box = QGroupBox("Parameters")
+        pred_params_layout = QVBoxLayout()
+        self.prediction_params_area = QScrollArea()
+        self.prediction_params_area.setWidgetResizable(True)
+        self.prediction_params_widget = QWidget()
+        self.prediction_params_layout = QVBoxLayout(self.prediction_params_widget)
+        self.prediction_params_layout.setSpacing(8)
+        self.prediction_params_layout.addStretch()
+        self.prediction_params_area.setWidget(self.prediction_params_widget)
+        pred_params_layout.addWidget(self.prediction_params_area)
+        self.prediction_params_box.setLayout(pred_params_layout)
+        left_panel.addWidget(self.prediction_params_box)
 
-        self.params_result_box = QGroupBox("Optimized Parameters")
-        params_layout = QVBoxLayout()
-        self.params_result_area = QScrollArea()
-        self.params_result_area.setWidgetResizable(True)
-        self.params_result_widget = QWidget()
-        self.params_result_layout = QVBoxLayout(self.params_result_widget)
-        self.params_result_layout.setSpacing(8)
-        self.params_result_layout.addStretch()
-        self.params_result_area.setWidget(self.params_result_widget)
-        params_layout.addWidget(self.params_result_area)
-        self.params_result_box.setLayout(params_layout)
-        left_panel.addWidget(self.params_result_box)
-
-        self.prediction_box = QGroupBox("Prediction")
-        pred_layout = QVBoxLayout()
-        self.prediction_hint = QLabel("Select unused modes and update prediction.")
-        pred_layout.addWidget(self.prediction_hint)
+        self.prediction_modes_box = QGroupBox("Prediction Data")
+        modes_layout = QVBoxLayout()
         self.prediction_modes_widget = QWidget()
         self.prediction_modes_layout = QGridLayout(self.prediction_modes_widget)
-        pred_layout.addWidget(self.prediction_modes_widget)
-        self.prediction_overlay = QCheckBox("Overlay on calibration")
-        self.prediction_overlay.setChecked(True)
-        pred_layout.addWidget(self.prediction_overlay)
+        modes_layout.addWidget(self.prediction_modes_widget)
         self.prediction_button = QPushButton("Update Prediction")
         self.prediction_button.clicked.connect(self._update_prediction_plot)
-        pred_layout.addWidget(self.prediction_button)
-        self.prediction_box.setLayout(pred_layout)
-        left_panel.addWidget(self.prediction_box)
+        modes_layout.addWidget(self.prediction_button)
+        self.prediction_modes_box.setLayout(modes_layout)
+        left_panel.addWidget(self.prediction_modes_box)
         left_panel.addStretch()
 
         layout.addLayout(left_panel, 1)
 
-        self.results_canvas = MatplotlibCanvas(width=7.2, height=3.8)
-        self.results_canvas.setMinimumHeight(280)
-        layout.addWidget(self.results_canvas, 2)
+        self.prediction_canvas = MatplotlibCanvas(width=7.2, height=3.8)
+        self.prediction_canvas.setMinimumHeight(280)
+        layout.addWidget(self.prediction_canvas, 2)
 
-        self.results_box.setLayout(layout)
-        return self.results_box
+        self.prediction_box.setLayout(layout)
+        return self.prediction_box
 
     def _populate_authors(self):
         self.author_combo.blockSignals(True)
@@ -790,10 +804,11 @@ class MainWindow(QMainWindow):
         self.latest_optimizer = optimizer
         self.latest_result = result
         self.latest_network = optimizer.solver.network
-        self._populate_result_params(optimizer.param_names, result.x)
+        self._populate_calibration_params(optimizer.param_names, result.x)
+        self._populate_prediction_params(optimizer.param_names, result.x)
         self._refresh_prediction_modes()
-        self._plot_results(overlay_calibration=True)
-        self._set_step(3)
+        self._plot_calibration_results()
+        self.calib_results_box.setVisible(True)
 
     def _on_optimization_failed(self, message):
         self.run_button.setEnabled(True)
@@ -853,15 +868,41 @@ class MainWindow(QMainWindow):
             return "&alpha;"
         return short
 
-    def _clear_result_params(self):
-        while self.params_result_layout.count():
-            item = self.params_result_layout.takeAt(0)
+    def _clear_calibration_params(self):
+        while self.calib_params_layout.count():
+            item = self.calib_params_layout.takeAt(0)
             widget = item.widget()
             if widget:
                 widget.deleteLater()
 
-    def _populate_result_params(self, param_names, values):
-        self._clear_result_params()
+    def _populate_calibration_params(self, param_names, values):
+        self._clear_calibration_params()
+        for name, value in zip(param_names, values):
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            label = QLabel()
+            label.setTextFormat(Qt.RichText)
+            label.setText(self._format_result_param_label(name))
+            edit = QLineEdit(f"{value:.6g}")
+            edit.setReadOnly(True)
+            edit.setMinimumWidth(140)
+            edit.setMinimumHeight(26)
+            edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            row_layout.addWidget(label)
+            row_layout.addWidget(edit, 1)
+            self.calib_params_layout.addWidget(row)
+        self.calib_params_layout.addStretch()
+
+    def _clear_prediction_params(self):
+        while self.prediction_params_layout.count():
+            item = self.prediction_params_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+    def _populate_prediction_params(self, param_names, values):
+        self._clear_prediction_params()
         for name, value in zip(param_names, values):
             row = QWidget()
             row_layout = QHBoxLayout(row)
@@ -875,8 +916,8 @@ class MainWindow(QMainWindow):
             edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             row_layout.addWidget(label)
             row_layout.addWidget(edit, 1)
-            self.params_result_layout.addWidget(row)
-        self.params_result_layout.addStretch()
+            self.prediction_params_layout.addWidget(row)
+        self.prediction_params_layout.addStretch()
 
     def _refresh_prediction_modes(self):
         for i in reversed(range(self.prediction_modes_layout.count())):
@@ -887,9 +928,7 @@ class MainWindow(QMainWindow):
         if author == "Select...":
             return
         available = self.datasets.get(author, [])
-        used = self._selected_modes()
-        unused = [m for m in available if m not in used]
-        for idx, mode in enumerate(unused):
+        for idx, mode in enumerate(available):
             checkbox = QCheckBox(format_mode_label(mode))
             row = idx // 2
             col = idx % 2
@@ -903,11 +942,10 @@ class MainWindow(QMainWindow):
             if isinstance(widget, QCheckBox) and widget.isChecked():
                 modes.append(mapping.get(widget.text(), widget.text()))
         return modes
-
-    def _get_current_param_values(self):
+    def _get_prediction_param_values(self):
         values = []
-        for i in range(self.params_result_layout.count()):
-            item = self.params_result_layout.itemAt(i)
+        for i in range(self.prediction_params_layout.count()):
+            item = self.prediction_params_layout.itemAt(i)
             row = item.widget()
             if not row:
                 continue
@@ -921,41 +959,48 @@ class MainWindow(QMainWindow):
                 values.append(0.0)
         return values
 
-    def _update_prediction_plot(self):
-        if not self.latest_optimizer or not self.latest_result:
-            return
-        self._plot_results(overlay_calibration=self.prediction_overlay.isChecked())
-
-    def _plot_results(self, overlay_calibration=True):
+    def _plot_calibration_results(self):
         if not self.latest_optimizer or not self.latest_result:
             return
         optimizer = self.latest_optimizer
-        param_values = self._get_current_param_values()
+        plot_params = dict(zip(optimizer.param_names, self.latest_result.x))
+
+        self.calib_canvas.ax.clear()
+        self.calib_canvas.apply_theme()
+
+        colors_calib = {"UT": "#2980b9", "ET": "#c0392b", "PS": "#27ae60", "BT": "#8e44ad"}
+        calib_data = optimizer.data
+        self._plot_dataset(self.calib_canvas.ax, calib_data, optimizer.solver, plot_params, colors_calib, "Exp", "Fit")
+
+        self.calib_canvas.ax.set_xlabel("lambda")
+        self.calib_canvas.ax.set_ylabel("stress")
+        self.calib_canvas.ax.legend(fontsize=7)
+        self.calib_canvas.draw()
+
+    def _update_prediction_plot(self):
+        if not self.latest_optimizer or not self.latest_result:
+            return
+        optimizer = self.latest_optimizer
+        param_values = self._get_prediction_param_values()
         if len(param_values) != len(optimizer.param_names):
             param_values = list(self.latest_result.x)
         plot_params = dict(zip(optimizer.param_names, param_values))
 
-        self.results_canvas.ax.clear()
-        self.results_canvas.apply_theme()
+        self.prediction_canvas.ax.clear()
+        self.prediction_canvas.apply_theme()
 
-        colors_calib = {"UT": "#2980b9", "ET": "#c0392b", "PS": "#27ae60", "BT": "#8e44ad"}
         colors_pred = {"UT": "#3498db", "ET": "#e74c3c", "PS": "#2ecc71", "BT": "#a569bd"}
-
-        if overlay_calibration:
-            calib_data = optimizer.data
-            self._plot_dataset(self.results_canvas.ax, calib_data, optimizer.solver, plot_params, colors_calib, "Exp", "Fit")
-
         pred_modes = self._get_prediction_modes()
         if pred_modes:
             author = self.author_combo.currentText()
             pred_configs = [{"author": author, "mode": m} for m in pred_modes]
             pred_data = load_experimental_data(pred_configs)
-            self._plot_dataset(self.results_canvas.ax, pred_data, optimizer.solver, plot_params, colors_pred, "Pred", "PredFit")
+            self._plot_dataset(self.prediction_canvas.ax, pred_data, optimizer.solver, plot_params, colors_pred, "Pred", "PredFit")
 
-        self.results_canvas.ax.set_xlabel("lambda")
-        self.results_canvas.ax.set_ylabel("stress")
-        self.results_canvas.ax.legend(fontsize=7)
-        self.results_canvas.draw()
+        self.prediction_canvas.ax.set_xlabel("lambda")
+        self.prediction_canvas.ax.set_ylabel("stress")
+        self.prediction_canvas.ax.legend(fontsize=7)
+        self.prediction_canvas.draw()
 
     def _plot_dataset(self, ax, data, solver, params, colors, exp_label, fit_label):
         for d in data:
