@@ -124,6 +124,7 @@ class LatexLabel(QLabel):
         self.setMinimumHeight(48)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setStyleSheet("background: transparent;")
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
 
     def set_latex(self, latex):
         if not latex:
@@ -132,9 +133,11 @@ class LatexLabel(QLabel):
             return
         fig = Figure(figsize=(5.2, 0.7), dpi=150)
         fig.patch.set_alpha(0.0)
+        fig.patch.set_facecolor("none")
         ax = fig.add_axes([0, 0, 1, 1])
         ax.axis("off")
         ax.set_facecolor("none")
+        ax.patch.set_alpha(0.0)
         text_color = QApplication.palette().color(QPalette.WindowText)
         color = (text_color.redF(), text_color.greenF(), text_color.blueF(), 1.0)
         ax.text(0.0, 0.5, f"${latex}$", fontsize=12, va="center", ha="left", color=color)
@@ -189,6 +192,8 @@ class MatplotlibCanvas(FigureCanvas):
         fig = Figure(figsize=(width, height), dpi=120)
         self.ax = fig.add_subplot(111)
         super().__init__(fig)
+        self.setStyleSheet("background: transparent;")
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.apply_theme()
 
     def _qcolor_to_mpl(self, color):
@@ -202,6 +207,7 @@ class MatplotlibCanvas(FigureCanvas):
         grid = palette.color(QPalette.Mid)
         self.figure.patch.set_facecolor("none")
         self.ax.set_facecolor("none")
+        self.ax.patch.set_alpha(0.0)
         self.ax.tick_params(colors=self._qcolor_to_mpl(text))
         self.ax.xaxis.label.set_color(self._qcolor_to_mpl(text))
         self.ax.yaxis.label.set_color(self._qcolor_to_mpl(text))
@@ -241,6 +247,9 @@ class SpringWidget(QGroupBox):
         self.params_layout.setContentsMargins(0, 0, 0, 0)
         self.params_layout.setHorizontalSpacing(10)
         self.params_layout.setVerticalSpacing(6)
+        self.params_layout.setColumnStretch(1, 1)
+        self.params_layout.setColumnStretch(3, 1)
+        self.params_layout.setColumnStretch(5, 1)
 
         layout = QVBoxLayout()
         layout.setSpacing(8)
@@ -272,7 +281,10 @@ class SpringWidget(QGroupBox):
         params_label = QLabel("Parameters")
         params_label.setFont(QFont("Helvetica", 11, QFont.Bold))
         params_block.addWidget(params_label)
-        params_block.addLayout(self.params_layout)
+        self.params_widget = QWidget()
+        self.params_widget.setLayout(self.params_layout)
+        self.params_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        params_block.addWidget(self.params_widget)
 
         formula_block = QVBoxLayout()
         formula_label = QLabel("Formula")
@@ -346,8 +358,8 @@ class SpringWidget(QGroupBox):
         temp_net = ParallelNetwork()
         temp_net.add_model(func, f"{model_name}_{self.index}")
         for idx, (name, default) in enumerate(zip(temp_net.param_names, temp_net.initial_guess)):
-            row = idx // 3
-            col = (idx % 3) * 2
+            row = idx
+            col = 0
             label = QLabel(name)
             edit = QLineEdit()
             text_value = f"{float(default):.4g}"
