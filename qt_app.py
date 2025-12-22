@@ -540,6 +540,11 @@ class MainWindow(QMainWindow):
         self.preview_canvas.setMinimumHeight(220)
         layout.addWidget(self.preview_canvas)
 
+        self.data_next_btn = QPushButton("Next: Model Architecture")
+        self.data_next_btn.setEnabled(False)
+        self.data_next_btn.clicked.connect(lambda: self._set_step(1))
+        layout.addWidget(self.data_next_btn, alignment=Qt.AlignRight)
+
         self.data_box.setLayout(layout)
         return self.data_box
 
@@ -558,6 +563,12 @@ class MainWindow(QMainWindow):
         self.spring_container = QVBoxLayout()
         self.spring_container.setSpacing(12)
         layout.addLayout(self.spring_container)
+
+        self.model_next_btn = QPushButton("Next: Optimization")
+        self.model_next_btn.setEnabled(False)
+        self.model_next_btn.clicked.connect(lambda: self._set_step(2))
+        layout.addWidget(self.model_next_btn, alignment=Qt.AlignRight)
+
         self.model_box.setLayout(layout)
 
         self._rebuild_springs(self.springs_spin.value())
@@ -577,6 +588,11 @@ class MainWindow(QMainWindow):
 
         self.opt_status = QLabel("")
         layout.addWidget(self.opt_status)
+
+        self.opt_next_btn = QPushButton("Next: Results")
+        self.opt_next_btn.setEnabled(False)
+        self.opt_next_btn.clicked.connect(lambda: self._set_step(3))
+        layout.addWidget(self.opt_next_btn, alignment=Qt.AlignRight)
 
         self.opt_box.setLayout(layout)
         return self.opt_box
@@ -647,6 +663,7 @@ class MainWindow(QMainWindow):
             self.preview_canvas.ax.clear()
             self.preview_canvas.apply_theme()
             self.preview_canvas.draw()
+            self.data_next_btn.setEnabled(False)
             return
 
         modes = self.datasets[text]
@@ -685,6 +702,7 @@ class MainWindow(QMainWindow):
             self.preview_canvas.ax.clear()
             self.preview_canvas.apply_theme()
             self.preview_canvas.draw()
+            self.data_next_btn.setEnabled(False)
             return
         configs = [{"author": author, "mode": m} for m in modes]
         data = load_experimental_data(configs)
@@ -708,8 +726,7 @@ class MainWindow(QMainWindow):
             self.preview_canvas.ax.set_ylabel(get_stress_type_label(d.get("stress_type", "PK1")))
         self.preview_canvas.ax.legend(fontsize=8)
         self.preview_canvas.draw()
-        if self.current_step == 0 and modes:
-            self._set_step(1)
+        self.data_next_btn.setEnabled(True)
 
     def _rebuild_springs(self, count):
         while self.spring_container.count():
@@ -768,6 +785,7 @@ class MainWindow(QMainWindow):
             return
         self.opt_status.setText("Optimization completed.")
         self.loss_label.setText(f"Final Loss: {result.fun:.6f}")
+        self.opt_next_btn.setEnabled(True)
         self.latest_optimizer = optimizer
         self.latest_result = result
         self.latest_network = optimizer.solver.network
@@ -779,6 +797,7 @@ class MainWindow(QMainWindow):
     def _on_optimization_failed(self, message):
         self.run_button.setEnabled(True)
         self.opt_status.setText(f"Optimization failed: {message}")
+        self.opt_next_btn.setEnabled(False)
 
     def _on_step_selected(self, index):
         if index < 0:
@@ -804,8 +823,9 @@ class MainWindow(QMainWindow):
     def _on_spring_config_changed(self):
         springs = [self.spring_container.itemAt(i).widget() for i in range(self.spring_container.count())]
         if springs and all(spring.is_valid() for spring in springs):
-            if self.current_step <= 1:
-                self._set_step(2)
+            self.model_next_btn.setEnabled(True)
+        else:
+            self.model_next_btn.setEnabled(False)
 
     def _format_result_param_label(self, name):
         parts = name.split("_")
