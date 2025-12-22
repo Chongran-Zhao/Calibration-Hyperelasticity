@@ -33,9 +33,10 @@ matplotlib.use("QtAgg")
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
-# Add src to path
+# Add src to path (support bundled app)
 current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(current_dir, "src"))
+base_dir = getattr(sys, "_MEIPASS", current_dir)
+sys.path.append(os.path.join(base_dir, "src"))
 
 from utils import load_experimental_data, get_deformation_gradient, get_stress_components
 from material_models import MaterialModels
@@ -63,7 +64,7 @@ DATASET_REFERENCES = {
 
 
 def get_available_datasets():
-    data_dir = os.path.join(current_dir, "data")
+    data_dir = os.path.join(base_dir, "data")
     datasets = {}
     data_h5 = os.path.join(data_dir, "data.h5")
     if os.path.exists(data_h5):
@@ -278,6 +279,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Hyperelastic Calibration (Desktop)")
         self.setMinimumSize(1200, 800)
+        os.environ["CALIBRATION_DATA_DIR"] = os.path.join(base_dir, "data")
 
         root = QWidget()
         root_layout = QHBoxLayout(root)

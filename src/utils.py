@@ -76,7 +76,8 @@ def load_experimental_data(configs):
     Prints status messages directly.
     """
     print(f"\n[Data Loading] Processing {len(configs)} configuration(s)...")
-    data_h5_path = os.path.join("data", "data.h5")
+    data_root = os.environ.get("CALIBRATION_DATA_DIR", "data")
+    data_h5_path = os.path.join(data_root, "data.h5")
     if h5py and os.path.exists(data_h5_path):
         return load_experimental_data_h5(configs, data_h5_path)
     all_tests = []
@@ -86,7 +87,7 @@ def load_experimental_data(configs):
         mode_raw = cfg['mode']
         mode = _parse_mode(mode_raw)
         
-        file_path = os.path.join("data", author, f"{mode_raw}.txt")
+        file_path = os.path.join(data_root, author, f"{mode_raw}.txt")
         
         if not os.path.exists(file_path):
             print(f"  Warning: File not found at {file_path}")
