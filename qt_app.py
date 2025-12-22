@@ -1,5 +1,7 @@
 import os
 import sys
+import tempfile
+from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -27,6 +29,15 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+cache_root = Path.home() / "Library" / "Caches" / "HyperelasticCalibration"
+try:
+    cache_root.mkdir(parents=True, exist_ok=True)
+except OSError:
+    cache_root = Path(tempfile.gettempdir()) / "HyperelasticCalibration"
+    cache_root.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", str(cache_root / "matplotlib"))
+os.environ.setdefault("XDG_CACHE_HOME", str(cache_root))
 
 import matplotlib
 matplotlib.use("QtAgg")
