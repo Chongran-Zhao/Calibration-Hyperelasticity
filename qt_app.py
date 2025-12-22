@@ -590,6 +590,9 @@ class MainWindow(QMainWindow):
         self.opt_status = QLabel("")
         layout.addWidget(self.opt_status)
 
+        self.loss_label = QLabel("Final Loss: -")
+        layout.addWidget(self.loss_label)
+
         self.calib_results_box = QGroupBox("Calibration Results")
         calib_layout = QHBoxLayout()
         self.calib_params_box = QGroupBox("Optimized Parameters")
