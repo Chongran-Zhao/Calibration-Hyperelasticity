@@ -8,7 +8,7 @@ from typing import List, Optional
 import numpy as np
 
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -41,6 +41,7 @@ os.environ.setdefault("XDG_CACHE_HOME", str(cache_root))
 
 import matplotlib
 matplotlib.use("QtAgg")
+import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -122,6 +123,7 @@ class LatexLabel(QLabel):
         self._latex_image_data = None
         self.setMinimumHeight(48)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setStyleSheet("background: transparent;")
 
     def set_latex(self, latex):
         if not latex:
@@ -129,9 +131,13 @@ class LatexLabel(QLabel):
             self._latex_image_data = None
             return
         fig = Figure(figsize=(5.2, 0.7), dpi=150)
+        fig.patch.set_alpha(0.0)
         ax = fig.add_axes([0, 0, 1, 1])
         ax.axis("off")
-        ax.text(0.0, 0.5, f"${latex}$", fontsize=12, va="center", ha="left")
+        ax.set_facecolor("none")
+        text_color = self.palette().color(QPalette.WindowText)
+        color = (text_color.redF(), text_color.greenF(), text_color.blueF(), 1.0)
+        ax.text(0.0, 0.5, f"${latex}$", fontsize=12, va="center", ha="left", color=color)
         canvas = FigureCanvasAgg(fig)
         canvas.draw()
         width, height = fig.get_size_inches() * fig.get_dpi()
@@ -148,7 +154,7 @@ class LatexLabel(QLabel):
         self.setPixmap(QPixmap.fromImage(qimage))
         self.setMinimumHeight(int(height))
         fig.clear()
-        matplotlib.pyplot.close(fig)
+        plt.close(fig)
 
 
 @dataclass
@@ -183,14 +189,35 @@ class MatplotlibCanvas(FigureCanvas):
         fig = Figure(figsize=(width, height), dpi=120)
         self.ax = fig.add_subplot(111)
         super().__init__(fig)
+        self.apply_theme()
+
+    def _qcolor_to_mpl(self, color):
+        return (color.redF(), color.greenF(), color.blueF(), 1.0)
+
+    def apply_theme(self):
+        palette = self.palette()
+        fig_bg = palette.color(QPalette.Window)
+        axes_bg = palette.color(QPalette.Base)
+        text = palette.color(QPalette.WindowText)
+        grid = palette.color(QPalette.Mid)
+        self.figure.patch.set_facecolor(self._qcolor_to_mpl(fig_bg))
+        self.ax.set_facecolor(self._qcolor_to_mpl(axes_bg))
+        self.ax.tick_params(colors=self._qcolor_to_mpl(text))
+        self.ax.xaxis.label.set_color(self._qcolor_to_mpl(text))
+        self.ax.yaxis.label.set_color(self._qcolor_to_mpl(text))
+        self.ax.title.set_color(self._qcolor_to_mpl(text))
+        for spine in self.ax.spines.values():
+            spine.set_color(self._qcolor_to_mpl(grid))
+        self.ax.grid(True, linestyle="--", alpha=0.25, color=self._qcolor_to_mpl(grid))
 
 
 class SpringWidget(QGroupBox):
     def __init__(self, index, parent=None):
-        super().__init__(f"Spring {index}")
+        super().__init__("")
         self.index = index
         self.model_combo = QComboBox()
         self.model_combo.addItems(["Select..."] + get_model_list())
+        self.model_label = QLabel("Model")
         self.strain_label = QLabel("Strain")
         self.strain_combo = QComboBox()
         self.strain_combo.addItems(list(STRAIN_CONFIGS.keys()))
@@ -206,28 +233,53 @@ class SpringWidget(QGroupBox):
         self.ogden_label.setVisible(False)
 
         self.formula_label = LatexLabel()
+        self.strain_formula_title = QLabel("Generalized Strain")
+        self.strain_formula_title.setFont(QFont("Helvetica", 10, QFont.Bold))
+        self.strain_formula_title.setVisible(False)
         self.strain_formula_label = LatexLabel()
         self.params_layout = QGridLayout()
+        self.params_layout.setContentsMargins(0, 0, 0, 0)
+        self.params_layout.setHorizontalSpacing(10)
+        self.params_layout.setVerticalSpacing(6)
 
         layout = QVBoxLayout()
-        form = QFormLayout()
-        form.addRow("Model", self.model_combo)
-        form.addRow(self.strain_label, self.strain_combo)
-        form.addRow(self.ogden_label, self.ogden_terms)
-        layout.addLayout(form)
+        layout.setSpacing(8)
+        layout.setContentsMargins(12, 12, 12, 12)
 
-        params_box = QGroupBox("Parameters")
-        params_box.setLayout(self.params_layout)
-        layout.addWidget(params_box)
+        header = QLabel(f"Spring {index}")
+        header.setFont(QFont("Helvetica", 12, QFont.Bold))
+        layout.addWidget(header)
 
-        formula_box = QGroupBox("Formula")
-        formula_layout = QVBoxLayout()
-        formula_layout.addWidget(self.formula_label)
-        formula_layout.addWidget(self.strain_formula_label)
-        formula_box.setLayout(formula_layout)
-        layout.addWidget(formula_box)
+        controls = QGridLayout()
+        controls.setHorizontalSpacing(10)
+        controls.setVerticalSpacing(6)
+        controls.addWidget(self.model_label, 0, 0)
+        controls.addWidget(self.model_combo, 0, 1)
+        controls.addWidget(self.strain_label, 0, 2)
+        controls.addWidget(self.strain_combo, 0, 3)
+        controls.addWidget(self.ogden_label, 0, 4)
+        controls.addWidget(self.ogden_terms, 0, 5)
+        controls.setColumnStretch(1, 2)
+        controls.setColumnStretch(3, 2)
+        layout.addLayout(controls)
+
+        params_label = QLabel("Parameters")
+        params_label.setFont(QFont("Helvetica", 11, QFont.Bold))
+        layout.addWidget(params_label)
+        layout.addLayout(self.params_layout)
+
+        formula_label = QLabel("Formula")
+        formula_label.setFont(QFont("Helvetica", 11, QFont.Bold))
+        layout.addWidget(formula_label)
+        layout.addWidget(self.formula_label)
+        layout.addWidget(self.strain_formula_title)
+        layout.addWidget(self.strain_formula_label)
 
         self.setLayout(layout)
+        self.setFlat(True)
+        self.setStyleSheet(
+            "QGroupBox { border: 1px solid palette(mid); border-radius: 8px; }"
+        )
 
         self.model_combo.currentTextChanged.connect(self._on_model_changed)
         self.strain_combo.currentTextChanged.connect(self._on_model_changed)
@@ -257,6 +309,7 @@ class SpringWidget(QGroupBox):
         if model_name == "Select...":
             self.formula_label.clear()
             self.strain_formula_label.clear()
+            self.strain_formula_title.setVisible(False)
             return
 
         if model_name == "Hill":
@@ -271,8 +324,10 @@ class SpringWidget(QGroupBox):
         self.formula_label.set_latex(formula)
         strain_formula = getattr(func, "strain_formula", "")
         if strain_formula:
+            self.strain_formula_title.setVisible(True)
             self.strain_formula_label.set_latex(strain_formula)
         else:
+            self.strain_formula_title.setVisible(False)
             self.strain_formula_label.clear()
 
         temp_net = ParallelNetwork()
@@ -403,6 +458,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(form)
 
         self.spring_container = QVBoxLayout()
+        self.spring_container.setSpacing(12)
         layout.addLayout(self.spring_container)
         self.model_box.setLayout(layout)
 
@@ -458,6 +514,7 @@ class MainWindow(QMainWindow):
         if text == "Select..." or text not in self.datasets:
             self.reference_label.setText("")
             self.preview_canvas.ax.clear()
+            self.preview_canvas.apply_theme()
             self.preview_canvas.draw()
             return
 
@@ -495,12 +552,14 @@ class MainWindow(QMainWindow):
         modes = self._selected_modes()
         if not modes:
             self.preview_canvas.ax.clear()
+            self.preview_canvas.apply_theme()
             self.preview_canvas.draw()
             return
         configs = [{"author": author, "mode": m} for m in modes]
         data = load_experimental_data(configs)
 
         self.preview_canvas.ax.clear()
+        self.preview_canvas.apply_theme()
         for idx, d in enumerate(data):
             stretch = d["stretch"]
             stress = d["stress_exp"]
@@ -517,7 +576,6 @@ class MainWindow(QMainWindow):
                 self.preview_canvas.ax.set_xlabel("lambda")
             self.preview_canvas.ax.set_ylabel(get_stress_type_label(d.get("stress_type", "PK1")))
         self.preview_canvas.ax.legend(fontsize=8)
-        self.preview_canvas.ax.grid(True, linestyle="--", alpha=0.3)
         self.preview_canvas.draw()
 
     def _rebuild_springs(self, count):
@@ -580,6 +638,7 @@ class MainWindow(QMainWindow):
         plot_params = dict(zip(optimizer.param_names, result.x))
         data = optimizer.data
         self.results_canvas.ax.clear()
+        self.results_canvas.apply_theme()
 
         colors = {"UT": "#2980b9", "ET": "#c0392b", "PS": "#27ae60", "BT": "#8e44ad"}
         for d in data:
