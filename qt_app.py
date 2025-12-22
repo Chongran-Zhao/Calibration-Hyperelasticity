@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import re
+import re
 from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Optional
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QListWidget,
     QLineEdit,
     QMainWindow,
     QMessageBox,
@@ -219,9 +221,10 @@ class MatplotlibCanvas(FigureCanvas):
 
 
 class SpringWidget(QGroupBox):
-    def __init__(self, index, parent=None):
+    def __init__(self, index, parent=None, on_change=None):
         super().__init__("")
         self.index = index
+        self.on_change = on_change
         self.model_combo = QComboBox()
         self.model_combo.addItems(["Select..."] + get_model_list())
         self.model_label = QLabel("Model")
@@ -354,6 +357,8 @@ class SpringWidget(QGroupBox):
             self.formula_label.clear()
             self.strain_formula_label.clear()
             self.strain_formula_title.setVisible(False)
+            if self.on_change:
+                self.on_change()
             return
 
         if model_name == "Hill":
@@ -364,6 +369,7 @@ class SpringWidget(QGroupBox):
         else:
             func = getattr(MaterialModels, model_name)
 
+        self._param_prefix = f"{model_name}_{self.index}_"
         formula = getattr(func, "formula", "")
         self.formula_label.set_latex(formula)
         strain_formula = getattr(func, "strain_formula", "")
@@ -393,6 +399,8 @@ class SpringWidget(QGroupBox):
             self.params_layout.addWidget(label, row, col)
             self.params_layout.addWidget(edit, row, col + 1)
             self.param_edits.append((name, edit, default))
+        if self.on_change:
+            self.on_change()
 
     def is_valid(self):
         return self.model_combo.currentText() != "Select..."
@@ -427,6 +435,12 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Hyperelastic Calibration (Desktop)")
         self.setMinimumSize(1200, 800)
         os.environ["CALIBRATION_DATA_DIR"] = os.path.join(base_dir, "data")
+        self.step_names = ["Experimental Data", "Model Architecture", "Optimization", "Results"]
+        self.current_step = 0
+        self.section_widgets = {}
+        self.latest_optimizer = None
+        self.latest_result = None
+        self.latest_network = None
 
         root = QWidget()
         root_layout = QHBoxLayout(root)
@@ -443,19 +457,41 @@ class MainWindow(QMainWindow):
         self._populate_authors()
 
     def _build_sidebar(self):
-        sidebar = QGroupBox("About")
+        sidebar = QGroupBox("Navigation")
         layout = QVBoxLayout()
-        layout.addWidget(QLabel("Chongran Zhao"))
-        layout.addWidget(QLabel("chongranzhao@outlook.com"))
-        layout.addWidget(QLabel("chongran-zhao.github.io"))
+
+        about_box = QGroupBox("About")
+        about_layout = QVBoxLayout()
+        about_layout.addWidget(QLabel("Chongran Zhao"))
+        email = QLabel("<a href='mailto:chongranzhao@outlook.com'>chongranzhao@outlook.com</a>")
+        email.setTextFormat(Qt.RichText)
+        email.setOpenExternalLinks(True)
+        about_layout.addWidget(email)
+        site = QLabel("<a href='https://chongran-zhao.github.io'>chongran-zhao.github.io</a>")
+        site.setTextFormat(Qt.RichText)
+        site.setOpenExternalLinks(True)
+        about_layout.addWidget(site)
+        about_box.setLayout(about_layout)
+        layout.addWidget(about_box)
+
+        workflow_box = QGroupBox("Workflow")
+        workflow_layout = QVBoxLayout()
+        self.step_list = QListWidget()
+        self.step_list.addItems(self.step_names)
+        self.step_list.setCurrentRow(0)
+        self.step_list.currentRowChanged.connect(self._on_step_selected)
+        workflow_layout.addWidget(self.step_list)
+        workflow_box.setLayout(workflow_layout)
+        layout.addWidget(workflow_box)
+
         layout.addStretch()
         sidebar.setLayout(layout)
-        sidebar.setMaximumWidth(220)
+        sidebar.setMaximumWidth(240)
         return sidebar
 
     def _build_content(self):
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
         container = QWidget()
         layout = QVBoxLayout(container)
 
@@ -463,14 +499,24 @@ class MainWindow(QMainWindow):
         header.setFont(QFont("Helvetica", 20, QFont.Bold))
         layout.addWidget(header)
 
-        layout.addWidget(self._build_data_section())
-        layout.addWidget(self._build_model_section())
-        layout.addWidget(self._build_optimization_section())
-        layout.addWidget(self._build_results_section())
+        data_section = self._build_data_section()
+        model_section = self._build_model_section()
+        opt_section = self._build_optimization_section()
+        results_section = self._build_results_section()
+        layout.addWidget(data_section)
+        layout.addWidget(model_section)
+        layout.addWidget(opt_section)
+        layout.addWidget(results_section)
         layout.addStretch()
 
-        scroll.setWidget(container)
-        return scroll
+        self.section_widgets = {
+            self.step_names[0]: data_section,
+            self.step_names[1]: model_section,
+            self.step_names[2]: opt_section,
+            self.step_names[3]: results_section,
+        }
+        self.scroll.setWidget(container)
+        return self.scroll
 
     def _build_data_section(self):
         self.data_box = QGroupBox("1. Experimental Data")
@@ -536,15 +582,48 @@ class MainWindow(QMainWindow):
         return self.opt_box
 
     def _build_results_section(self):
-        self.results_box = QGroupBox("Results")
-        layout = QVBoxLayout()
+        self.results_box = QGroupBox("4. Results")
+        layout = QHBoxLayout()
 
+        left_panel = QVBoxLayout()
         self.loss_label = QLabel("Final Loss: -")
-        layout.addWidget(self.loss_label)
+        left_panel.addWidget(self.loss_label)
+
+        self.params_result_box = QGroupBox("Optimized Parameters")
+        params_layout = QVBoxLayout()
+        self.params_result_area = QScrollArea()
+        self.params_result_area.setWidgetResizable(True)
+        self.params_result_widget = QWidget()
+        self.params_result_layout = QVBoxLayout(self.params_result_widget)
+        self.params_result_layout.setSpacing(8)
+        self.params_result_layout.addStretch()
+        self.params_result_area.setWidget(self.params_result_widget)
+        params_layout.addWidget(self.params_result_area)
+        self.params_result_box.setLayout(params_layout)
+        left_panel.addWidget(self.params_result_box)
+
+        self.prediction_box = QGroupBox("Prediction")
+        pred_layout = QVBoxLayout()
+        self.prediction_hint = QLabel("Select unused modes and update prediction.")
+        pred_layout.addWidget(self.prediction_hint)
+        self.prediction_modes_widget = QWidget()
+        self.prediction_modes_layout = QGridLayout(self.prediction_modes_widget)
+        pred_layout.addWidget(self.prediction_modes_widget)
+        self.prediction_overlay = QCheckBox("Overlay on calibration")
+        self.prediction_overlay.setChecked(True)
+        pred_layout.addWidget(self.prediction_overlay)
+        self.prediction_button = QPushButton("Update Prediction")
+        self.prediction_button.clicked.connect(self._update_prediction_plot)
+        pred_layout.addWidget(self.prediction_button)
+        self.prediction_box.setLayout(pred_layout)
+        left_panel.addWidget(self.prediction_box)
+        left_panel.addStretch()
+
+        layout.addLayout(left_panel, 1)
 
         self.results_canvas = MatplotlibCanvas(width=7.2, height=3.8)
         self.results_canvas.setMinimumHeight(280)
-        layout.addWidget(self.results_canvas)
+        layout.addWidget(self.results_canvas, 2)
 
         self.results_box.setLayout(layout)
         return self.results_box
@@ -629,6 +708,8 @@ class MainWindow(QMainWindow):
             self.preview_canvas.ax.set_ylabel(get_stress_type_label(d.get("stress_type", "PK1")))
         self.preview_canvas.ax.legend(fontsize=8)
         self.preview_canvas.draw()
+        if self.current_step == 0 and modes:
+            self._set_step(1)
 
     def _rebuild_springs(self, count):
         while self.spring_container.count():
@@ -638,8 +719,9 @@ class MainWindow(QMainWindow):
                 widget.deleteLater()
 
         for i in range(1, count + 1):
-            spring_widget = SpringWidget(i)
+            spring_widget = SpringWidget(i, on_change=self._on_spring_config_changed)
             self.spring_container.addWidget(spring_widget)
+        self._on_spring_config_changed()
 
     def _run_optimization(self):
         author = self.author_combo.currentText()
@@ -672,6 +754,7 @@ class MainWindow(QMainWindow):
         method = self.method_combo.currentText()
         self.opt_status.setText("Running optimization...")
         self.run_button.setEnabled(False)
+        self._set_step(2)
 
         self.worker = OptimizerWorker(optimizer, initial_guess, bounds, method)
         self.worker.finished.connect(self._on_optimization_finished)
@@ -685,14 +768,167 @@ class MainWindow(QMainWindow):
             return
         self.opt_status.setText("Optimization completed.")
         self.loss_label.setText(f"Final Loss: {result.fun:.6f}")
+        self.latest_optimizer = optimizer
+        self.latest_result = result
+        self.latest_network = optimizer.solver.network
+        self._populate_result_params(optimizer.param_names, result.x)
+        self._refresh_prediction_modes()
+        self._plot_results(overlay_calibration=True)
+        self._set_step(3)
 
-        # Plot results
-        plot_params = dict(zip(optimizer.param_names, result.x))
-        data = optimizer.data
+    def _on_optimization_failed(self, message):
+        self.run_button.setEnabled(True)
+        self.opt_status.setText(f"Optimization failed: {message}")
+
+    def _on_step_selected(self, index):
+        if index < 0:
+            return
+        self.current_step = index
+        step_name = self.step_names[index]
+        widget = self.section_widgets.get(step_name)
+        if widget:
+            self.scroll.ensureWidgetVisible(widget, 0, 20)
+
+    def _set_step(self, index):
+        if index == self.current_step:
+            return
+        self.current_step = index
+        self.step_list.blockSignals(True)
+        self.step_list.setCurrentRow(index)
+        self.step_list.blockSignals(False)
+        step_name = self.step_names[index]
+        widget = self.section_widgets.get(step_name)
+        if widget:
+            self.scroll.ensureWidgetVisible(widget, 0, 20)
+
+    def _on_spring_config_changed(self):
+        springs = [self.spring_container.itemAt(i).widget() for i in range(self.spring_container.count())]
+        if springs and all(spring.is_valid() for spring in springs):
+            if self.current_step <= 1:
+                self._set_step(2)
+
+    def _format_result_param_label(self, name):
+        parts = name.split("_")
+        short = parts[-1] if parts else name
+        match = re.match(r"^([A-Za-z]+)(\d+)$", short)
+        if match:
+            base, idx = match.groups()
+            if base.lower() == "mu":
+                return f"&mu;<sub>{idx}</sub>"
+            if base.lower() == "alpha":
+                return f"&alpha;<sub>{idx}</sub>"
+            return f"{base}<sub>{idx}</sub>"
+        if short.lower() == "mu":
+            return "&mu;"
+        if short.lower() == "alpha":
+            return "&alpha;"
+        return short
+
+    def _clear_result_params(self):
+        while self.params_result_layout.count():
+            item = self.params_result_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+    def _populate_result_params(self, param_names, values):
+        self._clear_result_params()
+        for name, value in zip(param_names, values):
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            label = QLabel()
+            label.setTextFormat(Qt.RichText)
+            label.setText(self._format_result_param_label(name))
+            edit = QLineEdit(f"{value:.6g}")
+            edit.setMinimumWidth(140)
+            edit.setMinimumHeight(26)
+            edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            row_layout.addWidget(label)
+            row_layout.addWidget(edit, 1)
+            self.params_result_layout.addWidget(row)
+        self.params_result_layout.addStretch()
+
+    def _refresh_prediction_modes(self):
+        for i in reversed(range(self.prediction_modes_layout.count())):
+            widget = self.prediction_modes_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        author = self.author_combo.currentText()
+        if author == "Select...":
+            return
+        available = self.datasets.get(author, [])
+        used = self._selected_modes()
+        unused = [m for m in available if m not in used]
+        for idx, mode in enumerate(unused):
+            checkbox = QCheckBox(format_mode_label(mode))
+            row = idx // 2
+            col = idx % 2
+            self.prediction_modes_layout.addWidget(checkbox, row, col)
+
+    def _get_prediction_modes(self):
+        modes = []
+        mapping = {format_mode_label(m): m for m in self.datasets.get(self.author_combo.currentText(), [])}
+        for i in range(self.prediction_modes_layout.count()):
+            widget = self.prediction_modes_layout.itemAt(i).widget()
+            if isinstance(widget, QCheckBox) and widget.isChecked():
+                modes.append(mapping.get(widget.text(), widget.text()))
+        return modes
+
+    def _get_current_param_values(self):
+        values = []
+        for i in range(self.params_result_layout.count()):
+            item = self.params_result_layout.itemAt(i)
+            row = item.widget()
+            if not row:
+                continue
+            edits = row.findChildren(QLineEdit)
+            if not edits:
+                continue
+            text = edits[0].text().strip()
+            try:
+                values.append(float(text))
+            except ValueError:
+                values.append(0.0)
+        return values
+
+    def _update_prediction_plot(self):
+        if not self.latest_optimizer or not self.latest_result:
+            return
+        self._plot_results(overlay_calibration=self.prediction_overlay.isChecked())
+
+    def _plot_results(self, overlay_calibration=True):
+        if not self.latest_optimizer or not self.latest_result:
+            return
+        optimizer = self.latest_optimizer
+        param_values = self._get_current_param_values()
+        if len(param_values) != len(optimizer.param_names):
+            param_values = list(self.latest_result.x)
+        plot_params = dict(zip(optimizer.param_names, param_values))
+
         self.results_canvas.ax.clear()
         self.results_canvas.apply_theme()
 
-        colors = {"UT": "#2980b9", "ET": "#c0392b", "PS": "#27ae60", "BT": "#8e44ad"}
+        colors_calib = {"UT": "#2980b9", "ET": "#c0392b", "PS": "#27ae60", "BT": "#8e44ad"}
+        colors_pred = {"UT": "#3498db", "ET": "#e74c3c", "PS": "#2ecc71", "BT": "#a569bd"}
+
+        if overlay_calibration:
+            calib_data = optimizer.data
+            self._plot_dataset(self.results_canvas.ax, calib_data, optimizer.solver, plot_params, colors_calib, "Exp", "Fit")
+
+        pred_modes = self._get_prediction_modes()
+        if pred_modes:
+            author = self.author_combo.currentText()
+            pred_configs = [{"author": author, "mode": m} for m in pred_modes]
+            pred_data = load_experimental_data(pred_configs)
+            self._plot_dataset(self.results_canvas.ax, pred_data, optimizer.solver, plot_params, colors_pred, "Pred", "PredFit")
+
+        self.results_canvas.ax.set_xlabel("lambda")
+        self.results_canvas.ax.set_ylabel("stress")
+        self.results_canvas.ax.legend(fontsize=7)
+        self.results_canvas.draw()
+
+    def _plot_dataset(self, ax, data, solver, params, colors, exp_label, fit_label):
         for d in data:
             mode = d["mode"]
             stress_type = d.get("stress_type", "PK1")
@@ -702,12 +938,12 @@ class MainWindow(QMainWindow):
 
             if mode == "BT":
                 if np.ndim(stress) == 1:
-                    self.results_canvas.ax.plot(stretch, stress, "o", label=f"Exp {label}")
+                    ax.plot(stretch, stress, "o", label=f"{exp_label} {label}")
                 else:
-                    self.results_canvas.ax.plot(stretch, stress[:, 0], "o", label=f"Exp {label} P11")
-                    self.results_canvas.ax.plot(stretch, stress[:, 1], "^", label=f"Exp {label} P22")
+                    ax.plot(stretch, stress[:, 0], "o", label=f"{exp_label} {label} P11")
+                    ax.plot(stretch, stress[:, 1], "^", label=f"{exp_label} {label} P22")
             else:
-                self.results_canvas.ax.plot(stretch, stress, "o", label=f"Exp {label}")
+                ax.plot(stretch, stress, "o", label=f"{exp_label} {label}")
 
             smooth = np.linspace(min(stretch), max(stretch), 120)
             model = []
@@ -719,26 +955,16 @@ class MainWindow(QMainWindow):
                 else:
                     F = get_deformation_gradient(lam, mode)
                 if stress_type == "cauchy":
-                    stress_tensor = optimizer.solver.get_Cauchy_stress(F, plot_params)
+                    stress_tensor = solver.get_Cauchy_stress(F, params)
                 else:
-                    stress_tensor = optimizer.solver.get_1st_PK_stress(F, plot_params)
+                    stress_tensor = solver.get_1st_PK_stress(F, params)
                 comps = get_stress_components(stress_tensor, mode)
                 model.append(comps[0])
                 if len(comps) > 1:
                     model2.append(comps[1])
-            self.results_canvas.ax.plot(smooth, model, "-", color=colors.get(mode, "black"))
+            ax.plot(smooth, model, "-", color=colors.get(mode, "black"), label=f"{fit_label} {label}")
             if model2:
-                self.results_canvas.ax.plot(smooth, model2, "--", color=colors.get(mode, "black"))
-
-        self.results_canvas.ax.set_xlabel("lambda")
-        self.results_canvas.ax.set_ylabel("stress")
-        self.results_canvas.ax.legend(fontsize=7)
-        self.results_canvas.ax.grid(True, linestyle="--", alpha=0.3)
-        self.results_canvas.draw()
-
-    def _on_optimization_failed(self, message):
-        self.run_button.setEnabled(True)
-        self.opt_status.setText(f"Optimization failed: {message}")
+                ax.plot(smooth, model2, "--", color=colors.get(mode, "black"), label=f"{fit_label} {label} P22")
 
 
 def main():
