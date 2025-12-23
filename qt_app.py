@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QProgressDialog,
     QPushButton,
     QFileDialog,
+    QInputDialog,
     QRadioButton,
     QScrollArea,
     QSizePolicy,
@@ -95,6 +96,16 @@ DATASET_REFERENCES = {
     "Jones_1975": ("Jones & Treloar 1975, J. Phys. D", "https://doi.org/10.1088/0022-3727/8/11/007"),
     "Kawamura_2001": ("Kawamura et al. 2001, Macromolecules", "https://doi.org/10.1021/ma002165y"),
     "Katashima_2012": ("Katashima et al. 2012, Soft Matter", "https://doi.org/10.1039/c2sm25340b"),
+}
+
+DATASET_N_GUESS = {
+    "Treloar_1944": 10.0,
+    "Jones_1975": 6.0,
+    "James_1975": 10.0,
+    "Kawamura_2001": 8.0,
+    "Katashima_2012": 8.0,
+    "Kawabata_1981": 6.0,
+    "Meunier_2008": 6.0,
 }
 
 MODEL_REFERENCES = {
@@ -365,6 +376,8 @@ class CustomDataEntry(QWidget):
             edit.setPlaceholderText(placeholders[col] if col < len(placeholders) else "")
             edit.textChanged.connect(self._emit_change)
             edit.setMinimumHeight(80)
+            edit.setMinimumWidth(140)
+            edit.setMaximumWidth(180)
             edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             self.data_grid.addWidget(label, 0, col)
             self.data_grid.addWidget(edit, 1, col)
@@ -415,10 +428,11 @@ class CustomDataEntry(QWidget):
 
 
 class SpringWidget(QGroupBox):
-    def __init__(self, index, parent=None, on_change=None):
+    def __init__(self, index, parent=None, on_change=None, author_provider=None):
         super().__init__("")
         self.index = index
         self.on_change = on_change
+        self.author_provider = author_provider
         self.model_combo = QComboBox()
         self.model_combo.addItems(["Select..."] + get_model_list())
         self.model_label = QLabel("Model")
@@ -453,19 +467,34 @@ class SpringWidget(QGroupBox):
         self.custom_formula_edit.textChanged.connect(self._on_custom_definition_changed)
         self.custom_param_edit.textChanged.connect(self._on_custom_definition_changed)
 
-        self.custom_palette = QWidget()
-        palette_layout = QHBoxLayout(self.custom_palette)
-        palette_layout.setContentsMargins(0, 0, 0, 0)
-        palette_tokens = [
-            "I1", "I2", "lambda_1", "lambda_2", "lambda_3",
-            "\\mu", "\\alpha", "C_1", "C_2", "N",
-            "+", "-", "*", "/", "^", "(", ")",
+        self._custom_tokens = [
+            {"latex": r"I_1", "symbol": "I1"},
+            {"latex": r"I_2", "symbol": "I2"},
+            {"latex": r"\lambda_1", "symbol": "lambda_1"},
+            {"latex": r"\lambda_2", "symbol": "lambda_2"},
+            {"latex": r"\lambda_3", "symbol": "lambda_3"},
+            {"latex": r"\mu", "symbol": "mu"},
+            {"latex": r"\alpha", "symbol": "alpha"},
+            {"latex": r"C_1", "symbol": "C_1"},
+            {"latex": r"C_2", "symbol": "C_2"},
+            {"latex": r"N", "symbol": "N"},
+            {"latex": r"+", "symbol": "+"},
+            {"latex": r"-", "symbol": "-"},
+            {"latex": r"\cdot", "symbol": "*"},
+            {"latex": r"/", "symbol": "/"},
+            {"latex": r"^{}", "symbol": "^"},
+            {"latex": r"(", "symbol": "("},
+            {"latex": r")", "symbol": ")"},
         ]
-        for token in palette_tokens:
-            btn = QToolButton()
-            btn.setText(token)
-            btn.clicked.connect(lambda _, t=token: self._insert_custom_token(t))
-            palette_layout.addWidget(btn)
+        self.custom_palette = QWidget()
+        self.custom_palette_layout = QGridLayout(self.custom_palette)
+        self.custom_palette_layout.setContentsMargins(0, 0, 0, 0)
+        self.custom_palette_layout.setHorizontalSpacing(6)
+        self.custom_palette_layout.setVerticalSpacing(6)
+        self.custom_add_token = QToolButton()
+        self.custom_add_token.setText("+")
+        self.custom_add_token.clicked.connect(self._add_custom_token_dialog)
+        self._build_custom_palette()
 
         self.custom_param_table = QGridLayout()
         self.custom_param_table.setHorizontalSpacing(8)
@@ -730,15 +759,51 @@ class SpringWidget(QGroupBox):
         if params:
             self.custom_param_edit.setText(", ".join(params))
 
-    def _insert_custom_token(self, token):
-        insert_map = {
-            "\\mu": "mu",
-            "\\alpha": "alpha",
-            "C_1": "C_1",
-            "C_2": "C_2",
-        }
+    def _build_custom_palette(self):
+        while self.custom_palette_layout.count():
+            item = self.custom_palette_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        cols = 6
+        row = 0
+        col = 0
+        for token in self._custom_tokens:
+            wrapper = QWidget()
+            wrapper_layout = QHBoxLayout(wrapper)
+            wrapper_layout.setContentsMargins(0, 0, 0, 0)
+            label = LatexLabel()
+            label.set_latex(token["latex"].strip("$"))
+            label.setMinimumHeight(26)
+            add_btn = QToolButton()
+            add_btn.setText("+")
+            add_btn.clicked.connect(lambda _, s=token["symbol"]: self._insert_custom_token(s))
+            wrapper_layout.addWidget(label)
+            wrapper_layout.addWidget(add_btn)
+            self.custom_palette_layout.addWidget(wrapper, row, col)
+            col += 1
+            if col >= cols:
+                col = 0
+                row += 1
+        self.custom_palette_layout.addWidget(self.custom_add_token, row, col)
+
+    def _add_custom_token_dialog(self):
+        latex, ok = QInputDialog.getText(self, "Custom token", "LaTeX (e.g., \\mu_1):")
+        if not ok or not latex.strip():
+            return
+        symbol, ok = QInputDialog.getText(self, "Custom token", "Symbol name (e.g., mu_1):")
+        if not ok or not symbol.strip():
+            return
+        self._custom_tokens.append({"latex": latex.strip(), "symbol": symbol.strip()})
+        params = self._parse_custom_params()
+        if symbol.strip() not in params:
+            params.append(symbol.strip())
+            self.custom_param_edit.setText(", ".join(params))
+        self._build_custom_palette()
+
+    def _insert_custom_token(self, symbol):
         current = self.custom_formula_edit.text()
-        self.custom_formula_edit.setText(current + insert_map.get(token, token))
+        self.custom_formula_edit.setText(current + symbol)
 
     def _on_model_changed(self):
         display_name = self.model_combo.currentText()
@@ -848,9 +913,13 @@ class SpringWidget(QGroupBox):
         self._param_prefix = f"{model_name}_{self.index}_"
         temp_net = ParallelNetwork()
         temp_net.add_model(func, f"{model_name}_{self.index}")
+        author_name = self.author_provider() if self.author_provider else None
+        n_guess = DATASET_N_GUESS.get(author_name, None)
         for idx, (name, default) in enumerate(zip(temp_net.param_names, temp_net.initial_guess)):
             row = idx
             col = 0
+            if n_guess is not None and (name.lower().endswith("_n") or name.lower().endswith("n")):
+                default = n_guess
             label = QLabel()
             label.setTextFormat(Qt.RichText)
             label.setText(self._format_param_label(name))
@@ -954,7 +1023,7 @@ class SpringWidget(QGroupBox):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Hyperelastic Calibration (Desktop)")
+        self.setWindowTitle("Calibration for Hyperelasticity")
         self.setMinimumSize(1400, 900)
         icon_path = os.path.join(base_dir, "assets", "icons", "app.png")
         if os.path.exists(icon_path):
@@ -967,6 +1036,7 @@ class MainWindow(QMainWindow):
         self.latest_result = None
         self.latest_network = None
         self._bt_mix_warned = False
+        self._custom_source_warned = False
 
         root = QWidget()
         root_layout = QHBoxLayout(root)
@@ -1022,7 +1092,7 @@ class MainWindow(QMainWindow):
         container = QWidget()
         layout = QVBoxLayout(container)
 
-        header = QLabel("Hyperelastic Calibration")
+        header = QLabel("Calibration for Hyperelasticity")
         header.setFont(QFont("Helvetica", 20, QFont.Bold))
         layout.addWidget(header)
 
@@ -1158,6 +1228,10 @@ class MainWindow(QMainWindow):
         self.run_button.clicked.connect(self._run_optimization)
         layout.addWidget(self.run_button)
 
+        self.report_button = QPushButton("Export Report (PDF)")
+        self.report_button.clicked.connect(self._export_report)
+        layout.addWidget(self.report_button)
+
         self.opt_status = QLabel("")
         layout.addWidget(self.opt_status)
 
@@ -1244,6 +1318,9 @@ class MainWindow(QMainWindow):
         pred_plot_layout.addWidget(self.prediction_canvas, 1)
         pred_actions = QHBoxLayout()
         pred_actions.addStretch()
+        self.pred_report_btn = QPushButton("Export Report (PDF)")
+        self.pred_report_btn.clicked.connect(self._export_report)
+        pred_actions.addWidget(self.pred_report_btn)
         self.pred_save_btn = QPushButton("Save Prediction Plot")
         self.pred_save_btn.clicked.connect(lambda: self._save_figure(self.prediction_canvas, "prediction_plot"))
         pred_actions.addWidget(self.pred_save_btn)
@@ -1316,6 +1393,61 @@ class MainWindow(QMainWindow):
             canvas.figure.savefig(file_path, dpi=300, bbox_inches="tight", transparent=True)
         except Exception as exc:
             QMessageBox.warning(self, "Save failed", f"Could not save plot: {exc}")
+
+    def _export_report(self):
+        if not self.latest_optimizer or not self.latest_result:
+            QMessageBox.information(self, "Report", "Run calibration first.")
+            return
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export report",
+            "calibration_report.pdf",
+            "PDF (*.pdf)",
+        )
+        if not file_path:
+            return
+        try:
+            from matplotlib.backends.backend_pdf import PdfPages
+            with PdfPages(file_path) as pdf:
+                fig = Figure(figsize=(8.5, 11), dpi=150)
+                ax = fig.add_subplot(111)
+                ax.axis("off")
+                optimizer = self.latest_optimizer
+                lines = []
+                lines.append("Calibration for Hyperelasticity")
+                lines.append("")
+                lines.append(f"Final loss: {self.latest_result.fun:.6g}")
+                lines.append("")
+                if self.use_builtin_radio.isChecked():
+                    lines.append(f"Dataset: {self.author_combo.currentText()}")
+                    lines.append(f"Modes: {', '.join(self._selected_modes())}")
+                else:
+                    lines.append("Dataset: Custom")
+                    lines.append(f"Custom entries: {len(self.custom_entries)}")
+                lines.append("")
+                lines.append("Model architecture:")
+                for idx in range(self.spring_container.count()):
+                    spring = self.spring_container.itemAt(idx).widget()
+                    if not spring:
+                        continue
+                    state = spring.get_state()
+                    if state.get("use_custom"):
+                        lines.append(f"  Spring {idx+1}: Custom ({state.get('custom_type')})")
+                        lines.append(f"    Formula: {state.get('custom_formula')}")
+                        lines.append(f"    Params: {state.get('custom_params')}")
+                    else:
+                        lines.append(f"  Spring {idx+1}: {state.get('model')}")
+                lines.append("")
+                lines.append("Optimized parameters:")
+                for name, value in zip(optimizer.param_names, self.latest_result.x):
+                    lines.append(f"  {name}: {value:.6g}")
+                ax.text(0.05, 0.98, "\n".join(lines), va="top", fontsize=10)
+                pdf.savefig(fig, bbox_inches="tight")
+                pdf.savefig(self.calib_canvas.figure, bbox_inches="tight")
+                if self.prediction_canvas and self.prediction_canvas.figure:
+                    pdf.savefig(self.prediction_canvas.figure, bbox_inches="tight")
+        except Exception as exc:
+            QMessageBox.warning(self, "Report failed", f"Could not export report:\n{exc}")
 
     def _populate_authors(self):
         self.author_combo.blockSignals(True)
@@ -1436,7 +1568,11 @@ class MainWindow(QMainWindow):
                 widget.deleteLater()
 
         for i in range(1, count + 1):
-            spring_widget = SpringWidget(i, on_change=self._on_spring_config_changed)
+            spring_widget = SpringWidget(
+                i,
+                on_change=self._on_spring_config_changed,
+                author_provider=lambda: self.author_combo.currentText(),
+            )
             if i <= len(previous_states):
                 spring_widget.apply_state(previous_states[i - 1])
             self.spring_container.addWidget(spring_widget)
@@ -1481,7 +1617,10 @@ class MainWindow(QMainWindow):
         if not result.success:
             self.opt_status.setText(f"Optimization failed: {result.message}")
             return
-        self.opt_status.setText("Optimization completed.")
+        message = "Optimization completed."
+        if result.fun > 0.1:
+            message += " Loss is high; consider adjusting initial guesses and rerun."
+        self.opt_status.setText(message)
         self.loss_label.setText(f"Final Loss: {result.fun:.6f}")
         self.opt_next_btn.setEnabled(True)
         self.latest_optimizer = optimizer
@@ -1954,7 +2093,7 @@ def main():
     app = QApplication(sys.argv)
     app.setFont(QFont("Helvetica", 13))
     progress = QProgressDialog("Loading libraries...", None, 0, 5)
-    progress.setWindowTitle("Starting Hyperelastic Calibration")
+    progress.setWindowTitle("Starting Calibration for Hyperelasticity")
     progress.setMinimumDuration(0)
     progress.setCancelButton(None)
     progress.setValue(0)
