@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QProgressDialog,
     QPushButton,
     QScrollArea,
     QSizePolicy,
