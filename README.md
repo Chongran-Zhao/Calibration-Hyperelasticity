@@ -24,6 +24,16 @@ pip install -r requirement.txt
 python qt_app.py
 ```
 
+## Install (Windows)
+
+1) Download `HyperelasticCalibration-windows.zip` from the latest release.
+2) Unzip and run `HyperelasticCalibration.exe`.
+
+## Install (Linux)
+
+1) Download `HyperelasticCalibration-linux.tar.gz` from the latest release.
+2) Extract and run `./HyperelasticCalibration/HyperelasticCalibration`.
+
 ## Example: Zhan (non-Gaussian)
 
 This example reproduces Fig. 7 from Zhan (JMPS) by fitting the Zhan (non-Gaussian)
