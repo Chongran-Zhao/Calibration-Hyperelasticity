@@ -1,5 +1,7 @@
 # Development Notes
 
+To continue this session, run `codex resume 019b3fbc-4d66-72f2-a04a-4d516a39a49b`.
+
 ## Repository Structure (Key Paths)
 
 - `qt_app.py`: Main desktop GUI (PySide6).
