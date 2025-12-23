@@ -112,7 +112,7 @@ def get_available_datasets():
 def format_mode_label(mode_key):
     if mode_key.startswith("BT_lambda_"):
         lam2 = mode_key.replace("BT_lambda_", "").replace("d", ".")
-        return f"Biaxial Tension, λ2={lam2}"
+        return f"Biaxial Tension, λ₂={lam2}"
     return MODE_DISPLAY_MAP.get(mode_key, mode_key)
 
 
@@ -505,6 +505,7 @@ class MainWindow(QMainWindow):
         self.latest_optimizer = None
         self.latest_result = None
         self.latest_network = None
+        self._bt_mix_warned = False
 
         root = QWidget()
         root_layout = QHBoxLayout(root)
@@ -601,8 +602,8 @@ class MainWindow(QMainWindow):
         self.reference_label.setOpenExternalLinks(True)
         layout.addWidget(self.reference_label)
 
-        self.preview_canvas = MatplotlibCanvas(width=8.4, height=4.2)
-        self.preview_canvas.setMinimumHeight(320)
+        self.preview_canvas = MatplotlibCanvas(width=8.8, height=4.6)
+        self.preview_canvas.setMinimumHeight(360)
         layout.addWidget(self.preview_canvas)
 
         preview_actions = QHBoxLayout()
@@ -779,6 +780,7 @@ class MainWindow(QMainWindow):
 
     def _on_author_changed(self, text):
         self._reset_results()
+        self._bt_mix_warned = False
         for i in reversed(range(self.modes_grid.count())):
             widget = self.modes_grid.itemAt(i).widget()
             if widget:
@@ -835,6 +837,16 @@ class MainWindow(QMainWindow):
             return
         configs = [{"author": author, "mode": m} for m in modes]
         data = load_experimental_data(configs)
+        bt_selected = any(d["mode"] == "BT" for d in data)
+        non_bt_selected = any(d["mode"] != "BT" for d in data)
+        if bt_selected and non_bt_selected and not self._bt_mix_warned:
+            QMessageBox.information(
+                self,
+                "Mixed loading modes",
+                "Selecting BT together with other modes is not recommended. "
+                "BT datasets are typically used for prediction.",
+            )
+            self._bt_mix_warned = True
 
         if data and all(d["mode"] == "BT" for d in data):
             self._plot_bt_preview(self.preview_canvas, data)
@@ -861,7 +873,7 @@ class MainWindow(QMainWindow):
                 ax.set_xlabel(r"$\lambda_1$")
             else:
                 ax.plot(stretch, stress, "o", label=label)
-                ax.set_xlabel(r"$\lambda$")
+                ax.set_xlabel(r"$\lambda_1$")
             ax.set_ylabel(get_uniaxial_component_label(d.get("stress_type", "PK1")))
         ax.legend(fontsize=8)
         self.preview_canvas.figure.tight_layout()
@@ -1147,7 +1159,7 @@ class MainWindow(QMainWindow):
         bt_only = self._plot_dataset(self.calib_canvas.ax, calib_data, optimizer.solver, plot_params, colors_calib, "Exp", "Fit")
 
         if not bt_only:
-            self.calib_canvas.ax.set_xlabel(r"$\lambda$")
+            self.calib_canvas.ax.set_xlabel(r"$\lambda_1$")
             stress_types = {d.get("stress_type", "PK1") for d in calib_data if d["mode"] != "BT"}
             if len(stress_types) == 1:
                 self.calib_canvas.ax.set_ylabel(get_uniaxial_component_label(stress_types.pop()))
@@ -1202,7 +1214,7 @@ class MainWindow(QMainWindow):
             bt_only = False
 
         if not bt_only:
-            self.prediction_canvas.ax.set_xlabel(r"$\lambda$")
+            self.prediction_canvas.ax.set_xlabel(r"$\lambda_1$")
             if pred_modes:
                 stress_types = {d.get("stress_type", "PK1") for d in pred_data if d["mode"] != "BT"}
                 if len(stress_types) == 1:
@@ -1233,7 +1245,7 @@ class MainWindow(QMainWindow):
                 else:
                     y = stress[:, 0]
                 lam2 = parse_lambda2(d.get("mode_raw", ""))
-                label = f"λ2={lam2}" if lam2 else "BT"
+                label = f"λ₂={lam2}" if lam2 else "BT"
                 marker = markers[idx % len(markers)]
                 color = colors[idx % len(colors)]
                 ax.plot(d["stretch"], y, marker, color=color, label=label, linestyle="None")
@@ -1254,7 +1266,7 @@ class MainWindow(QMainWindow):
         for idx, d in enumerate(data):
             stress = d["stress_exp"]
             lam2 = parse_lambda2(d.get("mode_raw", ""))
-            label = f"λ2={lam2}" if lam2 else "BT"
+            label = f"λ₂={lam2}" if lam2 else "BT"
             marker = markers[idx % len(markers)]
             color = colors[idx % len(colors)]
             if np.ndim(stress) == 1:
@@ -1287,7 +1299,7 @@ class MainWindow(QMainWindow):
                 else:
                     y = stress[:, 0]
                 lam2 = parse_lambda2(d.get("mode_raw", ""))
-                label = f"λ2={lam2}" if lam2 else "BT"
+                label = f"λ₂={lam2}" if lam2 else "BT"
                 marker = markers[idx % len(markers)]
                 color = colors_seq[idx % len(colors_seq)]
                 ax.plot(d["stretch"], y, marker, color=color, label=label, linestyle="None")
@@ -1317,7 +1329,7 @@ class MainWindow(QMainWindow):
         for idx, d in enumerate(data):
             stress = d["stress_exp"]
             lam2 = parse_lambda2(d.get("mode_raw", ""))
-            label = f"λ2={lam2}" if lam2 else "BT"
+            label = f"λ₂={lam2}" if lam2 else "BT"
             marker = markers[idx % len(markers)]
             color = colors_seq[idx % len(colors_seq)]
             if np.ndim(stress) == 1:
@@ -1363,15 +1375,16 @@ class MainWindow(QMainWindow):
             mode_label = format_mode_label(d.get("mode_raw", mode))
             label = mode_label
 
+            color = colors.get(mode, "black")
             if mode == "BT":
                 comp_11, comp_22 = get_bt_component_labels(stress_type)
                 if np.ndim(stress) == 1:
-                    ax.plot(stretch, stress, "o", label=f"{exp_label} {label} {comp_11}")
+                    ax.plot(stretch, stress, "o", color=color, label=f"{exp_label} {label} {comp_11}")
                 else:
-                    ax.plot(stretch, stress[:, 0], "o", label=f"{exp_label} {label} {comp_11}")
-                    ax.plot(stretch, stress[:, 1], "^", label=f"{exp_label} {label} {comp_22}")
+                    ax.plot(stretch, stress[:, 0], "o", color=color, label=f"{exp_label} {label} {comp_11}")
+                    ax.plot(stretch, stress[:, 1], "^", color=color, label=f"{exp_label} {label} {comp_22}")
             else:
-                ax.plot(stretch, stress, "o", label=f"{exp_label} {label}")
+                ax.plot(stretch, stress, "o", color=color, label=f"{exp_label} {label}")
 
             smooth = np.linspace(min(stretch), max(stretch), 120)
             model = []
@@ -1391,11 +1404,11 @@ class MainWindow(QMainWindow):
                 if len(comps) > 1:
                     model2.append(comps[1])
             if mode == "BT":
-                ax.plot(smooth, model, "-", color=colors.get(mode, "black"), label=f"{fit_label} {label} {comp_11}")
+                ax.plot(smooth, model, "-", color=color, label=f"{fit_label} {label} {comp_11}")
             else:
-                ax.plot(smooth, model, "-", color=colors.get(mode, "black"), label=f"{fit_label} {label}")
+                ax.plot(smooth, model, "-", color=color, label=f"{fit_label} {label}")
             if model2:
-                ax.plot(smooth, model2, "--", color=colors.get(mode, "black"), label=f"{fit_label} {label} {comp_22}")
+                ax.plot(smooth, model2, "--", color=color, label=f"{fit_label} {label} {comp_22}")
         return False
 
 
@@ -1404,8 +1417,26 @@ def main():
         return
     app = QApplication(sys.argv)
     app.setFont(QFont("Helvetica", 13))
+    progress = QProgressDialog("Loading libraries...", None, 0, 5)
+    progress.setWindowTitle("Starting Hyperelastic Calibration")
+    progress.setMinimumDuration(0)
+    progress.setCancelButton(None)
+    progress.setValue(0)
+    QApplication.processEvents()
+    steps = [
+        "Loading NumPy",
+        "Loading Matplotlib",
+        "Loading PySide6",
+        "Loading datasets",
+        "Finalizing",
+    ]
+    for idx, message in enumerate(steps, start=1):
+        progress.setLabelText(message)
+        progress.setValue(idx)
+        QApplication.processEvents()
     window = MainWindow()
     window.show()
+    progress.close()
     sys.exit(app.exec())
 
 
