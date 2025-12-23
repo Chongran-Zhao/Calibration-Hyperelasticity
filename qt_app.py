@@ -3,6 +3,7 @@ import sys
 import tempfile
 import re
 import warnings
+import multiprocessing
 from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Optional
@@ -55,7 +56,6 @@ warnings.filterwarnings(
 
 import matplotlib
 matplotlib.use("QtAgg")
-import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -118,6 +118,30 @@ def format_mode_label(mode_key):
 def get_stress_type_label(stress_type):
     return "Cauchy stress" if stress_type == "cauchy" else "Nominal stress"
 
+def get_bt_component_labels(stress_type):
+    if stress_type == "cauchy":
+        return r"$\sigma_{11}$", r"$\sigma_{22}$"
+    return r"$P_{11}$", r"$P_{22}$"
+
+def parse_lambda2(mode_raw):
+    if mode_raw.startswith("BT_lambda_"):
+        return mode_raw.replace("BT_lambda_", "").replace("d", ".")
+    return None
+
+def apply_theme_to_axis(ax):
+    palette = QApplication.palette()
+    text = palette.color(QPalette.WindowText)
+    grid = palette.color(QPalette.Mid)
+    ax.set_facecolor("none")
+    ax.patch.set_alpha(0.0)
+    ax.tick_params(colors=(text.redF(), text.greenF(), text.blueF(), 1.0))
+    ax.xaxis.label.set_color((text.redF(), text.greenF(), text.blueF(), 1.0))
+    ax.yaxis.label.set_color((text.redF(), text.greenF(), text.blueF(), 1.0))
+    ax.title.set_color((text.redF(), text.greenF(), text.blueF(), 1.0))
+    for spine in ax.spines.values():
+        spine.set_color((grid.redF(), grid.greenF(), grid.blueF(), 1.0))
+    ax.grid(True, linestyle="--", alpha=0.25, color=(grid.redF(), grid.greenF(), grid.blueF(), 1.0))
+
 
 def get_model_list():
     models = []
@@ -171,7 +195,7 @@ class LatexLabel(QLabel):
         self.setPixmap(QPixmap.fromImage(qimage))
         self.setMinimumHeight(int(height))
         fig.clear()
-        plt.close(fig)
+        del fig
 
 
 @dataclass
@@ -205,6 +229,7 @@ class MatplotlibCanvas(FigureCanvas):
     def __init__(self, width=5, height=3):
         fig = Figure(figsize=(width, height), dpi=120)
         self.ax = fig.add_subplot(111)
+        self.axes = [self.ax]
         super().__init__(fig)
         self.setStyleSheet("background: transparent;")
         self.setAttribute(Qt.WA_TranslucentBackground, True)
@@ -213,22 +238,15 @@ class MatplotlibCanvas(FigureCanvas):
     def _qcolor_to_mpl(self, color):
         return (color.redF(), color.greenF(), color.blueF(), 1.0)
 
+    def set_axes(self, axes):
+        self.axes = axes
+        if axes:
+            self.ax = axes[0]
+
     def apply_theme(self):
-        palette = self.palette()
-        fig_bg = palette.color(QPalette.Window)
-        axes_bg = palette.color(QPalette.Base)
-        text = palette.color(QPalette.WindowText)
-        grid = palette.color(QPalette.Mid)
         self.figure.patch.set_facecolor("none")
-        self.ax.set_facecolor("none")
-        self.ax.patch.set_alpha(0.0)
-        self.ax.tick_params(colors=self._qcolor_to_mpl(text))
-        self.ax.xaxis.label.set_color(self._qcolor_to_mpl(text))
-        self.ax.yaxis.label.set_color(self._qcolor_to_mpl(text))
-        self.ax.title.set_color(self._qcolor_to_mpl(text))
-        for spine in self.ax.spines.values():
-            spine.set_color(self._qcolor_to_mpl(grid))
-        self.ax.grid(True, linestyle="--", alpha=0.25, color=self._qcolor_to_mpl(grid))
+        for ax in self.axes:
+            apply_theme_to_axis(ax)
 
 
 class SpringWidget(QGroupBox):
@@ -760,7 +778,9 @@ class MainWindow(QMainWindow):
             return
         modes = self._selected_modes()
         if not modes:
-            self.preview_canvas.ax.clear()
+            self.preview_canvas.figure.clear()
+            ax = self.preview_canvas.figure.add_subplot(111)
+            self.preview_canvas.set_axes([ax])
             self.preview_canvas.apply_theme()
             self.preview_canvas.draw()
             self.data_next_btn.setEnabled(False)
@@ -768,24 +788,33 @@ class MainWindow(QMainWindow):
         configs = [{"author": author, "mode": m} for m in modes]
         data = load_experimental_data(configs)
 
-        self.preview_canvas.ax.clear()
+        if data and all(d["mode"] == "BT" for d in data):
+            self._plot_bt_preview(self.preview_canvas, data)
+            self.preview_canvas.draw()
+            self.data_next_btn.setEnabled(True)
+            return
+
+        self.preview_canvas.figure.clear()
+        ax = self.preview_canvas.figure.add_subplot(111)
+        self.preview_canvas.set_axes([ax])
         self.preview_canvas.apply_theme()
         for idx, d in enumerate(data):
             stretch = d["stretch"]
             stress = d["stress_exp"]
             label = format_mode_label(d.get("mode_raw", d["mode"]))
             if d["mode"] == "BT":
+                comp_11, comp_22 = get_bt_component_labels(d.get("stress_type", "PK1"))
                 if np.ndim(stress) == 1:
-                    self.preview_canvas.ax.plot(stretch, stress, "o", label=label)
+                    ax.plot(stretch, stress, "o", label=f"{label} {comp_11}")
                 else:
-                    self.preview_canvas.ax.plot(stretch, stress[:, 0], "o", label=f"{label} P11")
-                    self.preview_canvas.ax.plot(stretch, stress[:, 1], "^", label=f"{label} P22")
-                self.preview_canvas.ax.set_xlabel("lambda_1")
+                    ax.plot(stretch, stress[:, 0], "o", label=f"{label} {comp_11}")
+                    ax.plot(stretch, stress[:, 1], "^", label=f"{label} {comp_22}")
+                ax.set_xlabel("lambda_1")
             else:
-                self.preview_canvas.ax.plot(stretch, stress, "o", label=label)
-                self.preview_canvas.ax.set_xlabel("lambda")
-            self.preview_canvas.ax.set_ylabel(get_stress_type_label(d.get("stress_type", "PK1")))
-        self.preview_canvas.ax.legend(fontsize=8)
+                ax.plot(stretch, stress, "o", label=label)
+                ax.set_xlabel("lambda")
+            ax.set_ylabel(get_stress_type_label(d.get("stress_type", "PK1")))
+        ax.legend(fontsize=8)
         self.preview_canvas.draw()
         self.data_next_btn.setEnabled(True)
 
@@ -993,9 +1022,39 @@ class MainWindow(QMainWindow):
         available = self.datasets.get(author, [])
         for idx, mode in enumerate(available):
             checkbox = QCheckBox(format_mode_label(mode))
+            checkbox.setProperty("mode_key", mode)
+            checkbox.stateChanged.connect(self._on_prediction_mode_toggled)
             row = idx // 2
             col = idx % 2
             self.prediction_modes_layout.addWidget(checkbox, row, col)
+        self._apply_prediction_mode_rules()
+
+    def _on_prediction_mode_toggled(self, _state):
+        self._apply_prediction_mode_rules()
+
+    def _apply_prediction_mode_rules(self):
+        bt_selected = False
+        non_bt_selected = False
+        checkboxes = []
+        for i in range(self.prediction_modes_layout.count()):
+            widget = self.prediction_modes_layout.itemAt(i).widget()
+            if isinstance(widget, QCheckBox):
+                mode_key = widget.property("mode_key") or ""
+                is_bt = str(mode_key).startswith("BT")
+                if widget.isChecked():
+                    if is_bt:
+                        bt_selected = True
+                    else:
+                        non_bt_selected = True
+                checkboxes.append((widget, is_bt))
+
+        for checkbox, is_bt in checkboxes:
+            if bt_selected and not is_bt and not checkbox.isChecked():
+                checkbox.setEnabled(False)
+            elif non_bt_selected and is_bt and not checkbox.isChecked():
+                checkbox.setEnabled(False)
+            else:
+                checkbox.setEnabled(True)
 
     def _get_prediction_modes(self):
         modes = []
@@ -1028,16 +1087,19 @@ class MainWindow(QMainWindow):
         optimizer = self.latest_optimizer
         plot_params = dict(zip(optimizer.param_names, self.latest_result.x))
 
-        self.calib_canvas.ax.clear()
+        self.calib_canvas.figure.clear()
+        ax = self.calib_canvas.figure.add_subplot(111)
+        self.calib_canvas.set_axes([ax])
         self.calib_canvas.apply_theme()
 
         colors_calib = {"UT": "#2980b9", "ET": "#c0392b", "PS": "#27ae60", "BT": "#8e44ad"}
         calib_data = optimizer.data
-        self._plot_dataset(self.calib_canvas.ax, calib_data, optimizer.solver, plot_params, colors_calib, "Exp", "Fit")
+        bt_only = self._plot_dataset(self.calib_canvas.ax, calib_data, optimizer.solver, plot_params, colors_calib, "Exp", "Fit")
 
-        self.calib_canvas.ax.set_xlabel("lambda")
-        self.calib_canvas.ax.set_ylabel("stress")
-        self.calib_canvas.ax.legend(fontsize=7)
+        if not bt_only:
+            self.calib_canvas.ax.set_xlabel("lambda")
+            self.calib_canvas.ax.set_ylabel("stress")
+            self.calib_canvas.ax.legend(fontsize=7)
         self.calib_canvas.draw()
 
     def _reset_results(self):
@@ -1047,10 +1109,14 @@ class MainWindow(QMainWindow):
         self.loss_label.setText("Final Loss: -")
         self.opt_next_btn.setEnabled(False)
         self.calib_results_box.setVisible(False)
-        self.calib_canvas.ax.clear()
+        self.calib_canvas.figure.clear()
+        ax = self.calib_canvas.figure.add_subplot(111)
+        self.calib_canvas.set_axes([ax])
         self.calib_canvas.apply_theme()
         self.calib_canvas.draw()
-        self.prediction_canvas.ax.clear()
+        self.prediction_canvas.figure.clear()
+        ax = self.prediction_canvas.figure.add_subplot(111)
+        self.prediction_canvas.set_axes([ax])
         self.prediction_canvas.apply_theme()
         self.prediction_canvas.draw()
         self._clear_calibration_params()
@@ -1065,7 +1131,9 @@ class MainWindow(QMainWindow):
             param_values = list(self.latest_result.x)
         plot_params = dict(zip(optimizer.param_names, param_values))
 
-        self.prediction_canvas.ax.clear()
+        self.prediction_canvas.figure.clear()
+        ax = self.prediction_canvas.figure.add_subplot(111)
+        self.prediction_canvas.set_axes([ax])
         self.prediction_canvas.apply_theme()
 
         colors_pred = {"UT": "#3498db", "ET": "#e74c3c", "PS": "#2ecc71", "BT": "#a569bd"}
@@ -1074,28 +1142,167 @@ class MainWindow(QMainWindow):
             author = self.author_combo.currentText()
             pred_configs = [{"author": author, "mode": m} for m in pred_modes]
             pred_data = load_experimental_data(pred_configs)
-            self._plot_dataset(self.prediction_canvas.ax, pred_data, optimizer.solver, plot_params, colors_pred, "Pred", "PredFit")
+            bt_only = self._plot_dataset(self.prediction_canvas.ax, pred_data, optimizer.solver, plot_params, colors_pred, "Pred", "PredFit")
+        else:
+            bt_only = False
 
-        self.prediction_canvas.ax.set_xlabel("lambda")
-        self.prediction_canvas.ax.set_ylabel("stress")
-        self.prediction_canvas.ax.legend(fontsize=7)
+        if not bt_only:
+            self.prediction_canvas.ax.set_xlabel("lambda")
+            self.prediction_canvas.ax.set_ylabel("stress")
+            self.prediction_canvas.ax.legend(fontsize=7)
         self.prediction_canvas.draw()
 
+    def _plot_bt_preview(self, canvas, data):
+        author = self.author_combo.currentText()
+        is_jones = author == "Jones_1975"
+        fig = canvas.figure
+        fig.clear()
+        if is_jones:
+            ax = fig.add_subplot(111)
+            canvas.set_axes([ax])
+            canvas.apply_theme()
+            markers = ["o", "s", "v", "^", "D", "P", "X"]
+            colors = ["#000000", "#7f8c8d", "#2980b9", "#c0392b", "#27ae60", "#8e44ad", "#d35400"]
+            for idx, d in enumerate(data):
+                stress = d["stress_exp"]
+                if np.ndim(stress) == 1:
+                    y = stress
+                else:
+                    y = stress[:, 0] - stress[:, 1]
+                lam2 = parse_lambda2(d.get("mode_raw", ""))
+                label = f"λ2={lam2}" if lam2 else "BT"
+                marker = markers[idx % len(markers)]
+                color = colors[idx % len(colors)]
+                ax.plot(d["stretch"], y, marker, color=color, label=label, linestyle="None")
+            ax.set_xlabel("lambda_1")
+            ax.set_ylabel(r"Cauchy stress $\sigma_{11}-\sigma_{22}$")
+            ax.legend(fontsize=8)
+            return
+
+        stress_type = data[0].get("stress_type", "PK1")
+        comp_11, comp_22 = get_bt_component_labels(stress_type)
+        ax1 = fig.add_subplot(211)
+        ax2 = fig.add_subplot(212, sharex=ax1)
+        canvas.set_axes([ax1, ax2])
+        canvas.apply_theme()
+        markers = ["s", "v", "^", "D", "o", "P", "X"]
+        colors = ["#7f8c8d", "#2980b9", "#c0392b", "#27ae60", "#8e44ad", "#d35400", "#2c3e50"]
+        for idx, d in enumerate(data):
+            stress = d["stress_exp"]
+            lam2 = parse_lambda2(d.get("mode_raw", ""))
+            label = f"λ2={lam2}" if lam2 else "BT"
+            marker = markers[idx % len(markers)]
+            color = colors[idx % len(colors)]
+            if np.ndim(stress) == 1:
+                ax1.plot(d["stretch"], stress, marker, color=color, label=label, linestyle="None")
+            else:
+                ax1.plot(d["stretch"], stress[:, 0], marker, color=color, label=label, linestyle="None")
+                ax2.plot(d["stretch"], stress[:, 1], marker, color=color, label=label, linestyle="None")
+        ax1.set_ylabel(f"Nominal stress {comp_11}" if stress_type != "cauchy" else f"Cauchy stress {comp_11}")
+        ax2.set_ylabel(f"Nominal stress {comp_22}" if stress_type != "cauchy" else f"Cauchy stress {comp_22}")
+        ax2.set_xlabel("lambda_1")
+        ax1.legend(fontsize=8)
+        ax2.legend(fontsize=8)
+
+    def _plot_bt_dataset(self, canvas, data, solver, params, colors, exp_label, fit_label):
+        author = self.author_combo.currentText()
+        is_jones = author == "Jones_1975"
+        fig = canvas.figure
+        fig.clear()
+        if is_jones:
+            ax = fig.add_subplot(111)
+            canvas.set_axes([ax])
+            canvas.apply_theme()
+            markers = ["o", "s", "v", "^", "D", "P", "X"]
+            colors_seq = ["#000000", "#7f8c8d", "#2980b9", "#c0392b", "#27ae60", "#8e44ad", "#d35400"]
+            for idx, d in enumerate(data):
+                stress = d["stress_exp"]
+                if np.ndim(stress) == 1:
+                    y = stress
+                else:
+                    y = stress[:, 0] - stress[:, 1]
+                lam2 = parse_lambda2(d.get("mode_raw", ""))
+                label = f"λ2={lam2}" if lam2 else "BT"
+                marker = markers[idx % len(markers)]
+                color = colors_seq[idx % len(colors_seq)]
+                ax.plot(d["stretch"], y, marker, color=color, label=label, linestyle="None")
+                smooth = np.linspace(min(d["stretch"]), max(d["stretch"]), 120)
+                model = []
+                for lam in smooth:
+                    lam2_val = float(d["stretch_secondary"][0])
+                    F = get_deformation_gradient((lam, lam2_val), "BT")
+                    stress_tensor = solver.get_Cauchy_stress(F, params)
+                    comps = get_stress_components(stress_tensor, "BT")
+                    model.append(comps[0] - comps[1])
+                ax.plot(smooth, model, "-", color=color, label="_nolegend_")
+            ax.set_xlabel("lambda_1")
+            ax.set_ylabel(r"Cauchy stress $\sigma_{11}-\sigma_{22}$")
+            ax.legend(fontsize=8)
+            return
+
+        stress_type = data[0].get("stress_type", "PK1")
+        comp_11, comp_22 = get_bt_component_labels(stress_type)
+        ax1 = fig.add_subplot(211)
+        ax2 = fig.add_subplot(212, sharex=ax1)
+        canvas.set_axes([ax1, ax2])
+        canvas.apply_theme()
+        markers = ["s", "v", "^", "D", "o", "P", "X"]
+        colors_seq = ["#7f8c8d", "#2980b9", "#c0392b", "#27ae60", "#8e44ad", "#d35400", "#2c3e50"]
+        for idx, d in enumerate(data):
+            stress = d["stress_exp"]
+            lam2 = parse_lambda2(d.get("mode_raw", ""))
+            label = f"λ2={lam2}" if lam2 else "BT"
+            marker = markers[idx % len(markers)]
+            color = colors_seq[idx % len(colors_seq)]
+            if np.ndim(stress) == 1:
+                ax1.plot(d["stretch"], stress, marker, color=color, label=label, linestyle="None")
+            else:
+                ax1.plot(d["stretch"], stress[:, 0], marker, color=color, label=label, linestyle="None")
+                ax2.plot(d["stretch"], stress[:, 1], marker, color=color, label=label, linestyle="None")
+
+            smooth = np.linspace(min(d["stretch"]), max(d["stretch"]), 120)
+            model_11 = []
+            model_22 = []
+            for lam in smooth:
+                lam2_val = float(d["stretch_secondary"][0])
+                F = get_deformation_gradient((lam, lam2_val), "BT")
+                if stress_type == "cauchy":
+                    stress_tensor = solver.get_Cauchy_stress(F, params)
+                else:
+                    stress_tensor = solver.get_1st_PK_stress(F, params)
+                comps = get_stress_components(stress_tensor, "BT")
+                model_11.append(comps[0])
+                model_22.append(comps[1])
+            ax1.plot(smooth, model_11, "-", color=color, label="_nolegend_")
+            ax2.plot(smooth, model_22, "-", color=color, label="_nolegend_")
+
+        ax1.set_ylabel(f"Nominal stress {comp_11}" if stress_type != "cauchy" else f"Cauchy stress {comp_11}")
+        ax2.set_ylabel(f"Nominal stress {comp_22}" if stress_type != "cauchy" else f"Cauchy stress {comp_22}")
+        ax2.set_xlabel("lambda_1")
+        ax1.legend(fontsize=8)
+        ax2.legend(fontsize=8)
+
     def _plot_dataset(self, ax, data, solver, params, colors, exp_label, fit_label):
+        if data and all(d["mode"] == "BT" for d in data):
+            canvas = ax.figure.canvas
+            if isinstance(canvas, MatplotlibCanvas):
+                self._plot_bt_dataset(canvas, data, solver, params, colors, exp_label, fit_label)
+                return True
         for d in data:
             mode = d["mode"]
             stress_type = d.get("stress_type", "PK1")
             stretch = d["stretch"]
             stress = d["stress_exp"]
             mode_label = format_mode_label(d.get("mode_raw", mode))
-            label = f"{mode_label} ({'Cauchy' if stress_type == 'cauchy' else 'Nominal'})"
+            label = mode_label
 
             if mode == "BT":
+                comp_11, comp_22 = get_bt_component_labels(stress_type)
                 if np.ndim(stress) == 1:
-                    ax.plot(stretch, stress, "o", label=f"{exp_label} {label}")
+                    ax.plot(stretch, stress, "o", label=f"{exp_label} {label} {comp_11}")
                 else:
-                    ax.plot(stretch, stress[:, 0], "o", label=f"{exp_label} {label} P11")
-                    ax.plot(stretch, stress[:, 1], "^", label=f"{exp_label} {label} P22")
+                    ax.plot(stretch, stress[:, 0], "o", label=f"{exp_label} {label} {comp_11}")
+                    ax.plot(stretch, stress[:, 1], "^", label=f"{exp_label} {label} {comp_22}")
             else:
                 ax.plot(stretch, stress, "o", label=f"{exp_label} {label}")
 
@@ -1116,12 +1323,18 @@ class MainWindow(QMainWindow):
                 model.append(comps[0])
                 if len(comps) > 1:
                     model2.append(comps[1])
-            ax.plot(smooth, model, "-", color=colors.get(mode, "black"), label=f"{fit_label} {label}")
+            if mode == "BT":
+                ax.plot(smooth, model, "-", color=colors.get(mode, "black"), label=f"{fit_label} {label} {comp_11}")
+            else:
+                ax.plot(smooth, model, "-", color=colors.get(mode, "black"), label=f"{fit_label} {label}")
             if model2:
-                ax.plot(smooth, model2, "--", color=colors.get(mode, "black"), label=f"{fit_label} {label} P22")
+                ax.plot(smooth, model2, "--", color=colors.get(mode, "black"), label=f"{fit_label} {label} {comp_22}")
+        return False
 
 
 def main():
+    if multiprocessing.current_process().name != "MainProcess":
+        return
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
@@ -1129,4 +1342,5 @@ def main():
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     main()

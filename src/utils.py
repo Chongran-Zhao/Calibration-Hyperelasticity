@@ -176,6 +176,8 @@ def load_experimental_data_h5(configs, data_h5_path):
             stress_type = grp.attrs.get("stress_type", "PK1")
             if isinstance(stress_type, bytes):
                 stress_type = stress_type.decode("utf-8")
+            if author == "Jones_1975" and mode == "BT":
+                stress_type = "cauchy"
 
             if "stretch" in grp:
                 stretch = grp["stretch"][()]
