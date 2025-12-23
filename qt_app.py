@@ -315,6 +315,7 @@ class SpringWidget(QGroupBox):
         self.ogden_terms.valueChanged.connect(self._on_model_changed)
         self.param_edits = []
         self._param_prefix = f"{self.model_combo.currentText()}_{self.index}_"
+        self._model_name = "Select..."
 
     def _clear_params(self):
         while self.params_layout.count():
@@ -330,6 +331,8 @@ class SpringWidget(QGroupBox):
         match = re.match(r"^([A-Za-z]+)(\d+)$", name)
         if match:
             base, idx = match.groups()
+            if self._model_name == "Hill" and base.lower() in ("m", "n"):
+                return base
             if base.lower() == "mu":
                 return f"&mu;<sub>{idx}</sub>"
             if base.lower() == "alpha":
@@ -343,6 +346,7 @@ class SpringWidget(QGroupBox):
 
     def _on_model_changed(self):
         model_name = self.model_combo.currentText()
+        self._model_name = model_name
         is_hill = model_name == "Hill"
         is_ogden = model_name == "Ogden"
         self.strain_combo.setEnabled(is_hill)
@@ -400,7 +404,7 @@ class SpringWidget(QGroupBox):
             self.params_layout.addWidget(edit, row, col + 1)
             self.param_edits.append((name, edit, default))
         if self.on_change:
-            self.on_change()
+            self.on_change(changed=True)
 
     def is_valid(self):
         return self.model_combo.currentText() != "Select..."
@@ -427,6 +431,32 @@ class SpringWidget(QGroupBox):
                     user_params.append(float(default))
 
         return func, user_params
+
+    def get_state(self):
+        return {
+            "model": self.model_combo.currentText(),
+            "strain": self.strain_combo.currentText(),
+            "ogden_terms": self.ogden_terms.value(),
+            "params": [edit.text().strip() for _, edit, _ in self.param_edits],
+        }
+
+    def apply_state(self, state):
+        if not state:
+            return
+        model = state.get("model", "Select...")
+        if model in [self.model_combo.itemText(i) for i in range(self.model_combo.count())]:
+            self.model_combo.setCurrentText(model)
+        if model == "Hill":
+            strain = state.get("strain")
+            if strain in [self.strain_combo.itemText(i) for i in range(self.strain_combo.count())]:
+                self.strain_combo.setCurrentText(strain)
+        if model == "Ogden":
+            self.ogden_terms.setValue(state.get("ogden_terms", 1))
+        # Apply params after widgets are built
+        values = state.get("params", [])
+        for i, (_, edit, _) in enumerate(self.param_edits):
+            if i < len(values) and values[i]:
+                edit.setText(values[i])
 
 
 class MainWindow(QMainWindow):
@@ -671,6 +701,7 @@ class MainWindow(QMainWindow):
         self.author_combo.blockSignals(False)
 
     def _on_author_changed(self, text):
+        self._reset_results()
         for i in reversed(range(self.modes_grid.count())):
             widget = self.modes_grid.itemAt(i).widget()
             if widget:
@@ -712,6 +743,7 @@ class MainWindow(QMainWindow):
         return [mapping.get(m, m) for m in modes]
 
     def _update_preview(self):
+        self._reset_results()
         author = self.author_combo.currentText()
         if author == "Select...":
             return
@@ -747,6 +779,11 @@ class MainWindow(QMainWindow):
         self.data_next_btn.setEnabled(True)
 
     def _rebuild_springs(self, count):
+        previous_states = []
+        for i in range(self.spring_container.count()):
+            widget = self.spring_container.itemAt(i).widget()
+            if widget:
+                previous_states.append(widget.get_state())
         while self.spring_container.count():
             item = self.spring_container.takeAt(0)
             widget = item.widget()
@@ -755,6 +792,8 @@ class MainWindow(QMainWindow):
 
         for i in range(1, count + 1):
             spring_widget = SpringWidget(i, on_change=self._on_spring_config_changed)
+            if i <= len(previous_states):
+                spring_widget.apply_state(previous_states[i - 1])
             self.spring_container.addWidget(spring_widget)
         self._on_spring_config_changed()
 
@@ -855,7 +894,9 @@ class MainWindow(QMainWindow):
             if widget:
                 widget.setVisible(idx == self.current_step)
 
-    def _on_spring_config_changed(self):
+    def _on_spring_config_changed(self, changed=False):
+        if changed:
+            self._reset_results()
         springs = [self.spring_container.itemAt(i).widget() for i in range(self.spring_container.count())]
         if springs and all(spring.is_valid() for spring in springs):
             self.model_next_btn.setEnabled(True)
@@ -988,6 +1029,22 @@ class MainWindow(QMainWindow):
         self.calib_canvas.ax.legend(fontsize=7)
         self.calib_canvas.draw()
 
+    def _reset_results(self):
+        self.latest_optimizer = None
+        self.latest_result = None
+        self.latest_network = None
+        self.loss_label.setText("Final Loss: -")
+        self.opt_next_btn.setEnabled(False)
+        self.calib_results_box.setVisible(False)
+        self.calib_canvas.ax.clear()
+        self.calib_canvas.apply_theme()
+        self.calib_canvas.draw()
+        self.prediction_canvas.ax.clear()
+        self.prediction_canvas.apply_theme()
+        self.prediction_canvas.draw()
+        self._clear_calibration_params()
+        self._clear_prediction_params()
+
     def _update_prediction_plot(self):
         if not self.latest_optimizer or not self.latest_result:
             return
@@ -1019,7 +1076,8 @@ class MainWindow(QMainWindow):
             stress_type = d.get("stress_type", "PK1")
             stretch = d["stretch"]
             stress = d["stress_exp"]
-            label = f"{d['tag']} ({'Cauchy' if stress_type == 'cauchy' else 'Nominal'})"
+            mode_label = format_mode_label(d.get("mode_raw", mode))
+            label = f"{mode_label} ({'Cauchy' if stress_type == 'cauchy' else 'Nominal'})"
 
             if mode == "BT":
                 if np.ndim(stress) == 1:
