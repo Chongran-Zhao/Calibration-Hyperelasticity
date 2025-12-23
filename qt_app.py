@@ -382,7 +382,7 @@ class CustomDataEntry(QWidget):
 
         self.data_grid = QGridLayout()
         self.data_grid.setHorizontalSpacing(4)
-        self.data_grid.setVerticalSpacing(6)
+        self.data_grid.setVerticalSpacing(10)
         self.data_grid.setAlignment(Qt.AlignLeft)
         layout.addLayout(self.data_grid)
 
@@ -425,6 +425,9 @@ class CustomDataEntry(QWidget):
         for col, text in enumerate(labels):
             label = SmallLatexLabel()
             label.set_latex(text.strip("$"))
+            label.setMinimumHeight(22)
+            label.setMaximumHeight(24)
+            label.setMargin(2)
             edit = QPlainTextEdit()
             edit.setPlaceholderText(placeholders[col] if col < len(placeholders) else "")
             edit.textChanged.connect(self._emit_change)
@@ -436,6 +439,8 @@ class CustomDataEntry(QWidget):
             self.data_grid.addWidget(edit, 1, col)
             self.data_inputs.append(edit)
             self.data_grid.setColumnStretch(col, 0)
+            self.data_grid.setRowMinimumHeight(1, 90)
+        self.data_grid.setRowMinimumHeight(0, 28)
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.data_grid.addWidget(spacer, 0, len(labels), 2, 1)
@@ -1483,6 +1488,7 @@ class MainWindow(QMainWindow):
         try:
             from matplotlib.backends.backend_pdf import PdfPages
             with PdfPages(file_path) as pdf:
+                # Cover page with summary
                 fig = Figure(figsize=(8.5, 11), dpi=150)
                 ax = fig.add_subplot(111)
                 ax.axis("off")
@@ -1517,6 +1523,51 @@ class MainWindow(QMainWindow):
                     lines.append(f"  {name}: {value:.6g}")
                 ax.text(0.05, 0.98, "\n".join(lines), va="top", fontsize=10)
                 pdf.savefig(fig, bbox_inches="tight")
+
+                # Formula pages
+                for idx in range(self.spring_container.count()):
+                    spring = self.spring_container.itemAt(idx).widget()
+                    if not spring:
+                        continue
+                    state = spring.get_state()
+                    fig = Figure(figsize=(8.5, 5.5), dpi=150)
+                    ax = fig.add_subplot(111)
+                    ax.axis("off")
+                    if state.get("use_custom"):
+                        formula = state.get("custom_formula", "")
+                        title = f"Spring {idx+1} Formula (Custom)"
+                    else:
+                        model_name = resolve_model_name(state.get("model", ""))
+                        func = None
+                        if model_name == "Ogden":
+                            func = MaterialModels.create_ogden_model(state.get("ogden_terms", 1))
+                        elif model_name == "Hill":
+                            func = MaterialModels.create_hill_model(state.get("strain"))
+                        elif model_name:
+                            func = getattr(MaterialModels, model_name, None)
+                        formula = getattr(func, "formula", "") if func else ""
+                        title = f"Spring {idx+1} Formula"
+                    ax.text(0.05, 0.9, title, fontsize=12, fontweight="bold")
+                    if formula:
+                        ax.text(0.05, 0.6, f"${formula}$", fontsize=12)
+                    pdf.savefig(fig, bbox_inches="tight")
+
+                # Experimental data table
+                data = self._collect_experimental_data()
+                fig = Figure(figsize=(8.5, 11), dpi=150)
+                ax = fig.add_subplot(111)
+                ax.axis("off")
+                table_lines = ["Experimental data summary:"]
+                for d in data:
+                    mode_label = d.get("label") or format_mode_label(d.get("mode_raw", d.get("mode")))
+                    stress_type = get_stress_type_label(d.get("stress_type", "PK1"))
+                    table_lines.append(
+                        f"- {mode_label} ({stress_type}), points: {len(d.get('stretch', []))}"
+                    )
+                ax.text(0.05, 0.98, "\n".join(table_lines), va="top", fontsize=10)
+                pdf.savefig(fig, bbox_inches="tight")
+
+                # Plots
                 pdf.savefig(self.calib_canvas.figure, bbox_inches="tight")
                 if self.prediction_canvas and self.prediction_canvas.figure:
                     pdf.savefig(self.prediction_canvas.figure, bbox_inches="tight")
