@@ -124,6 +124,9 @@ def get_bt_component_labels(stress_type):
         return r"$\sigma_{11}$", r"$\sigma_{22}$"
     return r"$P_{11}$", r"$P_{22}$"
 
+def get_uniaxial_component_label(stress_type):
+    return r"$\sigma_{11}$" if stress_type == "cauchy" else r"$P_{11}$"
+
 def parse_lambda2(mode_raw):
     if mode_raw.startswith("BT_lambda_"):
         return mode_raw.replace("BT_lambda_", "").replace("d", ".")
@@ -248,6 +251,7 @@ class MatplotlibCanvas(FigureCanvas):
         self.figure.patch.set_facecolor("none")
         for ax in self.axes:
             apply_theme_to_axis(ax)
+            ax.tick_params(labelsize=10)
 
 
 class SpringWidget(QGroupBox):
@@ -597,9 +601,16 @@ class MainWindow(QMainWindow):
         self.reference_label.setOpenExternalLinks(True)
         layout.addWidget(self.reference_label)
 
-        self.preview_canvas = MatplotlibCanvas(width=7.6, height=2.7)
-        self.preview_canvas.setMinimumHeight(220)
+        self.preview_canvas = MatplotlibCanvas(width=8.4, height=4.2)
+        self.preview_canvas.setMinimumHeight(320)
         layout.addWidget(self.preview_canvas)
+
+        preview_actions = QHBoxLayout()
+        preview_actions.addStretch()
+        self.preview_save_btn = QPushButton("Save Preview Plot")
+        self.preview_save_btn.clicked.connect(lambda: self._save_figure(self.preview_canvas, "preview_plot"))
+        preview_actions.addWidget(self.preview_save_btn)
+        layout.addLayout(preview_actions)
 
         self.data_next_btn = QPushButton("Next: Model Architecture")
         self.data_next_btn.setEnabled(False)
@@ -668,9 +679,19 @@ class MainWindow(QMainWindow):
         self.calib_params_box.setLayout(params_layout)
         calib_layout.addWidget(self.calib_params_box, 1)
 
-        self.calib_canvas = MatplotlibCanvas(width=7.2, height=3.8)
-        self.calib_canvas.setMinimumHeight(280)
-        calib_layout.addWidget(self.calib_canvas, 2)
+        self.calib_canvas = MatplotlibCanvas(width=8.0, height=4.4)
+        self.calib_canvas.setMinimumHeight(340)
+        calib_plot_container = QWidget()
+        calib_plot_layout = QVBoxLayout(calib_plot_container)
+        calib_plot_layout.setContentsMargins(0, 0, 0, 0)
+        calib_plot_layout.addWidget(self.calib_canvas, 1)
+        calib_actions = QHBoxLayout()
+        calib_actions.addStretch()
+        self.calib_save_btn = QPushButton("Save Calibration Plot")
+        self.calib_save_btn.clicked.connect(lambda: self._save_figure(self.calib_canvas, "calibration_plot"))
+        calib_actions.addWidget(self.calib_save_btn)
+        calib_plot_layout.addLayout(calib_actions)
+        calib_layout.addWidget(calib_plot_container, 2)
         self.calib_results_box.setLayout(calib_layout)
         self.calib_results_box.setVisible(False)
         layout.addWidget(self.calib_results_box)
@@ -715,12 +736,38 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(left_panel, 1)
 
-        self.prediction_canvas = MatplotlibCanvas(width=7.2, height=3.8)
-        self.prediction_canvas.setMinimumHeight(280)
-        layout.addWidget(self.prediction_canvas, 2)
+        self.prediction_canvas = MatplotlibCanvas(width=8.0, height=4.4)
+        self.prediction_canvas.setMinimumHeight(340)
+        pred_plot_container = QWidget()
+        pred_plot_layout = QVBoxLayout(pred_plot_container)
+        pred_plot_layout.setContentsMargins(0, 0, 0, 0)
+        pred_plot_layout.addWidget(self.prediction_canvas, 1)
+        pred_actions = QHBoxLayout()
+        pred_actions.addStretch()
+        self.pred_save_btn = QPushButton("Save Prediction Plot")
+        self.pred_save_btn.clicked.connect(lambda: self._save_figure(self.prediction_canvas, "prediction_plot"))
+        pred_actions.addWidget(self.pred_save_btn)
+        pred_plot_layout.addLayout(pred_actions)
+        layout.addWidget(pred_plot_container, 2)
 
         self.prediction_box.setLayout(layout)
         return self.prediction_box
+
+    def _save_figure(self, canvas, default_name):
+        from PySide6.QtWidgets import QFileDialog
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save plot",
+            f"{default_name}.png",
+            "PNG (*.png);;PDF (*.pdf);;SVG (*.svg)",
+        )
+        if not file_path:
+            return
+        try:
+            canvas.figure.savefig(file_path, dpi=300, bbox_inches="tight", transparent=True)
+        except Exception as exc:
+            QMessageBox.warning(self, "Save failed", f"Could not save plot: {exc}")
 
     def _populate_authors(self):
         self.author_combo.blockSignals(True)
@@ -791,6 +838,7 @@ class MainWindow(QMainWindow):
 
         if data and all(d["mode"] == "BT" for d in data):
             self._plot_bt_preview(self.preview_canvas, data)
+            self.preview_canvas.figure.tight_layout()
             self.preview_canvas.draw()
             self.data_next_btn.setEnabled(True)
             return
@@ -810,12 +858,13 @@ class MainWindow(QMainWindow):
                 else:
                     ax.plot(stretch, stress[:, 0], "o", label=f"{label} {comp_11}")
                     ax.plot(stretch, stress[:, 1], "^", label=f"{label} {comp_22}")
-                ax.set_xlabel("lambda_1")
+                ax.set_xlabel(r"$\lambda_1$")
             else:
                 ax.plot(stretch, stress, "o", label=label)
-                ax.set_xlabel("lambda")
-            ax.set_ylabel(get_stress_type_label(d.get("stress_type", "PK1")))
+                ax.set_xlabel(r"$\lambda$")
+            ax.set_ylabel(get_uniaxial_component_label(d.get("stress_type", "PK1")))
         ax.legend(fontsize=8)
+        self.preview_canvas.figure.tight_layout()
         self.preview_canvas.draw()
         self.data_next_btn.setEnabled(True)
 
@@ -1098,9 +1147,14 @@ class MainWindow(QMainWindow):
         bt_only = self._plot_dataset(self.calib_canvas.ax, calib_data, optimizer.solver, plot_params, colors_calib, "Exp", "Fit")
 
         if not bt_only:
-            self.calib_canvas.ax.set_xlabel("lambda")
-            self.calib_canvas.ax.set_ylabel("stress")
+            self.calib_canvas.ax.set_xlabel(r"$\lambda$")
+            stress_types = {d.get("stress_type", "PK1") for d in calib_data if d["mode"] != "BT"}
+            if len(stress_types) == 1:
+                self.calib_canvas.ax.set_ylabel(get_uniaxial_component_label(stress_types.pop()))
+            else:
+                self.calib_canvas.ax.set_ylabel(r"$P_{11}$")
             self.calib_canvas.ax.legend(fontsize=7)
+            self.calib_canvas.figure.tight_layout()
         self.calib_canvas.draw()
 
     def _reset_results(self):
@@ -1148,9 +1202,17 @@ class MainWindow(QMainWindow):
             bt_only = False
 
         if not bt_only:
-            self.prediction_canvas.ax.set_xlabel("lambda")
-            self.prediction_canvas.ax.set_ylabel("stress")
+            self.prediction_canvas.ax.set_xlabel(r"$\lambda$")
+            if pred_modes:
+                stress_types = {d.get("stress_type", "PK1") for d in pred_data if d["mode"] != "BT"}
+                if len(stress_types) == 1:
+                    self.prediction_canvas.ax.set_ylabel(get_uniaxial_component_label(stress_types.pop()))
+                else:
+                    self.prediction_canvas.ax.set_ylabel(r"$P_{11}$")
+            else:
+                self.prediction_canvas.ax.set_ylabel(r"$P_{11}$")
             self.prediction_canvas.ax.legend(fontsize=7)
+            self.prediction_canvas.figure.tight_layout()
         self.prediction_canvas.draw()
 
     def _plot_bt_preview(self, canvas, data):
@@ -1175,9 +1237,10 @@ class MainWindow(QMainWindow):
                 marker = markers[idx % len(markers)]
                 color = colors[idx % len(colors)]
                 ax.plot(d["stretch"], y, marker, color=color, label=label, linestyle="None")
-            ax.set_xlabel("lambda_1")
-            ax.set_ylabel(r"Cauchy stress $\sigma_{11}-\sigma_{22}$")
+            ax.set_xlabel(r"$\lambda_1$")
+            ax.set_ylabel(r"$\sigma_{11}-\sigma_{22}$")
             ax.legend(fontsize=8)
+            fig.tight_layout()
             return
 
         stress_type = data[0].get("stress_type", "PK1")
@@ -1199,11 +1262,12 @@ class MainWindow(QMainWindow):
             else:
                 ax1.plot(d["stretch"], stress[:, 0], marker, color=color, label=label, linestyle="None")
                 ax2.plot(d["stretch"], stress[:, 1], marker, color=color, label=label, linestyle="None")
-        ax1.set_ylabel(f"Nominal stress {comp_11}" if stress_type != "cauchy" else f"Cauchy stress {comp_11}")
-        ax2.set_ylabel(f"Nominal stress {comp_22}" if stress_type != "cauchy" else f"Cauchy stress {comp_22}")
-        ax2.set_xlabel("lambda_1")
+        ax1.set_ylabel(comp_11)
+        ax2.set_ylabel(comp_22)
+        ax2.set_xlabel(r"$\lambda_1$")
         ax1.legend(fontsize=8)
         ax2.legend(fontsize=8)
+        fig.tight_layout()
 
     def _plot_bt_dataset(self, canvas, data, solver, params, colors, exp_label, fit_label):
         author = self.author_combo.currentText()
@@ -1236,9 +1300,10 @@ class MainWindow(QMainWindow):
                     comps = get_stress_components(stress_tensor, "BT")
                     model.append(comps[0] - comps[1])
                 ax.plot(smooth, model, "-", color=color, label="_nolegend_")
-            ax.set_xlabel("lambda_1")
-            ax.set_ylabel(r"Cauchy stress $\sigma_{11}-\sigma_{22}$")
+            ax.set_xlabel(r"$\lambda_1$")
+            ax.set_ylabel(r"$\sigma_{11}-\sigma_{22}$")
             ax.legend(fontsize=8)
+            fig.tight_layout()
             return
 
         stress_type = data[0].get("stress_type", "PK1")
@@ -1277,11 +1342,12 @@ class MainWindow(QMainWindow):
             ax1.plot(smooth, model_11, "-", color=color, label="_nolegend_")
             ax2.plot(smooth, model_22, "-", color=color, label="_nolegend_")
 
-        ax1.set_ylabel(f"Nominal stress {comp_11}" if stress_type != "cauchy" else f"Cauchy stress {comp_11}")
-        ax2.set_ylabel(f"Nominal stress {comp_22}" if stress_type != "cauchy" else f"Cauchy stress {comp_22}")
-        ax2.set_xlabel("lambda_1")
+        ax1.set_ylabel(comp_11)
+        ax2.set_ylabel(comp_22)
+        ax2.set_xlabel(r"$\lambda_1$")
         ax1.legend(fontsize=8)
         ax2.legend(fontsize=8)
+        fig.tight_layout()
 
     def _plot_dataset(self, ax, data, solver, params, colors, exp_label, fit_label):
         if data and all(d["mode"] == "BT" for d in data):
@@ -1337,6 +1403,7 @@ def main():
     if multiprocessing.current_process().name != "MainProcess":
         return
     app = QApplication(sys.argv)
+    app.setFont(QFont("Helvetica", 13))
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
