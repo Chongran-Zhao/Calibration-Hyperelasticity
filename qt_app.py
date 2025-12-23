@@ -242,8 +242,8 @@ class SmallLatexLabel(QLabel):
         super().__init__(parent)
         self.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self._latex_image_data = None
-        self.setMinimumHeight(22)
-        self.setMaximumHeight(26)
+        self.setMinimumHeight(16)
+        self.setMaximumHeight(18)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.setStyleSheet("background: transparent;")
         self.setAttribute(Qt.WA_TranslucentBackground, True)
@@ -253,7 +253,7 @@ class SmallLatexLabel(QLabel):
             self.clear()
             self._latex_image_data = None
             return
-        fig = Figure(figsize=(1.2, 0.35), dpi=200)
+        fig = Figure(figsize=(0.6, 0.18), dpi=220)
         fig.patch.set_alpha(0.0)
         fig.patch.set_facecolor("none")
         ax = fig.add_axes([0, 0, 1, 1])
@@ -262,7 +262,7 @@ class SmallLatexLabel(QLabel):
         ax.patch.set_alpha(0.0)
         text_color = QApplication.palette().color(QPalette.WindowText)
         color = (text_color.redF(), text_color.greenF(), text_color.blueF(), 1.0)
-        ax.text(0.0, 0.5, f"${latex}$", fontsize=11, va="center", ha="left", color=color)
+        ax.text(0.0, 0.5, f"${latex}$", fontsize=8, va="center", ha="left", color=color)
         canvas = FigureCanvasAgg(fig)
         canvas.draw()
         width, height = fig.get_size_inches() * fig.get_dpi()
@@ -277,6 +277,19 @@ class SmallLatexLabel(QLabel):
             QImage.Format_RGBA8888,
         )
         self.setPixmap(QPixmap.fromImage(qimage))
+
+
+class SmallHtmlLabel(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.setTextFormat(Qt.RichText)
+        self.setStyleSheet("background: transparent;")
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+    def set_html(self, html):
+        self.setText(html)
         self.setMinimumHeight(int(height))
         fig.clear()
         del fig
@@ -371,7 +384,7 @@ class CustomDataEntry(QWidget):
         layout.addLayout(form)
 
         self.data_grid = QGridLayout()
-        self.data_grid.setHorizontalSpacing(10)
+        self.data_grid.setHorizontalSpacing(4)
         self.data_grid.setVerticalSpacing(6)
         self.data_grid.setAlignment(Qt.AlignLeft)
         layout.addLayout(self.data_grid)
@@ -425,6 +438,10 @@ class CustomDataEntry(QWidget):
             self.data_grid.addWidget(label, 0, col)
             self.data_grid.addWidget(edit, 1, col)
             self.data_inputs.append(edit)
+            self.data_grid.setColumnStretch(col, 0)
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.data_grid.addWidget(spacer, 0, len(labels), 2, 1)
 
     def _on_mode_changed(self):
         self._build_data_fields()
@@ -511,23 +528,23 @@ class SpringWidget(QGroupBox):
         self.custom_param_edit.textChanged.connect(self._on_custom_definition_changed)
 
         self._custom_tokens = [
-            {"latex": r"I_1", "symbol": "I1"},
-            {"latex": r"I_2", "symbol": "I2"},
-            {"latex": r"\lambda_1", "symbol": "lambda_1"},
-            {"latex": r"\lambda_2", "symbol": "lambda_2"},
-            {"latex": r"\lambda_3", "symbol": "lambda_3"},
-            {"latex": r"\mu", "symbol": "mu"},
-            {"latex": r"\alpha", "symbol": "alpha"},
-            {"latex": r"C_1", "symbol": "C_1"},
-            {"latex": r"C_2", "symbol": "C_2"},
-            {"latex": r"N", "symbol": "N"},
-            {"latex": r"+", "symbol": "+"},
-            {"latex": r"-", "symbol": "-"},
-            {"latex": r"\cdot", "symbol": "*"},
-            {"latex": r"/", "symbol": "/"},
-            {"latex": r"^{}", "symbol": "^"},
-            {"latex": r"(", "symbol": "("},
-            {"latex": r")", "symbol": ")"},
+            {"html": "I<sub>1</sub>", "symbol": "I1"},
+            {"html": "I<sub>2</sub>", "symbol": "I2"},
+            {"html": "&lambda;<sub>1</sub>", "symbol": "lambda_1"},
+            {"html": "&lambda;<sub>2</sub>", "symbol": "lambda_2"},
+            {"html": "&lambda;<sub>3</sub>", "symbol": "lambda_3"},
+            {"html": "&mu;", "symbol": "mu"},
+            {"html": "&alpha;", "symbol": "alpha"},
+            {"html": "C<sub>1</sub>", "symbol": "C_1"},
+            {"html": "C<sub>2</sub>", "symbol": "C_2"},
+            {"html": "N", "symbol": "N"},
+            {"html": "+", "symbol": "+"},
+            {"html": "−", "symbol": "-"},
+            {"html": "·", "symbol": "*"},
+            {"html": "/", "symbol": "/"},
+            {"html": "^", "symbol": "^"},
+            {"html": "(", "symbol": "("},
+            {"html": ")", "symbol": ")"},
         ]
         self.custom_palette = QWidget()
         self.custom_palette_layout = QGridLayout(self.custom_palette)
@@ -809,16 +826,15 @@ class SpringWidget(QGroupBox):
             widget = item.widget()
             if widget:
                 widget.deleteLater()
-        cols = 6
+        cols = 8
         row = 0
         col = 0
         for token in self._custom_tokens:
             wrapper = QWidget()
             wrapper_layout = QHBoxLayout(wrapper)
             wrapper_layout.setContentsMargins(0, 0, 0, 0)
-            label = SmallLatexLabel()
-            label.set_latex(token["latex"].strip("$"))
-            label.setMinimumHeight(26)
+            label = SmallHtmlLabel()
+            label.set_html(token["html"])
             add_btn = QToolButton()
             add_btn.setText("+")
             add_btn.clicked.connect(lambda _, s=token["symbol"]: self._insert_custom_token(s))
@@ -831,6 +847,7 @@ class SpringWidget(QGroupBox):
                 col = 0
                 row += 1
         self.custom_palette_layout.addWidget(self.custom_add_token, row, col)
+        self.custom_palette_layout.setColumnStretch(cols, 1)
 
     def _add_custom_token_dialog(self):
         latex, ok = QInputDialog.getText(self, "Custom token", "LaTeX (e.g., \\mu_1):")
@@ -839,7 +856,7 @@ class SpringWidget(QGroupBox):
         symbol, ok = QInputDialog.getText(self, "Custom token", "Symbol name (e.g., mu_1):")
         if not ok or not symbol.strip():
             return
-        self._custom_tokens.append({"latex": latex.strip(), "symbol": symbol.strip()})
+        self._custom_tokens.append({"html": self._latex_to_html(latex.strip()), "symbol": symbol.strip()})
         params = self._parse_custom_params()
         if symbol.strip() not in params:
             params.append(symbol.strip())
@@ -849,6 +866,21 @@ class SpringWidget(QGroupBox):
     def _insert_custom_token(self, symbol):
         current = self.custom_formula_edit.text()
         self.custom_formula_edit.setText(current + symbol)
+
+    def _latex_to_html(self, latex):
+        text = latex.strip().replace("$", "")
+        text = text.replace("\\lambda", "&lambda;")
+        text = text.replace("\\mu", "&mu;")
+        text = text.replace("\\alpha", "&alpha;")
+        match = re.match(r"^([A-Za-z&;]+)_\\{?(\\d+)\\}?$", text)
+        if match:
+            base, idx = match.groups()
+            return f"{base}<sub>{idx}</sub>"
+        match = re.match(r"^([A-Za-z&;]+)_(\\d+)$", text)
+        if match:
+            base, idx = match.groups()
+            return f"{base}<sub>{idx}</sub>"
+        return text
 
     def _on_model_changed(self):
         display_name = self.model_combo.currentText()
