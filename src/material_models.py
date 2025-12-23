@@ -1,6 +1,7 @@
 import sympy as sp
 from generalized_strains import GeneralizedStrains, STRAIN_CONFIGS, STRAIN_FORMULAS
 from utils import inv_Langevin_Kroger
+from zhan_models import zhan_gaussian_pk1, zhan_nongaussian_pk1
 
 # =============================================================================
 # Decorator for Model Tagging & Configuration
@@ -87,6 +88,37 @@ class MaterialModels:
         lambda_r = sp.sqrt(I1 / (3.0 * N))
         beta = inv_Langevin_Kroger(lambda_r)
         return mu * N * (lambda_r * beta + sp.log(beta / sp.sinh(beta)))
+
+    # --- Zhan Models (Custom Stress) ---
+
+    @staticmethod
+    @register_model(
+        model_type='custom',
+        category='micromechanical',
+        formula_str=r"\Psi = \mu\left[(\lambda_1+\lambda_2+\lambda_3)^2 + 2(\lambda_1^2+\lambda_2^2+\lambda_3^2)\right]",
+        param_names=["mu"],
+        initial_guess=[0.5],
+        bounds=[(1e-6, None)]
+    )
+    def ZhanGaussian(lambda_1, lambda_2, lambda_3, params):
+        """Zhan Gaussian Model (custom PK1)"""
+        mu = params['mu']
+        return mu * ((lambda_1 + lambda_2 + lambda_3)**2 + 2.0 * (lambda_1**2 + lambda_2**2 + lambda_3**2))
+
+    @staticmethod
+    @register_model(
+        model_type='custom',
+        category='micromechanical',
+        formula_str=r"\Psi = \mu\sqrt{N}\int_{\mathbb{S}^2} \left( \lambda_i \beta + \ln\left( \beta / \sinh(\beta) \right) \right) d\Omega",
+        param_names=["mu", "N"],
+        initial_guess=[0.5, 10.0],
+        bounds=[(1e-6, None), (1.0, None)]
+    )
+    def ZhanNonGaussian(lambda_1, lambda_2, lambda_3, params):
+        """Zhan non-Gaussian Model (custom PK1)"""
+        mu = params['mu']
+        N = params['N']
+        return mu * sp.sqrt(N) * (lambda_1 + lambda_2 + lambda_3)
 
     # --- Stretch Based Models ---
 
@@ -218,6 +250,11 @@ class MaterialModels:
         Hill_Dynamic.bounds = full_bounds
         
         return Hill_Dynamic
+
+
+# Attach custom stress functions for Zhan models
+MaterialModels.ZhanGaussian.custom_pk1 = zhan_gaussian_pk1
+MaterialModels.ZhanNonGaussian.custom_pk1 = zhan_nongaussian_pk1
 
 def print_model_info(model_func):
     """Helper to print model details from tags."""

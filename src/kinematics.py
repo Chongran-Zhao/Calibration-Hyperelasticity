@@ -25,12 +25,15 @@ class Kinematics:
             self.model_type = 'invariant'
         elif tag_type == 'stretch_based':
             self.model_type = 'stretch'
+        elif tag_type == 'custom':
+            self.model_type = 'custom'
         else:
             raise ValueError(f"Unknown model_type tag: {tag_type}")
 
         # 2. Generate Parameter Symbols
-        self.param_symbols = {name: sp.Symbol(name) for name in param_names}
-        self.param_symbols_list = [self.param_symbols[name] for name in param_names]
+        if self.model_type != 'custom':
+            self.param_symbols = {name: sp.Symbol(name) for name in param_names}
+            self.param_symbols_list = [self.param_symbols[name] for name in param_names]
 
         # 3. Prepare Derivatives based on Model Type
         if self.model_type == 'invariant':
@@ -97,6 +100,9 @@ class Kinematics:
             s3 = self.calc_dPsi_dl3(l1, l2, l3, *p_vals)
             
             S_hyper = np.diag([s1/l1, s2/l2, s3/l3])
+        else:
+            P = self.energy_function.custom_pk1(F, params)
+            return np.linalg.solve(F, P)
         Sigma_hyper = F @ S_hyper @ F.T
         p = Sigma_hyper[2, 2]
         
@@ -107,9 +113,15 @@ class Kinematics:
         return S_total
 
     def get_1st_PK_stress(self, F, params):
+        if self.model_type == 'custom':
+            return self.energy_function.custom_pk1(F, params)
         S = self.get_2nd_PK_stress(F, params)
         return F @ S
 
     def get_Cauchy_stress(self, F, params):
+        if self.model_type == 'custom':
+            P = self.energy_function.custom_pk1(F, params)
+            J = np.linalg.det(F)
+            return (P @ F.T) / J
         S = self.get_2nd_PK_stress(F, params)
         return F @ S @ F.T

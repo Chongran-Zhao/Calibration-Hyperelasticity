@@ -1,6 +1,7 @@
 import sympy as sp
 import inspect
 import random
+import numpy as np
 
 class ParallelNetwork:
     """
@@ -26,7 +27,7 @@ class ParallelNetwork:
         self.bounds = []
         
         # Metadata to masquerade as a standard stretch-based model function
-        self.model_type = 'stretch_based' 
+        self.model_type = 'stretch_based'
         self.category = 'composite'
         self.formula = r"\Psi_{total} = \sum_{i=1}^{N} \Psi_{i}"
 
@@ -52,7 +53,8 @@ class ParallelNetwork:
             'prefix': name_prefix,
             'local_params': orig_params,
             'global_params': new_params,
-            'orig_type': getattr(model_func, 'model_type', 'stretch_based')
+            'orig_type': getattr(model_func, 'model_type', 'stretch_based'),
+            'solver': None,
         })
         
         # 4. Update global configuration with PERTURBATION
@@ -99,6 +101,11 @@ class ParallelNetwork:
         else:
             self.bounds.extend([(None, None)] * len(new_params))
 
+        if getattr(model_func, 'model_type', None) == 'custom':
+            self.model_type = 'custom'
+        elif self.model_type != 'custom':
+            self.model_type = 'stretch_based'
+
     def __call__(self, lambda_1, lambda_2, lambda_3, params):
         """
         Calculates the total strain energy density.
@@ -138,3 +145,23 @@ class ParallelNetwork:
             total_psi += term
             
         return total_psi
+
+    def custom_pk1(self, F, params):
+        """
+        Computes total PK1 stress for custom or mixed networks.
+        """
+        total = np.zeros((3, 3), dtype=float)
+        for comp in self.components:
+            model_func = comp['func']
+            local_params_dict = {}
+            for lp, gp in zip(comp['local_params'], comp['global_params']):
+                local_params_dict[lp] = params[gp]
+
+            if comp['orig_type'] == 'custom':
+                total += model_func.custom_pk1(F, local_params_dict)
+            else:
+                if comp['solver'] is None:
+                    from kinematics import Kinematics
+                    comp['solver'] = Kinematics(model_func, comp['local_params'])
+                total += comp['solver'].get_1st_PK_stress(F, local_params_dict)
+        return total

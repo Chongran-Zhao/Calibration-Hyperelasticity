@@ -11,7 +11,7 @@ from typing import List, Optional
 import numpy as np
 
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QFont, QPalette
+from PySide6.QtGui import QFont, QPalette, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -97,8 +97,16 @@ MODEL_REFERENCES = {
     "Yeoh": ("Yeoh 1993, Rubber Chemistry and Technology", "https://doi.org/10.5254/1.3538343"),
     "ArrudaBoyce": ("Arruda & Boyce 1993, J. Mech. Phys. Solids", "https://doi.org/10.1016/0022-5096(93)90013-6"),
     "Ogden": ("Ogden 1972, Proc. R. Soc. A", "https://doi.org/10.1098/rspa.1972.0026"),
-    "Hill": ("Seth-Hill generalized strains 2005, Int. J. Numer. Meth. Eng.", "https://doi.org/10.1002/cnm.752"),
+    "Hill": ("A continuum and computational framework for viscoelastodynamics: III. A nonlinear theory", "https://doi.org/10.1016/j.cma.2024.117248"),
+    "ZhanGaussian": ("Zhan et al. 2022, J. Mech. Phys. Solids", "https://www.sciencedirect.com/science/article/abs/pii/S0022509622003325"),
+    "ZhanNonGaussian": ("Zhan et al. 2022, J. Mech. Phys. Solids", "https://www.sciencedirect.com/science/article/abs/pii/S0022509622003325"),
 }
+
+MODEL_DISPLAY_NAMES = {
+    "ZhanGaussian": "Zhan (Gaussian)",
+    "ZhanNonGaussian": "Zhan (non-Gaussian)",
+}
+MODEL_DISPLAY_LOOKUP = {v: k for k, v in MODEL_DISPLAY_NAMES.items()}
 
 
 def get_available_datasets():
@@ -163,9 +171,12 @@ def get_model_list():
         attr = getattr(MaterialModels, attr_name)
         if hasattr(attr, "model_type") and hasattr(attr, "category"):
             if hasattr(attr, "param_names") and attr.param_names:
-                models.append(attr_name)
+                models.append(MODEL_DISPLAY_NAMES.get(attr_name, attr_name))
     models.append("Hill")
     return sorted(models)
+
+def resolve_model_name(display_name):
+    return MODEL_DISPLAY_LOOKUP.get(display_name, display_name)
 
 
 class LatexLabel(QLabel):
@@ -398,10 +409,11 @@ class SpringWidget(QGroupBox):
         return name
 
     def _on_model_changed(self):
-        model_name = self.model_combo.currentText()
-        self._model_name = model_name
-        is_hill = model_name == "Hill"
-        is_ogden = model_name == "Ogden"
+        display_name = self.model_combo.currentText()
+        model_name = resolve_model_name(display_name)
+        self._model_name = display_name
+        is_hill = display_name == "Hill"
+        is_ogden = display_name == "Ogden"
         self.strain_combo.setEnabled(is_hill)
         self.strain_combo.setVisible(is_hill)
         self.strain_label.setVisible(is_hill)
@@ -410,7 +422,7 @@ class SpringWidget(QGroupBox):
         self.ogden_label.setVisible(is_ogden)
         self._clear_params()
 
-        if model_name == "Select...":
+        if display_name == "Select...":
             self.formula_label.clear()
             self.strain_formula_label.clear()
             self.strain_formula_title.setVisible(False)
@@ -420,10 +432,10 @@ class SpringWidget(QGroupBox):
                 self.on_change()
             return
 
-        if model_name == "Hill":
+        if display_name == "Hill":
             strain_name = self.strain_combo.currentText()
             func = MaterialModels.create_hill_model(strain_name)
-        elif model_name == "Ogden":
+        elif display_name == "Ogden":
             func = MaterialModels.create_ogden_model(self.ogden_terms.value())
         else:
             func = getattr(MaterialModels, model_name)
@@ -474,11 +486,12 @@ class SpringWidget(QGroupBox):
         return self.model_combo.currentText() != "Select..."
 
     def build_config(self):
-        model_name = self.model_combo.currentText()
-        if model_name == "Hill":
+        display_name = self.model_combo.currentText()
+        model_name = resolve_model_name(display_name)
+        if display_name == "Hill":
             strain_name = self.strain_combo.currentText()
             func = MaterialModels.create_hill_model(strain_name)
-        elif model_name == "Ogden":
+        elif display_name == "Ogden":
             func = MaterialModels.create_ogden_model(self.ogden_terms.value())
         else:
             func = getattr(MaterialModels, model_name)
@@ -528,6 +541,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Hyperelastic Calibration (Desktop)")
         self.setMinimumSize(1400, 900)
+        icon_path = os.path.join(base_dir, "assets", "icons", "app.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         os.environ["CALIBRATION_DATA_DIR"] = os.path.join(base_dir, "data")
         self.step_names = ["Experimental Data", "Model Architecture", "Optimization", "Prediction"]
         self.current_step = 0
