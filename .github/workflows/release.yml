@@ -11,13 +11,15 @@ permissions:
 jobs:
   create_release:
     runs-on: ubuntu-latest
+    env:
+      TAG_NAME: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
       - name: Create draft release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" --draft --title "${GITHUB_REF_NAME}" --notes ""
+          gh release create "${TAG_NAME}" --draft --title "${TAG_NAME}" --notes ""
 
   build:
     needs: create_release
@@ -25,6 +27,8 @@ jobs:
     strategy:
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
+    env:
+      TAG_NAME: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
 
@@ -68,28 +72,30 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "${GITHUB_REF_NAME}" HyperelasticCalibration-macos.zip --clobber
+          gh release upload "${TAG_NAME}" HyperelasticCalibration-macos.zip --clobber
 
       - name: Upload release asset (Linux)
         if: matrix.os == 'ubuntu-latest'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "${GITHUB_REF_NAME}" HyperelasticCalibration-linux.tar.gz --clobber
+          gh release upload "${TAG_NAME}" HyperelasticCalibration-linux.tar.gz --clobber
 
       - name: Upload release asset (Windows)
         if: matrix.os == 'windows-latest'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "${GITHUB_REF_NAME}" HyperelasticCalibration-windows.zip --clobber
+          gh release upload "${TAG_NAME}" HyperelasticCalibration-windows.zip --clobber
 
   finalize_release:
     needs: build
     runs-on: ubuntu-latest
+    env:
+      TAG_NAME: ${{ github.ref_name }}
     steps:
       - name: Publish release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release edit "${GITHUB_REF_NAME}" --draft=false
+          gh release edit "${TAG_NAME}" --draft=false
