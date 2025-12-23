@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 import numpy as np
+import sympy as sp
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont, QPalette, QIcon
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressDialog,
     QPushButton,
+    QFileDialog,
     QScrollArea,
     QSizePolicy,
     QSpinBox,
@@ -172,6 +174,8 @@ def get_model_list():
         if hasattr(attr, "model_type") and hasattr(attr, "category"):
             if hasattr(attr, "param_names") and attr.param_names:
                 models.append(MODEL_DISPLAY_NAMES.get(attr_name, attr_name))
+    models.append("Custom (Invariant)")
+    models.append("Custom (Stretch)")
     models.append("Hill")
     return sorted(models)
 
@@ -297,6 +301,26 @@ class SpringWidget(QGroupBox):
         self.ogden_terms.setVisible(False)
         self.ogden_label.setVisible(False)
 
+        self.custom_group = QGroupBox("Custom Model")
+        custom_layout = QFormLayout()
+        self.custom_hint = QLabel("Use variables: I1, I2 or lambda_1, lambda_2, lambda_3.")
+        self.custom_hint.setStyleSheet("color: palette(mid);")
+        self.custom_formula_edit = QLineEdit()
+        self.custom_formula_edit.setPlaceholderText("e.g., C1*(I1-3) + C2*(I2-3)")
+        self.custom_param_edit = QLineEdit()
+        self.custom_param_edit.setPlaceholderText("e.g., C1, C2")
+        self.custom_guess_edit = QLineEdit()
+        self.custom_guess_edit.setPlaceholderText("e.g., 0.5, 0.1")
+        self.custom_bounds_edit = QLineEdit()
+        self.custom_bounds_edit.setPlaceholderText("e.g., 1e-6,; ,; -1,1")
+        custom_layout.addRow(self.custom_hint)
+        custom_layout.addRow("Formula", self.custom_formula_edit)
+        custom_layout.addRow("Parameters", self.custom_param_edit)
+        custom_layout.addRow("Initial guess", self.custom_guess_edit)
+        custom_layout.addRow("Bounds (min,max; ...)", self.custom_bounds_edit)
+        self.custom_group.setLayout(custom_layout)
+        self.custom_group.setVisible(False)
+
         self.formula_label = LatexLabel()
         self.strain_formula_title = QLabel("Generalized Strain")
         self.strain_formula_title.setFont(QFont("Helvetica", 10, QFont.Bold))
@@ -347,6 +371,7 @@ class SpringWidget(QGroupBox):
         params_label = QLabel("Parameters")
         params_label.setFont(QFont("Helvetica", 11, QFont.Bold))
         params_block.addWidget(params_label)
+        params_block.addWidget(self.custom_group)
         self.params_widget = QWidget()
         self.params_widget.setLayout(self.params_layout)
         self.params_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
@@ -377,9 +402,16 @@ class SpringWidget(QGroupBox):
         self.model_combo.currentTextChanged.connect(self._on_model_changed)
         self.strain_combo.currentTextChanged.connect(self._on_model_changed)
         self.ogden_terms.valueChanged.connect(self._on_model_changed)
+        self.custom_formula_edit.textChanged.connect(self._on_custom_definition_changed)
+        self.custom_param_edit.textChanged.connect(self._on_custom_definition_changed)
+        self.custom_guess_edit.textChanged.connect(self._on_custom_definition_changed)
+        self.custom_bounds_edit.textChanged.connect(self._on_custom_definition_changed)
         self.param_edits = []
         self._param_prefix = f"{self.model_combo.currentText()}_{self.index}_"
         self._model_name = "Select..."
+        self._custom_valid = False
+        self._custom_error = ""
+        self._custom_cached_func = None
 
     def _clear_params(self):
         while self.params_layout.count():
@@ -408,18 +440,109 @@ class SpringWidget(QGroupBox):
             return "&alpha;"
         return name
 
+    def _parse_custom_params(self):
+        return [p.strip() for p in self.custom_param_edit.text().split(",") if p.strip()]
+
+    def _parse_custom_guesses(self, count):
+        text = self.custom_guess_edit.text().strip()
+        if not text:
+            return [0.1] * count
+        values = []
+        for part in text.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                values.append(float(part))
+            except ValueError:
+                continue
+        if len(values) < count:
+            values.extend([0.1] * (count - len(values)))
+        return values[:count]
+
+    def _parse_custom_bounds(self, count):
+        text = self.custom_bounds_edit.text().strip()
+        if not text:
+            return [(None, None)] * count
+        bounds = []
+        for pair in text.split(";"):
+            pair = pair.strip()
+            if not pair:
+                continue
+            pieces = [p.strip() for p in pair.split(",")]
+            lo = None
+            hi = None
+            if len(pieces) >= 1 and pieces[0]:
+                try:
+                    lo = float(pieces[0])
+                except ValueError:
+                    lo = None
+            if len(pieces) >= 2 and pieces[1]:
+                try:
+                    hi = float(pieces[1])
+                except ValueError:
+                    hi = None
+            bounds.append((lo, hi))
+        if len(bounds) < count:
+            bounds.extend([(None, None)] * (count - len(bounds)))
+        return bounds[:count]
+
+    def _build_custom_model(self, custom_kind):
+        formula_text = self.custom_formula_edit.text().strip()
+        if not formula_text:
+            raise ValueError("Custom formula is empty.")
+        param_names = self._parse_custom_params()
+        if not param_names:
+            raise ValueError("Custom parameters are empty.")
+        params_symbols = {name: sp.Symbol(name) for name in param_names}
+        if custom_kind == "invariant":
+            I1, I2 = sp.symbols("I1 I2")
+            locals_map = {"I1": I1, "I2": I2, **params_symbols}
+        else:
+            l1, l2, l3 = sp.symbols("lambda_1 lambda_2 lambda_3")
+            locals_map = {"lambda_1": l1, "lambda_2": l2, "lambda_3": l3, **params_symbols}
+        psi_expr = sp.sympify(formula_text, locals=locals_map)
+        formula_latex = sp.latex(psi_expr)
+        initial_guess = self._parse_custom_guesses(len(param_names))
+        bounds = self._parse_custom_bounds(len(param_names))
+
+        if custom_kind == "invariant":
+            def CustomModel(I1, I2, params):
+                return psi_expr
+            CustomModel.model_type = "invariant_based"
+        else:
+            def CustomModel(lambda_1, lambda_2, lambda_3, params):
+                return psi_expr
+            CustomModel.model_type = "stretch_based"
+        CustomModel.category = "custom"
+        CustomModel.formula = formula_latex
+        CustomModel.param_names = param_names
+        CustomModel.initial_guess = initial_guess
+        CustomModel.bounds = bounds
+        CustomModel.__name__ = f"Custom_{custom_kind}"
+        return CustomModel
+
+    def _on_custom_definition_changed(self):
+        if self.model_combo.currentText() not in ("Custom (Invariant)", "Custom (Stretch)"):
+            return
+        self._on_model_changed()
+
     def _on_model_changed(self):
         display_name = self.model_combo.currentText()
         model_name = resolve_model_name(display_name)
         self._model_name = display_name
         is_hill = display_name == "Hill"
         is_ogden = display_name == "Ogden"
+        is_custom_invariant = display_name == "Custom (Invariant)"
+        is_custom_stretch = display_name == "Custom (Stretch)"
+        is_custom = is_custom_invariant or is_custom_stretch
         self.strain_combo.setEnabled(is_hill)
         self.strain_combo.setVisible(is_hill)
         self.strain_label.setVisible(is_hill)
         self.ogden_terms.setEnabled(is_ogden)
         self.ogden_terms.setVisible(is_ogden)
         self.ogden_label.setVisible(is_ogden)
+        self.custom_group.setVisible(is_custom)
         self._clear_params()
 
         if display_name == "Select...":
@@ -432,7 +555,29 @@ class SpringWidget(QGroupBox):
                 self.on_change()
             return
 
-        if display_name == "Hill":
+        if is_custom:
+            custom_kind = "invariant" if is_custom_invariant else "stretch"
+            self.custom_hint.setText(
+                "Use variables: I1, I2." if is_custom_invariant else "Use variables: lambda_1, lambda_2, lambda_3."
+            )
+            try:
+                func = self._build_custom_model(custom_kind)
+                self._custom_valid = True
+                self._custom_error = ""
+                self._custom_cached_func = func
+            except Exception as exc:
+                self._custom_valid = False
+                self._custom_error = str(exc)
+                self._custom_cached_func = None
+                self.formula_label.clear()
+                self.strain_formula_label.clear()
+                self.strain_formula_title.setVisible(False)
+                self.reference_title.setVisible(False)
+                self.reference_label.clear()
+                if self.on_change:
+                    self.on_change(changed=True)
+                return
+        elif display_name == "Hill":
             strain_name = self.strain_combo.currentText()
             func = MaterialModels.create_hill_model(strain_name)
         elif display_name == "Ogden":
@@ -451,14 +596,42 @@ class SpringWidget(QGroupBox):
             self.strain_formula_title.setVisible(False)
             self.strain_formula_label.clear()
 
-        reference = MODEL_REFERENCES.get(model_name)
-        if reference:
-            label, url = reference
-            self.reference_title.setVisible(True)
-            self.reference_label.setText(f"<a href='{url}'>{label}</a>")
-        else:
+        if is_custom:
             self.reference_title.setVisible(False)
             self.reference_label.clear()
+        else:
+            reference = MODEL_REFERENCES.get(model_name)
+            if reference:
+                label, url = reference
+                self.reference_title.setVisible(True)
+                self.reference_label.setText(f"<a href='{url}'>{label}</a>")
+            else:
+                self.reference_title.setVisible(False)
+                self.reference_label.clear()
+
+        if is_custom:
+            self._param_prefix = f"Custom_{self.index}_"
+            param_names = getattr(func, "param_names", [])
+            defaults = getattr(func, "initial_guess", [])
+            for idx, (name, default) in enumerate(zip(param_names, defaults)):
+                row = idx
+                col = 0
+                label = QLabel()
+                label.setTextFormat(Qt.RichText)
+                label.setText(self._format_param_label(name))
+                edit = QLineEdit()
+                text_value = f"{float(default):.4g}"
+                edit.setText(text_value)
+                edit.setPlaceholderText(text_value)
+                edit.setMinimumWidth(140)
+                edit.setMinimumHeight(26)
+                edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                self.params_layout.addWidget(label, row, col)
+                self.params_layout.addWidget(edit, row, col + 1)
+                self.param_edits.append((name, edit, default))
+            if self.on_change:
+                self.on_change(changed=True)
+            return
 
         self._param_prefix = f"{model_name}_{self.index}_"
         temp_net = ParallelNetwork()
@@ -483,12 +656,19 @@ class SpringWidget(QGroupBox):
             self.on_change(changed=True)
 
     def is_valid(self):
+        display_name = self.model_combo.currentText()
+        if display_name in ("Custom (Invariant)", "Custom (Stretch)"):
+            return self._custom_valid
         return self.model_combo.currentText() != "Select..."
 
     def build_config(self):
         display_name = self.model_combo.currentText()
         model_name = resolve_model_name(display_name)
-        if display_name == "Hill":
+        if display_name == "Custom (Invariant)":
+            func = self._custom_cached_func or self._build_custom_model("invariant")
+        elif display_name == "Custom (Stretch)":
+            func = self._custom_cached_func or self._build_custom_model("stretch")
+        elif display_name == "Hill":
             strain_name = self.strain_combo.currentText()
             func = MaterialModels.create_hill_model(strain_name)
         elif display_name == "Ogden":
@@ -515,6 +695,10 @@ class SpringWidget(QGroupBox):
             "strain": self.strain_combo.currentText(),
             "ogden_terms": self.ogden_terms.value(),
             "params": [edit.text().strip() for _, edit, _ in self.param_edits],
+            "custom_formula": self.custom_formula_edit.text(),
+            "custom_params": self.custom_param_edit.text(),
+            "custom_guess": self.custom_guess_edit.text(),
+            "custom_bounds": self.custom_bounds_edit.text(),
         }
 
     def apply_state(self, state):
@@ -529,6 +713,11 @@ class SpringWidget(QGroupBox):
                 self.strain_combo.setCurrentText(strain)
         if model == "Ogden":
             self.ogden_terms.setValue(state.get("ogden_terms", 1))
+        self.custom_formula_edit.setText(state.get("custom_formula", ""))
+        self.custom_param_edit.setText(state.get("custom_params", ""))
+        self.custom_guess_edit.setText(state.get("custom_guess", ""))
+        self.custom_bounds_edit.setText(state.get("custom_bounds", ""))
+        self._on_model_changed()
         # Apply params after widgets are built
         values = state.get("params", [])
         for i, (_, edit, _) in enumerate(self.param_edits):
@@ -642,6 +831,35 @@ class MainWindow(QMainWindow):
 
         self.modes_grid = QGridLayout()
         layout.addLayout(self.modes_grid)
+
+        self.custom_data_box = QGroupBox("Custom Data (Optional)")
+        custom_layout = QFormLayout()
+        file_row = QHBoxLayout()
+        self.custom_data_path = QLineEdit()
+        self.custom_data_path.setReadOnly(True)
+        self.custom_data_browse = QPushButton("Browse")
+        self.custom_data_browse.clicked.connect(self._browse_custom_data)
+        file_row.addWidget(self.custom_data_path, 1)
+        file_row.addWidget(self.custom_data_browse)
+        custom_layout.addRow("Data file", file_row)
+        self.custom_mode_combo = QComboBox()
+        self.custom_mode_combo.addItem("Uniaxial Tension", "UT")
+        self.custom_mode_combo.addItem("Uniaxial Compression", "UC")
+        self.custom_mode_combo.addItem("Equibiaxial Tension", "ET")
+        self.custom_mode_combo.addItem("Pure Shear", "PS")
+        self.custom_mode_combo.addItem("Biaxial Tension", "BT")
+        custom_layout.addRow("Loading mode", self.custom_mode_combo)
+        self.custom_stress_combo = QComboBox()
+        self.custom_stress_combo.addItem("Nominal (1st PK)", "PK1")
+        self.custom_stress_combo.addItem("Cauchy", "cauchy")
+        custom_layout.addRow("Stress type", self.custom_stress_combo)
+        self.custom_data_enabled = QCheckBox("Use custom data in calibration")
+        self.custom_data_enabled.stateChanged.connect(self._update_preview)
+        self.custom_mode_combo.currentIndexChanged.connect(self._update_preview)
+        self.custom_stress_combo.currentIndexChanged.connect(self._update_preview)
+        custom_layout.addRow(self.custom_data_enabled)
+        self.custom_data_box.setLayout(custom_layout)
+        layout.addWidget(self.custom_data_box)
 
         self.reference_label = QLabel()
         self.reference_label.setTextFormat(Qt.RichText)
@@ -800,9 +1018,90 @@ class MainWindow(QMainWindow):
         self.prediction_box.setLayout(layout)
         return self.prediction_box
 
-    def _save_figure(self, canvas, default_name):
-        from PySide6.QtWidgets import QFileDialog
+    def _browse_custom_data(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select custom data",
+            "",
+            "Data files (*.txt *.csv);;All files (*)",
+        )
+        if not file_path:
+            return
+        self.custom_data_path.setText(file_path)
+        self.custom_data_enabled.setChecked(True)
+        self._update_preview()
 
+    def _load_custom_data(self):
+        if not self.custom_data_enabled.isChecked():
+            return []
+        path = self.custom_data_path.text().strip()
+        if not path:
+            return []
+        try:
+            raw_data = np.loadtxt(path, delimiter=None)
+        except Exception as exc:
+            try:
+                raw_data = np.loadtxt(path, delimiter=",")
+            except Exception:
+                QMessageBox.warning(self, "Custom data error", f"Could not load file:\n{exc}")
+                return []
+        if raw_data.ndim == 1:
+            raw_data = raw_data.reshape(1, -1)
+        mode = self.custom_mode_combo.currentData()
+        stress_type = self.custom_stress_combo.currentData()
+        label = f"Custom {MODE_DISPLAY_MAP.get(mode, mode)}"
+
+        if mode == "BT":
+            if raw_data.shape[1] < 3:
+                QMessageBox.warning(self, "Custom data error", "BT data needs at least 3 columns.")
+                return []
+            stretch = raw_data[:, 0]
+            stretch_secondary = raw_data[:, 1]
+            stress_primary = raw_data[:, 2]
+            if raw_data.shape[1] >= 4:
+                stress_secondary = raw_data[:, 3]
+                stress_exp = np.column_stack([stress_primary, stress_secondary])
+            else:
+                stress_exp = stress_primary
+            return [{
+                "author": "Custom",
+                "mode": "BT",
+                "mode_raw": "BT",
+                "label": label,
+                "stretch": stretch,
+                "stretch_secondary": stretch_secondary,
+                "stress_exp": stress_exp,
+                "stress_type": stress_type,
+            }]
+
+        if raw_data.shape[1] < 2:
+            QMessageBox.warning(self, "Custom data error", "Data needs at least 2 columns.")
+            return []
+        stretch = raw_data[:, 0]
+        stress_exp = raw_data[:, 1]
+        return [{
+            "author": "Custom",
+            "mode": mode,
+            "mode_raw": mode,
+            "label": label,
+            "stretch": stretch,
+            "stress_exp": stress_exp,
+            "stress_type": stress_type,
+        }]
+
+    def _collect_experimental_data(self):
+        data = []
+        author = self.author_combo.currentText()
+        modes = self._selected_modes()
+        if author != "Select..." and modes:
+            configs = [{"author": author, "mode": m} for m in modes]
+            data.extend(load_experimental_data(configs))
+        custom_data = self._load_custom_data()
+        if custom_data:
+            data.extend(custom_data)
+        return data
+
+    def _save_figure(self, canvas, default_name):
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Save plot",
@@ -870,10 +1169,8 @@ class MainWindow(QMainWindow):
     def _update_preview(self):
         self._reset_results()
         author = self.author_combo.currentText()
-        if author == "Select...":
-            return
-        modes = self._selected_modes()
-        if not modes:
+        data = self._collect_experimental_data()
+        if not data:
             self.preview_canvas.figure.clear()
             ax = self.preview_canvas.figure.add_subplot(111)
             self.preview_canvas.set_axes([ax])
@@ -881,8 +1178,6 @@ class MainWindow(QMainWindow):
             self.preview_canvas.draw()
             self.data_next_btn.setEnabled(False)
             return
-        configs = [{"author": author, "mode": m} for m in modes]
-        data = load_experimental_data(configs)
         bt_selected = any(d["mode"] == "BT" for d in data)
         non_bt_selected = any(d["mode"] != "BT" for d in data)
         if bt_selected and non_bt_selected and not self._bt_mix_warned:
@@ -908,7 +1203,7 @@ class MainWindow(QMainWindow):
         for idx, d in enumerate(data):
             stretch = d["stretch"]
             stress = d["stress_exp"]
-            label = format_mode_label(d.get("mode_raw", d["mode"]))
+            label = d.get("label") or format_mode_label(d.get("mode_raw", d["mode"]))
             if d["mode"] == "BT":
                 comp_11, comp_22 = get_bt_component_labels(d.get("stress_type", "PK1"))
                 if np.ndim(stress) == 1:
@@ -946,24 +1241,20 @@ class MainWindow(QMainWindow):
         self._on_spring_config_changed()
 
     def _run_optimization(self):
-        author = self.author_combo.currentText()
-        if author == "Select...":
-            QMessageBox.warning(self, "Missing data", "Select a dataset.")
+        exp_data = self._collect_experimental_data()
+        if not exp_data:
+            QMessageBox.warning(self, "Missing data", "Select at least one dataset or load custom data.")
             return
-        modes = self._selected_modes()
-        if not modes:
-            QMessageBox.warning(self, "Missing data", "Select at least one mode.")
-            return
-
-        configs = [{"author": author, "mode": m} for m in modes]
-        exp_data = load_experimental_data(configs)
 
         execution_network = ParallelNetwork()
         initial_guess = []
         for idx in range(self.spring_container.count()):
             spring = self.spring_container.itemAt(idx).widget()
             if not spring.is_valid():
-                QMessageBox.warning(self, "Model error", "Select a model for each spring.")
+                if getattr(spring, "_custom_error", ""):
+                    QMessageBox.warning(self, "Model error", f"Custom model error:\n{spring._custom_error}")
+                else:
+                    QMessageBox.warning(self, "Model error", "Select a model for each spring.")
                 return
             func, params = spring.build_config()
             execution_network.add_model(func, f"{func.__name__}_{idx+1}")
@@ -1274,8 +1565,7 @@ class MainWindow(QMainWindow):
         self.prediction_canvas.draw()
 
     def _plot_bt_preview(self, canvas, data):
-        author = self.author_combo.currentText()
-        is_jones = author == "Jones_1975"
+        is_jones = all(d.get("author") == "Jones_1975" for d in data)
         fig = canvas.figure
         fig.clear()
         if is_jones:
@@ -1328,8 +1618,7 @@ class MainWindow(QMainWindow):
         fig.tight_layout()
 
     def _plot_bt_dataset(self, canvas, data, solver, params, colors, exp_label, fit_label):
-        author = self.author_combo.currentText()
-        is_jones = author == "Jones_1975"
+        is_jones = all(d.get("author") == "Jones_1975" for d in data)
         fig = canvas.figure
         fig.clear()
         if is_jones:
@@ -1418,8 +1707,7 @@ class MainWindow(QMainWindow):
             stress_type = d.get("stress_type", "PK1")
             stretch = d["stretch"]
             stress = d["stress_exp"]
-            mode_label = format_mode_label(d.get("mode_raw", mode))
-            label = mode_label
+            label = d.get("label") or format_mode_label(d.get("mode_raw", mode))
 
             color = colors.get(mode, "black")
             if mode == "BT":
