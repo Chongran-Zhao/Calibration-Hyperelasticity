@@ -74,6 +74,7 @@ from optimization import MaterialOptimizer
 
 MODE_DISPLAY_MAP = {
     "UT": "Uniaxial Tension",
+    "UC": "Uniaxial Compression",
     "ET": "Equibiaxial Tension",
     "PS": "Pure Shear",
     "BT": "Biaxial Tension",
@@ -1168,7 +1169,7 @@ class MainWindow(QMainWindow):
                 if np.ndim(stress) == 1:
                     y = stress
                 else:
-                    y = stress[:, 0] - stress[:, 1]
+                    y = stress[:, 0]
                 lam2 = parse_lambda2(d.get("mode_raw", ""))
                 label = f"λ2={lam2}" if lam2 else "BT"
                 marker = markers[idx % len(markers)]
@@ -1220,7 +1221,7 @@ class MainWindow(QMainWindow):
                 if np.ndim(stress) == 1:
                     y = stress
                 else:
-                    y = stress[:, 0] - stress[:, 1]
+                    y = stress[:, 0]
                 lam2 = parse_lambda2(d.get("mode_raw", ""))
                 label = f"λ2={lam2}" if lam2 else "BT"
                 marker = markers[idx % len(markers)]

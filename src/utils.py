@@ -11,7 +11,7 @@ def get_deformation_gradient(stretch, mode):
     """
     Constructs the deformation gradient tensor F based on stretch and mode.
     """
-    if mode == 'UT':
+    if mode in ('UT', 'UC'):
         # Uniaxial Tension: diag(lambda, lambda^-0.5, lambda^-0.5)
         F = np.diag([stretch, stretch**-0.5, stretch**-0.5])
     elif mode == 'ET':
@@ -33,7 +33,7 @@ def get_stress_components(P_tensor, mode):
     Extract stress components from the P tensor based on the experimental mode.
     Returns a list of components in the expected order.
     """
-    if mode == 'UT':
+    if mode in ('UT', 'UC'):
         # Uniaxial Tension in X: P_11
         return [P_tensor[0, 0]]
     if mode == 'ET':
