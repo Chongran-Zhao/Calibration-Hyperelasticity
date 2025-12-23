@@ -121,6 +121,36 @@ brew update
 brew install --cask hyperelastic-calibration
 ```
 
+## Session Log (2025-12-23)
+
+High-level summary of this session:
+- Added a README example using Zhan (non-Gaussian) and moved screenshots to `assets/examples/zhan-non-gaussian-james-1975`.
+- Built a multi-platform release workflow and iterated until release publishing was reliable.
+- Re-released as `v1.0` and updated the Homebrew cask to the new macOS asset SHA.
+- Added explicit bundling of `tqdm` in the PyInstaller build to fix runtime errors.
+- Ensured app startup shows a progress dialog and sets the app name/icon during initialization.
+- Documented release and Homebrew procedures in this file.
+
+Key commits pushed:
+- `Add README example for Zhan non-Gaussian`
+- `Add multi-platform release workflow and install docs`
+- `Add quick user guide`
+- `Fix app startup icon and bundle tqdm`
+- `Make release workflow reliable`
+- `Fix release job checkout`
+- `Publish release from collected artifacts`
+- `Add development release notes`
+- `Expand development notes`
+
+Release workflow notes:
+- Final workflow uploads build artifacts and publishes the release from a single job to avoid race conditions.
+- The release is triggered by pushing a tag like `v1.0`.
+
+Homebrew cask update (v1.0):
+- Tap repo: `Chongran-Zhao/homebrew-hyperelastic`
+- Cask file: `Casks/hyperelastic-calibration.rb`
+- SHA updated to match `HyperelasticCalibration-macos.zip` from the v1.0 release.
+
 ## Homebrew (macOS)
 
 The cask is maintained in:
