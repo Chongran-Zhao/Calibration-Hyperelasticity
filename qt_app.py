@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont, QPalette, QIcon
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QFormLayout,
@@ -27,12 +28,15 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
     QProgressDialog,
     QPushButton,
     QFileDialog,
+    QRadioButton,
     QScrollArea,
     QSizePolicy,
     QSpinBox,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -174,8 +178,6 @@ def get_model_list():
         if hasattr(attr, "model_type") and hasattr(attr, "category"):
             if hasattr(attr, "param_names") and attr.param_names:
                 models.append(MODEL_DISPLAY_NAMES.get(attr_name, attr_name))
-    models.append("Custom (Invariant)")
-    models.append("Custom (Stretch)")
     models.append("Hill")
     return sorted(models)
 
@@ -279,6 +281,139 @@ class MatplotlibCanvas(FigureCanvas):
             ax.tick_params(labelsize=10)
 
 
+class CustomDataEntry(QWidget):
+    def __init__(self, index, on_change=None, on_remove=None):
+        super().__init__()
+        self.index = index
+        self.on_change = on_change
+        self.on_remove = on_remove
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        header = QHBoxLayout()
+        title = QLabel(f"Dataset {index}")
+        title.setFont(QFont("Helvetica", 11, QFont.Bold))
+        remove_btn = QToolButton()
+        remove_btn.setText("−")
+        remove_btn.clicked.connect(self._remove)
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(remove_btn)
+        layout.addLayout(header)
+
+        form = QFormLayout()
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("Uniaxial Tension", "UT")
+        self.mode_combo.addItem("Uniaxial Compression", "UC")
+        self.mode_combo.addItem("Equibiaxial Tension", "ET")
+        self.mode_combo.addItem("Pure Shear", "PS")
+        self.mode_combo.addItem("Biaxial Tension", "BT")
+        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        self.stress_combo = QComboBox()
+        self.stress_combo.addItem("Nominal (1st PK)", "PK1")
+        self.stress_combo.addItem("Cauchy", "cauchy")
+        self.stress_combo.currentIndexChanged.connect(self._on_mode_changed)
+        form.addRow("Loading mode", self.mode_combo)
+        form.addRow("Stress type", self.stress_combo)
+        layout.addLayout(form)
+
+        self.data_grid = QGridLayout()
+        self.data_grid.setHorizontalSpacing(10)
+        self.data_grid.setVerticalSpacing(6)
+        layout.addLayout(self.data_grid)
+
+        self._build_data_fields()
+
+    def _remove(self):
+        if self.on_remove:
+            self.on_remove(self)
+
+    def _emit_change(self, *_args):
+        if self.on_change:
+            self.on_change()
+
+    def _build_data_fields(self):
+        while self.data_grid.count():
+            item = self.data_grid.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        self.data_inputs = []
+        mode = self.mode_combo.currentData()
+        stress_type = self.stress_combo.currentData()
+        if mode == "BT":
+            if stress_type == "cauchy":
+                labels = [r"$\lambda_1$", r"$\lambda_2$", r"$\sigma_{11}$", r"$\sigma_{22}$"]
+            else:
+                labels = [r"$\lambda_1$", r"$\lambda_2$", r"$P_{11}$", r"$P_{22}$"]
+            placeholders = [
+                "1.0\n1.1\n1.2\n1.3",
+                "1.0\n1.0\n1.0\n1.0",
+                "0.0\n0.2\n0.4\n0.6",
+                "0.0\n0.1\n0.2\n0.3",
+            ]
+        else:
+            stress_label = r"$P_{11}$" if stress_type != "cauchy" else r"$\sigma_{11}$"
+            labels = [r"$\lambda_1$", stress_label]
+            placeholders = ["1.0\n1.1\n1.2\n1.3", "0.0\n0.2\n0.4\n0.6"]
+
+        for col, text in enumerate(labels):
+            label = LatexLabel()
+            label.set_latex(text.strip("$"))
+            edit = QPlainTextEdit()
+            edit.setPlaceholderText(placeholders[col] if col < len(placeholders) else "")
+            edit.textChanged.connect(self._emit_change)
+            edit.setMinimumHeight(80)
+            edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.data_grid.addWidget(label, 0, col)
+            self.data_grid.addWidget(edit, 1, col)
+            self.data_inputs.append(edit)
+
+    def _on_mode_changed(self):
+        self._build_data_fields()
+        self._emit_change()
+
+    def _parse_column(self, text):
+        values = []
+        for part in text.replace(",", " ").split():
+            try:
+                values.append(float(part))
+            except ValueError:
+                continue
+        return values
+
+    def get_data(self):
+        mode = self.mode_combo.currentData()
+        stress_type = self.stress_combo.currentData()
+        columns = [self._parse_column(edit.toPlainText()) for edit in self.data_inputs]
+        if not columns or not columns[0]:
+            return None
+        lengths = [len(col) for col in columns]
+        if len(set(lengths)) != 1:
+            raise ValueError("Each column must have the same number of values.")
+        data = {
+            "author": "Custom",
+            "mode": mode,
+            "mode_raw": mode,
+            "label": f"Custom {MODE_DISPLAY_MAP.get(mode, mode)}",
+            "stress_type": stress_type,
+        }
+        if mode == "BT":
+            data["stretch"] = np.array(columns[0], dtype=float)
+            data["stretch_secondary"] = np.array(columns[1], dtype=float)
+            stress_primary = np.array(columns[2], dtype=float)
+            stress_secondary = np.array(columns[3], dtype=float) if len(columns) > 3 else None
+            if stress_secondary is not None:
+                data["stress_exp"] = np.column_stack([stress_primary, stress_secondary])
+            else:
+                data["stress_exp"] = stress_primary
+        else:
+            data["stretch"] = np.array(columns[0], dtype=float)
+            data["stress_exp"] = np.array(columns[1], dtype=float)
+        return data
+
+
 class SpringWidget(QGroupBox):
     def __init__(self, index, parent=None, on_change=None):
         super().__init__("")
@@ -301,25 +436,54 @@ class SpringWidget(QGroupBox):
         self.ogden_terms.setVisible(False)
         self.ogden_label.setVisible(False)
 
-        self.custom_group = QGroupBox("Custom Model")
-        custom_layout = QFormLayout()
+        self.use_custom_cb = QCheckBox("Use custom model")
+        self.use_custom_cb.stateChanged.connect(self._on_model_changed)
+        self.custom_type_combo = QComboBox()
+        self.custom_type_combo.addItem("Invariant-based", "invariant")
+        self.custom_type_combo.addItem("Stretch-based", "stretch")
+        self.custom_type_combo.currentIndexChanged.connect(self._on_custom_definition_changed)
         self.custom_hint = QLabel("Use variables: I1, I2 or lambda_1, lambda_2, lambda_3.")
         self.custom_hint.setStyleSheet("color: palette(mid);")
         self.custom_formula_edit = QLineEdit()
         self.custom_formula_edit.setPlaceholderText("e.g., C1*(I1-3) + C2*(I2-3)")
         self.custom_param_edit = QLineEdit()
-        self.custom_param_edit.setPlaceholderText("e.g., C1, C2")
-        self.custom_guess_edit = QLineEdit()
-        self.custom_guess_edit.setPlaceholderText("e.g., 0.5, 0.1")
-        self.custom_bounds_edit = QLineEdit()
-        self.custom_bounds_edit.setPlaceholderText("e.g., 1e-6,; ,; -1,1")
-        custom_layout.addRow(self.custom_hint)
-        custom_layout.addRow("Formula", self.custom_formula_edit)
-        custom_layout.addRow("Parameters", self.custom_param_edit)
-        custom_layout.addRow("Initial guess", self.custom_guess_edit)
-        custom_layout.addRow("Bounds (min,max; ...)", self.custom_bounds_edit)
-        self.custom_group.setLayout(custom_layout)
-        self.custom_group.setVisible(False)
+        self.custom_param_edit.setPlaceholderText("Parameters: C1, C2")
+        self.custom_param_auto = QPushButton("Auto-detect params")
+        self.custom_param_auto.clicked.connect(self._auto_detect_params)
+        self.custom_formula_edit.textChanged.connect(self._on_custom_definition_changed)
+        self.custom_param_edit.textChanged.connect(self._on_custom_definition_changed)
+
+        self.custom_palette = QWidget()
+        palette_layout = QHBoxLayout(self.custom_palette)
+        palette_layout.setContentsMargins(0, 0, 0, 0)
+        palette_tokens = [
+            "I1", "I2", "lambda_1", "lambda_2", "lambda_3",
+            "\\mu", "\\alpha", "C_1", "C_2", "N",
+            "+", "-", "*", "/", "^", "(", ")",
+        ]
+        for token in palette_tokens:
+            btn = QToolButton()
+            btn.setText(token)
+            btn.clicked.connect(lambda _, t=token: self._insert_custom_token(t))
+            palette_layout.addWidget(btn)
+
+        self.custom_param_table = QGridLayout()
+        self.custom_param_table.setHorizontalSpacing(8)
+        self.custom_param_table.setVerticalSpacing(6)
+        self._custom_param_widgets = []
+
+        self.custom_area = QWidget()
+        custom_area_layout = QVBoxLayout(self.custom_area)
+        custom_area_layout.setContentsMargins(0, 0, 0, 0)
+        custom_area_layout.addWidget(self.custom_type_combo)
+        custom_area_layout.addWidget(self.custom_hint)
+        custom_area_layout.addWidget(self.custom_palette)
+        custom_area_layout.addWidget(self.custom_formula_edit)
+        param_row = QHBoxLayout()
+        param_row.addWidget(self.custom_param_edit, 1)
+        param_row.addWidget(self.custom_param_auto)
+        custom_area_layout.addLayout(param_row)
+        custom_area_layout.addLayout(self.custom_param_table)
 
         self.formula_label = LatexLabel()
         self.strain_formula_title = QLabel("Generalized Strain")
@@ -371,7 +535,8 @@ class SpringWidget(QGroupBox):
         params_label = QLabel("Parameters")
         params_label.setFont(QFont("Helvetica", 11, QFont.Bold))
         params_block.addWidget(params_label)
-        params_block.addWidget(self.custom_group)
+        params_block.addWidget(self.use_custom_cb)
+        params_block.addWidget(self.custom_area)
         self.params_widget = QWidget()
         self.params_widget.setLayout(self.params_layout)
         self.params_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
@@ -402,16 +567,13 @@ class SpringWidget(QGroupBox):
         self.model_combo.currentTextChanged.connect(self._on_model_changed)
         self.strain_combo.currentTextChanged.connect(self._on_model_changed)
         self.ogden_terms.valueChanged.connect(self._on_model_changed)
-        self.custom_formula_edit.textChanged.connect(self._on_custom_definition_changed)
-        self.custom_param_edit.textChanged.connect(self._on_custom_definition_changed)
-        self.custom_guess_edit.textChanged.connect(self._on_custom_definition_changed)
-        self.custom_bounds_edit.textChanged.connect(self._on_custom_definition_changed)
         self.param_edits = []
         self._param_prefix = f"{self.model_combo.currentText()}_{self.index}_"
         self._model_name = "Select..."
         self._custom_valid = False
         self._custom_error = ""
         self._custom_cached_func = None
+        self._on_model_changed()
 
     def _clear_params(self):
         while self.params_layout.count():
@@ -434,6 +596,14 @@ class SpringWidget(QGroupBox):
             if base.lower() == "alpha":
                 return f"&alpha;<sub>{idx}</sub>"
             return f"{base}<sub>{idx}</sub>"
+        match = re.match(r"^([A-Za-z]+)_([0-9]+)$", name)
+        if match:
+            base, idx = match.groups()
+            if base.lower() == "mu":
+                return f"&mu;<sub>{idx}</sub>"
+            if base.lower() == "alpha":
+                return f"&alpha;<sub>{idx}</sub>"
+            return f"{base}<sub>{idx}</sub>"
         if name.lower() == "mu":
             return "&mu;"
         if name.lower() == "alpha":
@@ -443,52 +613,51 @@ class SpringWidget(QGroupBox):
     def _parse_custom_params(self):
         return [p.strip() for p in self.custom_param_edit.text().split(",") if p.strip()]
 
-    def _parse_custom_guesses(self, count):
-        text = self.custom_guess_edit.text().strip()
-        if not text:
-            return [0.1] * count
-        values = []
-        for part in text.split(","):
-            part = part.strip()
-            if not part:
-                continue
-            try:
-                values.append(float(part))
-            except ValueError:
-                continue
-        if len(values) < count:
-            values.extend([0.1] * (count - len(values)))
-        return values[:count]
+    def _get_custom_param_rows(self):
+        rows = []
+        for name, guess_edit, min_edit, max_edit in self._custom_param_widgets:
+            rows.append((name, guess_edit, min_edit, max_edit))
+        return rows
 
-    def _parse_custom_bounds(self, count):
-        text = self.custom_bounds_edit.text().strip()
-        if not text:
-            return [(None, None)] * count
-        bounds = []
-        for pair in text.split(";"):
-            pair = pair.strip()
-            if not pair:
-                continue
-            pieces = [p.strip() for p in pair.split(",")]
-            lo = None
-            hi = None
-            if len(pieces) >= 1 and pieces[0]:
-                try:
-                    lo = float(pieces[0])
-                except ValueError:
-                    lo = None
-            if len(pieces) >= 2 and pieces[1]:
-                try:
-                    hi = float(pieces[1])
-                except ValueError:
-                    hi = None
-            bounds.append((lo, hi))
-        if len(bounds) < count:
-            bounds.extend([(None, None)] * (count - len(bounds)))
-        return bounds[:count]
+    def _refresh_custom_param_rows(self):
+        previous = {name: (guess.text(), min_edit.text(), max_edit.text()) for name, guess, min_edit, max_edit in self._custom_param_widgets}
+        while self.custom_param_table.count():
+            item = self.custom_param_table.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        self._custom_param_widgets = []
+        headers = ["Param", "Guess", "Min", "Max"]
+        for col, text in enumerate(headers):
+            label = QLabel(text)
+            label.setFont(QFont("Helvetica", 9, QFont.Bold))
+            self.custom_param_table.addWidget(label, 0, col)
+
+        params = self._parse_custom_params()
+        for row, name in enumerate(params, start=1):
+            label = QLabel(name)
+            guess_val, min_val, max_val = previous.get(name, ("0.1", "", ""))
+            guess = QLineEdit(guess_val)
+            min_edit = QLineEdit(min_val)
+            max_edit = QLineEdit(max_val)
+            guess.setMinimumWidth(90)
+            min_edit.setMinimumWidth(70)
+            max_edit.setMinimumWidth(70)
+            self.custom_param_table.addWidget(label, row, 0)
+            self.custom_param_table.addWidget(guess, row, 1)
+            self.custom_param_table.addWidget(min_edit, row, 2)
+            self.custom_param_table.addWidget(max_edit, row, 3)
+            self._custom_param_widgets.append((name, guess, min_edit, max_edit))
 
     def _build_custom_model(self, custom_kind):
         formula_text = self.custom_formula_edit.text().strip()
+        formula_text = (
+            formula_text.replace("\\mu", "mu")
+            .replace("\\alpha", "alpha")
+            .replace("\\lambda_1", "lambda_1")
+            .replace("\\lambda_2", "lambda_2")
+            .replace("\\lambda_3", "lambda_3")
+        )
         if not formula_text:
             raise ValueError("Custom formula is empty.")
         param_names = self._parse_custom_params()
@@ -503,8 +672,28 @@ class SpringWidget(QGroupBox):
             locals_map = {"lambda_1": l1, "lambda_2": l2, "lambda_3": l3, **params_symbols}
         psi_expr = sp.sympify(formula_text, locals=locals_map)
         formula_latex = sp.latex(psi_expr)
-        initial_guess = self._parse_custom_guesses(len(param_names))
-        bounds = self._parse_custom_bounds(len(param_names))
+        guesses = []
+        bounds = []
+        rows = {name: (guess_edit, min_edit, max_edit) for name, guess_edit, min_edit, max_edit in self._get_custom_param_rows()}
+        for name in param_names:
+            guess_edit, min_edit, max_edit = rows.get(name, (None, None, None))
+            try:
+                guesses.append(float(guess_edit.text()) if guess_edit else 0.1)
+            except ValueError:
+                guesses.append(0.1)
+            lo = None
+            hi = None
+            if min_edit and min_edit.text().strip():
+                try:
+                    lo = float(min_edit.text())
+                except ValueError:
+                    lo = None
+            if max_edit and max_edit.text().strip():
+                try:
+                    hi = float(max_edit.text())
+                except ValueError:
+                    hi = None
+            bounds.append((lo, hi))
 
         if custom_kind == "invariant":
             def CustomModel(I1, I2, params):
@@ -517,35 +706,58 @@ class SpringWidget(QGroupBox):
         CustomModel.category = "custom"
         CustomModel.formula = formula_latex
         CustomModel.param_names = param_names
-        CustomModel.initial_guess = initial_guess
+        CustomModel.initial_guess = guesses
         CustomModel.bounds = bounds
         CustomModel.__name__ = f"Custom_{custom_kind}"
         return CustomModel
 
     def _on_custom_definition_changed(self):
-        if self.model_combo.currentText() not in ("Custom (Invariant)", "Custom (Stretch)"):
+        if not self.use_custom_cb.isChecked():
             return
+        self._refresh_custom_param_rows()
         self._on_model_changed()
+
+    def _auto_detect_params(self):
+        formula_text = self.custom_formula_edit.text().strip()
+        if not formula_text:
+            return
+        try:
+            expr = sp.sympify(formula_text)
+        except Exception:
+            return
+        reserved = {"I1", "I2", "lambda_1", "lambda_2", "lambda_3"}
+        params = sorted({str(sym) for sym in expr.free_symbols if str(sym) not in reserved})
+        if params:
+            self.custom_param_edit.setText(", ".join(params))
+
+    def _insert_custom_token(self, token):
+        insert_map = {
+            "\\mu": "mu",
+            "\\alpha": "alpha",
+            "C_1": "C_1",
+            "C_2": "C_2",
+        }
+        current = self.custom_formula_edit.text()
+        self.custom_formula_edit.setText(current + insert_map.get(token, token))
 
     def _on_model_changed(self):
         display_name = self.model_combo.currentText()
         model_name = resolve_model_name(display_name)
         self._model_name = display_name
+        is_custom = self.use_custom_cb.isChecked()
         is_hill = display_name == "Hill"
         is_ogden = display_name == "Ogden"
-        is_custom_invariant = display_name == "Custom (Invariant)"
-        is_custom_stretch = display_name == "Custom (Stretch)"
-        is_custom = is_custom_invariant or is_custom_stretch
-        self.strain_combo.setEnabled(is_hill)
-        self.strain_combo.setVisible(is_hill)
-        self.strain_label.setVisible(is_hill)
-        self.ogden_terms.setEnabled(is_ogden)
-        self.ogden_terms.setVisible(is_ogden)
-        self.ogden_label.setVisible(is_ogden)
-        self.custom_group.setVisible(is_custom)
+        self.strain_combo.setEnabled(is_hill and not is_custom)
+        self.strain_combo.setVisible(is_hill and not is_custom)
+        self.strain_label.setVisible(is_hill and not is_custom)
+        self.ogden_terms.setEnabled(is_ogden and not is_custom)
+        self.ogden_terms.setVisible(is_ogden and not is_custom)
+        self.ogden_label.setVisible(is_ogden and not is_custom)
+        self.custom_area.setVisible(is_custom)
+        self._refresh_custom_param_rows()
         self._clear_params()
 
-        if display_name == "Select...":
+        if display_name == "Select..." and not is_custom:
             self.formula_label.clear()
             self.strain_formula_label.clear()
             self.strain_formula_title.setVisible(False)
@@ -556,9 +768,9 @@ class SpringWidget(QGroupBox):
             return
 
         if is_custom:
-            custom_kind = "invariant" if is_custom_invariant else "stretch"
+            custom_kind = self.custom_type_combo.currentData()
             self.custom_hint.setText(
-                "Use variables: I1, I2." if is_custom_invariant else "Use variables: lambda_1, lambda_2, lambda_3."
+                "Use variables: I1, I2." if custom_kind == "invariant" else "Use variables: lambda_1, lambda_2, lambda_3."
             )
             try:
                 func = self._build_custom_model(custom_kind)
@@ -657,17 +869,15 @@ class SpringWidget(QGroupBox):
 
     def is_valid(self):
         display_name = self.model_combo.currentText()
-        if display_name in ("Custom (Invariant)", "Custom (Stretch)"):
+        if self.use_custom_cb.isChecked():
             return self._custom_valid
         return self.model_combo.currentText() != "Select..."
 
     def build_config(self):
         display_name = self.model_combo.currentText()
         model_name = resolve_model_name(display_name)
-        if display_name == "Custom (Invariant)":
-            func = self._custom_cached_func or self._build_custom_model("invariant")
-        elif display_name == "Custom (Stretch)":
-            func = self._custom_cached_func or self._build_custom_model("stretch")
+        if self.use_custom_cb.isChecked():
+            func = self._custom_cached_func or self._build_custom_model(self.custom_type_combo.currentData())
         elif display_name == "Hill":
             strain_name = self.strain_combo.currentText()
             func = MaterialModels.create_hill_model(strain_name)
@@ -695,10 +905,14 @@ class SpringWidget(QGroupBox):
             "strain": self.strain_combo.currentText(),
             "ogden_terms": self.ogden_terms.value(),
             "params": [edit.text().strip() for _, edit, _ in self.param_edits],
+            "use_custom": self.use_custom_cb.isChecked(),
+            "custom_type": self.custom_type_combo.currentData(),
             "custom_formula": self.custom_formula_edit.text(),
             "custom_params": self.custom_param_edit.text(),
-            "custom_guess": self.custom_guess_edit.text(),
-            "custom_bounds": self.custom_bounds_edit.text(),
+            "custom_param_values": [
+                (name, guess.text(), min_edit.text(), max_edit.text())
+                for name, guess, min_edit, max_edit in self._get_custom_param_rows()
+            ],
         }
 
     def apply_state(self, state):
@@ -713,11 +927,23 @@ class SpringWidget(QGroupBox):
                 self.strain_combo.setCurrentText(strain)
         if model == "Ogden":
             self.ogden_terms.setValue(state.get("ogden_terms", 1))
+        self.use_custom_cb.setChecked(state.get("use_custom", False))
+        custom_type = state.get("custom_type", "invariant")
+        idx = self.custom_type_combo.findData(custom_type)
+        if idx >= 0:
+            self.custom_type_combo.setCurrentIndex(idx)
         self.custom_formula_edit.setText(state.get("custom_formula", ""))
         self.custom_param_edit.setText(state.get("custom_params", ""))
-        self.custom_guess_edit.setText(state.get("custom_guess", ""))
-        self.custom_bounds_edit.setText(state.get("custom_bounds", ""))
         self._on_model_changed()
+        for name, guess_val, min_val, max_val in state.get("custom_param_values", []):
+            for row_name, guess_edit, min_edit, max_edit in self._get_custom_param_rows():
+                if row_name == name:
+                    if guess_val:
+                        guess_edit.setText(guess_val)
+                    if min_val:
+                        min_edit.setText(min_val)
+                    if max_val:
+                        max_edit.setText(max_val)
         # Apply params after widgets are built
         values = state.get("params", [])
         for i, (_, edit, _) in enumerate(self.param_edits):
@@ -755,6 +981,7 @@ class MainWindow(QMainWindow):
 
         self.datasets = get_available_datasets()
         self._populate_authors()
+        self._update_data_source()
 
     def _build_sidebar(self):
         sidebar = QGroupBox("Navigation")
@@ -823,43 +1050,51 @@ class MainWindow(QMainWindow):
         self.data_box = QGroupBox("1. Experimental Data")
         layout = QVBoxLayout()
 
+        source_box = QGroupBox("Data source")
+        source_layout = QHBoxLayout()
+        self.data_source_group = QButtonGroup(self)
+        self.use_builtin_radio = QRadioButton("Use built-in datasets")
+        self.use_custom_radio = QRadioButton("Use your own data")
+        self.use_builtin_radio.setChecked(True)
+        self.data_source_group.addButton(self.use_builtin_radio)
+        self.data_source_group.addButton(self.use_custom_radio)
+        self.use_builtin_radio.toggled.connect(self._update_data_source)
+        self.use_custom_radio.toggled.connect(self._update_data_source)
+        source_layout.addWidget(self.use_builtin_radio)
+        source_layout.addWidget(self.use_custom_radio)
+        source_box.setLayout(source_layout)
+        layout.addWidget(source_box)
+
+        self.builtin_widget = QWidget()
+        builtin_layout = QVBoxLayout(self.builtin_widget)
         form = QFormLayout()
         self.author_combo = QComboBox()
         self.author_combo.currentTextChanged.connect(self._on_author_changed)
         form.addRow("Author / Dataset", self.author_combo)
-        layout.addLayout(form)
+        builtin_layout.addLayout(form)
 
         self.modes_grid = QGridLayout()
-        layout.addLayout(self.modes_grid)
+        builtin_layout.addLayout(self.modes_grid)
+        layout.addWidget(self.builtin_widget)
 
-        self.custom_data_box = QGroupBox("Custom Data (Optional)")
-        custom_layout = QFormLayout()
-        file_row = QHBoxLayout()
-        self.custom_data_path = QLineEdit()
-        self.custom_data_path.setReadOnly(True)
-        self.custom_data_browse = QPushButton("Browse")
-        self.custom_data_browse.clicked.connect(self._browse_custom_data)
-        file_row.addWidget(self.custom_data_path, 1)
-        file_row.addWidget(self.custom_data_browse)
-        custom_layout.addRow("Data file", file_row)
-        self.custom_mode_combo = QComboBox()
-        self.custom_mode_combo.addItem("Uniaxial Tension", "UT")
-        self.custom_mode_combo.addItem("Uniaxial Compression", "UC")
-        self.custom_mode_combo.addItem("Equibiaxial Tension", "ET")
-        self.custom_mode_combo.addItem("Pure Shear", "PS")
-        self.custom_mode_combo.addItem("Biaxial Tension", "BT")
-        custom_layout.addRow("Loading mode", self.custom_mode_combo)
-        self.custom_stress_combo = QComboBox()
-        self.custom_stress_combo.addItem("Nominal (1st PK)", "PK1")
-        self.custom_stress_combo.addItem("Cauchy", "cauchy")
-        custom_layout.addRow("Stress type", self.custom_stress_combo)
-        self.custom_data_enabled = QCheckBox("Use custom data in calibration")
-        self.custom_data_enabled.stateChanged.connect(self._update_preview)
-        self.custom_mode_combo.currentIndexChanged.connect(self._update_preview)
-        self.custom_stress_combo.currentIndexChanged.connect(self._update_preview)
-        custom_layout.addRow(self.custom_data_enabled)
-        self.custom_data_box.setLayout(custom_layout)
-        layout.addWidget(self.custom_data_box)
+        self.custom_widget = QWidget()
+        custom_layout = QVBoxLayout(self.custom_widget)
+        custom_header = QHBoxLayout()
+        custom_title = QLabel("Custom datasets")
+        custom_title.setFont(QFont("Helvetica", 11, QFont.Bold))
+        add_btn = QToolButton()
+        add_btn.setText("+")
+        add_btn.clicked.connect(self._add_custom_entry)
+        custom_header.addWidget(custom_title)
+        custom_header.addStretch()
+        custom_header.addWidget(add_btn)
+        custom_layout.addLayout(custom_header)
+        self.custom_entries_layout = QVBoxLayout()
+        custom_layout.addLayout(self.custom_entries_layout)
+        self.custom_widget.setVisible(False)
+        layout.addWidget(self.custom_widget)
+
+        self.custom_entries = []
 
         self.reference_label = QLabel()
         self.reference_label.setTextFormat(Qt.RichText)
@@ -1018,87 +1253,54 @@ class MainWindow(QMainWindow):
         self.prediction_box.setLayout(layout)
         return self.prediction_box
 
-    def _browse_custom_data(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select custom data",
-            "",
-            "Data files (*.txt *.csv);;All files (*)",
-        )
-        if not file_path:
-            return
-        self.custom_data_path.setText(file_path)
-        self.custom_data_enabled.setChecked(True)
+    def _update_data_source(self):
+        use_builtin = self.use_builtin_radio.isChecked()
+        self.builtin_widget.setVisible(use_builtin)
+        self.custom_widget.setVisible(not use_builtin)
+        if use_builtin:
+            self.reference_label.setVisible(True)
+        else:
+            self.reference_label.setText("")
+            self.reference_label.setVisible(False)
         self._update_preview()
 
-    def _load_custom_data(self):
-        if not self.custom_data_enabled.isChecked():
-            return []
-        path = self.custom_data_path.text().strip()
-        if not path:
-            return []
-        try:
-            raw_data = np.loadtxt(path, delimiter=None)
-        except Exception as exc:
+    def _add_custom_entry(self):
+        entry = CustomDataEntry(len(self.custom_entries) + 1, on_change=self._update_preview, on_remove=self._remove_custom_entry)
+        self.custom_entries.append(entry)
+        self.custom_entries_layout.addWidget(entry)
+        self._update_preview()
+
+    def _remove_custom_entry(self, entry):
+        if entry in self.custom_entries:
+            self.custom_entries.remove(entry)
+            entry.setParent(None)
+            entry.deleteLater()
+        for idx, widget in enumerate(self.custom_entries, start=1):
+            widget.index = idx
+        self._update_preview()
+
+    def _load_custom_entries(self):
+        data = []
+        for entry in self.custom_entries:
             try:
-                raw_data = np.loadtxt(path, delimiter=",")
-            except Exception:
-                QMessageBox.warning(self, "Custom data error", f"Could not load file:\n{exc}")
+                item = entry.get_data()
+            except ValueError as exc:
+                QMessageBox.warning(self, "Custom data error", str(exc))
                 return []
-        if raw_data.ndim == 1:
-            raw_data = raw_data.reshape(1, -1)
-        mode = self.custom_mode_combo.currentData()
-        stress_type = self.custom_stress_combo.currentData()
-        label = f"Custom {MODE_DISPLAY_MAP.get(mode, mode)}"
-
-        if mode == "BT":
-            if raw_data.shape[1] < 3:
-                QMessageBox.warning(self, "Custom data error", "BT data needs at least 3 columns.")
-                return []
-            stretch = raw_data[:, 0]
-            stretch_secondary = raw_data[:, 1]
-            stress_primary = raw_data[:, 2]
-            if raw_data.shape[1] >= 4:
-                stress_secondary = raw_data[:, 3]
-                stress_exp = np.column_stack([stress_primary, stress_secondary])
-            else:
-                stress_exp = stress_primary
-            return [{
-                "author": "Custom",
-                "mode": "BT",
-                "mode_raw": "BT",
-                "label": label,
-                "stretch": stretch,
-                "stretch_secondary": stretch_secondary,
-                "stress_exp": stress_exp,
-                "stress_type": stress_type,
-            }]
-
-        if raw_data.shape[1] < 2:
-            QMessageBox.warning(self, "Custom data error", "Data needs at least 2 columns.")
-            return []
-        stretch = raw_data[:, 0]
-        stress_exp = raw_data[:, 1]
-        return [{
-            "author": "Custom",
-            "mode": mode,
-            "mode_raw": mode,
-            "label": label,
-            "stretch": stretch,
-            "stress_exp": stress_exp,
-            "stress_type": stress_type,
-        }]
+            if item:
+                data.append(item)
+        return data
 
     def _collect_experimental_data(self):
         data = []
-        author = self.author_combo.currentText()
-        modes = self._selected_modes()
-        if author != "Select..." and modes:
-            configs = [{"author": author, "mode": m} for m in modes]
-            data.extend(load_experimental_data(configs))
-        custom_data = self._load_custom_data()
-        if custom_data:
-            data.extend(custom_data)
+        if self.use_builtin_radio.isChecked():
+            author = self.author_combo.currentText()
+            modes = self._selected_modes()
+            if author != "Select..." and modes:
+                configs = [{"author": author, "mode": m} for m in modes]
+                data.extend(load_experimental_data(configs))
+        else:
+            data.extend(self._load_custom_entries())
         return data
 
     def _save_figure(self, canvas, default_name):
