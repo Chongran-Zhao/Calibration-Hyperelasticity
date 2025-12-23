@@ -235,6 +235,48 @@ class LatexLabel(QLabel):
             QImage.Format_RGBA8888,
         )
         self.setPixmap(QPixmap.fromImage(qimage))
+
+
+class SmallLatexLabel(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self._latex_image_data = None
+        self.setMinimumHeight(22)
+        self.setMaximumHeight(26)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.setStyleSheet("background: transparent;")
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+    def set_latex(self, latex):
+        if not latex:
+            self.clear()
+            self._latex_image_data = None
+            return
+        fig = Figure(figsize=(1.2, 0.35), dpi=200)
+        fig.patch.set_alpha(0.0)
+        fig.patch.set_facecolor("none")
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.axis("off")
+        ax.set_facecolor("none")
+        ax.patch.set_alpha(0.0)
+        text_color = QApplication.palette().color(QPalette.WindowText)
+        color = (text_color.redF(), text_color.greenF(), text_color.blueF(), 1.0)
+        ax.text(0.0, 0.5, f"${latex}$", fontsize=11, va="center", ha="left", color=color)
+        canvas = FigureCanvasAgg(fig)
+        canvas.draw()
+        width, height = fig.get_size_inches() * fig.get_dpi()
+        image = canvas.buffer_rgba()
+        from PySide6.QtGui import QImage, QPixmap
+        self._latex_image_data = bytes(image)
+        qimage = QImage(
+            self._latex_image_data,
+            int(width),
+            int(height),
+            int(width) * 4,
+            QImage.Format_RGBA8888,
+        )
+        self.setPixmap(QPixmap.fromImage(qimage))
         self.setMinimumHeight(int(height))
         fig.clear()
         del fig
@@ -331,6 +373,7 @@ class CustomDataEntry(QWidget):
         self.data_grid = QGridLayout()
         self.data_grid.setHorizontalSpacing(10)
         self.data_grid.setVerticalSpacing(6)
+        self.data_grid.setAlignment(Qt.AlignLeft)
         layout.addLayout(self.data_grid)
 
         self._build_data_fields()
@@ -370,7 +413,7 @@ class CustomDataEntry(QWidget):
             placeholders = ["1.0\n1.1\n1.2\n1.3", "0.0\n0.2\n0.4\n0.6"]
 
         for col, text in enumerate(labels):
-            label = LatexLabel()
+            label = SmallLatexLabel()
             label.set_latex(text.strip("$"))
             edit = QPlainTextEdit()
             edit.setPlaceholderText(placeholders[col] if col < len(placeholders) else "")
@@ -378,7 +421,7 @@ class CustomDataEntry(QWidget):
             edit.setMinimumHeight(80)
             edit.setMinimumWidth(140)
             edit.setMaximumWidth(180)
-            edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            edit.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             self.data_grid.addWidget(label, 0, col)
             self.data_grid.addWidget(edit, 1, col)
             self.data_inputs.append(edit)
@@ -489,8 +532,9 @@ class SpringWidget(QGroupBox):
         self.custom_palette = QWidget()
         self.custom_palette_layout = QGridLayout(self.custom_palette)
         self.custom_palette_layout.setContentsMargins(0, 0, 0, 0)
-        self.custom_palette_layout.setHorizontalSpacing(6)
-        self.custom_palette_layout.setVerticalSpacing(6)
+        self.custom_palette_layout.setHorizontalSpacing(4)
+        self.custom_palette_layout.setVerticalSpacing(4)
+        self.custom_palette_layout.setAlignment(Qt.AlignLeft)
         self.custom_add_token = QToolButton()
         self.custom_add_token.setText("+")
         self.custom_add_token.clicked.connect(self._add_custom_token_dialog)
@@ -772,7 +816,7 @@ class SpringWidget(QGroupBox):
             wrapper = QWidget()
             wrapper_layout = QHBoxLayout(wrapper)
             wrapper_layout.setContentsMargins(0, 0, 0, 0)
-            label = LatexLabel()
+            label = SmallLatexLabel()
             label.set_latex(token["latex"].strip("$"))
             label.setMinimumHeight(26)
             add_btn = QToolButton()
@@ -780,6 +824,7 @@ class SpringWidget(QGroupBox):
             add_btn.clicked.connect(lambda _, s=token["symbol"]: self._insert_custom_token(s))
             wrapper_layout.addWidget(label)
             wrapper_layout.addWidget(add_btn)
+            wrapper.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             self.custom_palette_layout.addWidget(wrapper, row, col)
             col += 1
             if col >= cols:
