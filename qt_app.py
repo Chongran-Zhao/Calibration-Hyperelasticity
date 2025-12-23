@@ -2216,12 +2216,18 @@ def main():
     if multiprocessing.current_process().name != "MainProcess":
         return
     app = QApplication(sys.argv)
+    app.setApplicationName("Calibration for Hyperelasticity")
+    app.setApplicationDisplayName("Calibration for Hyperelasticity")
+    app_icon_path = os.path.join(base_dir, "assets", "icons", "app.png")
+    if os.path.exists(app_icon_path):
+        app.setWindowIcon(QIcon(app_icon_path))
     app.setFont(QFont("Helvetica", 13))
     progress = QProgressDialog("Loading libraries...", None, 0, 5)
     progress.setWindowTitle("Starting Calibration for Hyperelasticity")
     progress.setMinimumDuration(0)
     progress.setCancelButton(None)
     progress.setValue(0)
+    progress.show()
     QApplication.processEvents()
     steps = [
         "Loading NumPy",
