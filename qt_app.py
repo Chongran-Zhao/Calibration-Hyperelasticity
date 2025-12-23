@@ -91,6 +91,15 @@ DATASET_REFERENCES = {
     "Katashima_2012": ("Katashima et al. 2012, Soft Matter", "https://doi.org/10.1039/c2sm25340b"),
 }
 
+MODEL_REFERENCES = {
+    "NeoHookean": ("Treloar 1943, Rubber Chemistry and Technology", "https://doi.org/10.5254/1.3540158"),
+    "MooneyRivlin": ("Mooney 1940, Journal of Applied Physics", "https://doi.org/10.1063/1.1712836"),
+    "Yeoh": ("Yeoh 1993, Rubber Chemistry and Technology", "https://doi.org/10.5254/1.3538343"),
+    "ArrudaBoyce": ("Arruda & Boyce 1993, J. Mech. Phys. Solids", "https://doi.org/10.1016/0022-5096(93)90013-6"),
+    "Ogden": ("Ogden 1972, Proc. R. Soc. A", "https://doi.org/10.1098/rspa.1972.0026"),
+    "Hill": ("Seth-Hill generalized strains 2005, Int. J. Numer. Meth. Eng.", "https://doi.org/10.1002/cnm.752"),
+}
+
 
 def get_available_datasets():
     data_dir = os.path.join(base_dir, "data")
@@ -282,6 +291,13 @@ class SpringWidget(QGroupBox):
         self.strain_formula_title.setFont(QFont("Helvetica", 10, QFont.Bold))
         self.strain_formula_title.setVisible(False)
         self.strain_formula_label = LatexLabel()
+        self.reference_title = QLabel("Reference")
+        self.reference_title.setFont(QFont("Helvetica", 10, QFont.Bold))
+        self.reference_title.setVisible(False)
+        self.reference_label = QLabel()
+        self.reference_label.setTextFormat(Qt.RichText)
+        self.reference_label.setOpenExternalLinks(True)
+        self.reference_label.setWordWrap(True)
         self.params_layout = QGridLayout()
         self.params_layout.setContentsMargins(0, 0, 0, 0)
         self.params_layout.setHorizontalSpacing(10)
@@ -332,6 +348,8 @@ class SpringWidget(QGroupBox):
         formula_block.addWidget(self.formula_label)
         formula_block.addWidget(self.strain_formula_title)
         formula_block.addWidget(self.strain_formula_label)
+        formula_block.addWidget(self.reference_title)
+        formula_block.addWidget(self.reference_label)
 
         content.addLayout(params_block, 0, 0)
         content.addLayout(formula_block, 0, 1)
@@ -396,6 +414,8 @@ class SpringWidget(QGroupBox):
             self.formula_label.clear()
             self.strain_formula_label.clear()
             self.strain_formula_title.setVisible(False)
+            self.reference_title.setVisible(False)
+            self.reference_label.clear()
             if self.on_change:
                 self.on_change()
             return
@@ -418,6 +438,15 @@ class SpringWidget(QGroupBox):
         else:
             self.strain_formula_title.setVisible(False)
             self.strain_formula_label.clear()
+
+        reference = MODEL_REFERENCES.get(model_name)
+        if reference:
+            label, url = reference
+            self.reference_title.setVisible(True)
+            self.reference_label.setText(f"<a href='{url}'>{label}</a>")
+        else:
+            self.reference_title.setVisible(False)
+            self.reference_label.clear()
 
         self._param_prefix = f"{model_name}_{self.index}_"
         temp_net = ParallelNetwork()
