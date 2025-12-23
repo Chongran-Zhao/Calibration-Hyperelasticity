@@ -2,7 +2,7 @@ import os
 import sys
 import tempfile
 import re
-import re
+import warnings
 from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Optional
@@ -41,6 +41,17 @@ except OSError:
     cache_root.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("MPLCONFIGDIR", str(cache_root / "matplotlib"))
 os.environ.setdefault("XDG_CACHE_HOME", str(cache_root))
+# Force single-threaded math to avoid multiprocessing resource_tracker warnings.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+warnings.filterwarnings(
+    "ignore",
+    message=r"resource_tracker: process died unexpectedly.*",
+    category=UserWarning,
+)
 
 import matplotlib
 matplotlib.use("QtAgg")
