@@ -34,6 +34,13 @@ python qt_app.py
 1) Download `HyperelasticCalibration-linux.tar.gz` from the latest release.
 2) Extract and run `./HyperelasticCalibration/HyperelasticCalibration`.
 
+## User Guide
+
+1) Select experimental data (built-in or your own).
+2) Configure the material model.
+3) Run calibration.
+4) Run prediction on selected datasets.
+
 ## Example: Zhan (non-Gaussian)
 
 This example reproduces Fig. 7 from Zhan (JMPS) by fitting the Zhan (non-Gaussian)
