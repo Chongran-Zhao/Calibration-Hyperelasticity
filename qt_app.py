@@ -290,9 +290,6 @@ class SmallHtmlLabel(QLabel):
 
     def set_html(self, html):
         self.setText(html)
-        self.setMinimumHeight(int(height))
-        fig.clear()
-        del fig
 
 
 @dataclass
