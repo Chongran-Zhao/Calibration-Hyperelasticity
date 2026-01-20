@@ -16,9 +16,10 @@ except Exception:
     user_cache_dir = None
 
 from PySide6.QtCore import Qt, QThread, Signal, QUrl, QSize
-from PySide6.QtGui import QFont, QPalette, QIcon, QColor, QFontDatabase, QDesktopServices
+from PySide6.QtGui import QFont, QPalette, QIcon, QColor, QFontDatabase, QDesktopServices, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
+    QAbstractSpinBox,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -133,7 +134,10 @@ MODEL_REFERENCES = {
     "Yeoh": ("Yeoh 1993, Rubber Chemistry and Technology", "https://doi.org/10.5254/1.3538343"),
     "ArrudaBoyce": ("Arruda & Boyce 1993, J. Mech. Phys. Solids", "https://doi.org/10.1016/0022-5096(93)90013-6"),
     "Ogden": ("Ogden 1972, Proc. R. Soc. A", "https://doi.org/10.1098/rspa.1972.0026"),
-    "Hill": ("A continuum and computational framework for viscoelastodynamics: III. A nonlinear theory", "https://doi.org/10.1016/j.cma.2024.117248"),
+    "Hill": (
+        "Liu, Guan, Zhao, Luo 2024, Computer Methods in Applied Mechanics and Engineering 430:117248",
+        "https://doi.org/10.1016/j.cma.2024.117248",
+    ),
     "ZhanGaussian": ("Zhan et al. 2022, J. Mech. Phys. Solids", "https://www.sciencedirect.com/science/article/abs/pii/S0022509622003325"),
     "ZhanNonGaussian": ("Zhan et al. 2022, J. Mech. Phys. Solids", "https://www.sciencedirect.com/science/article/abs/pii/S0022509622003325"),
 }
@@ -326,6 +330,9 @@ def build_app_stylesheet():
         "QFrame#stepCard[state=\"complete\"] QLabel#stepStatus { color: palette(highlight); }"
         "QFrame#stepCard[state=\"locked\"] QLabel#stepStatus { color: #475569; }"
         "QFrame#stepConnector { background: palette(mid); border-radius: 1px; }"
+        "QGroupBox#springSourceBox { margin-top: 18px; border-radius: 10px; }"
+        "QGroupBox#springSourceBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px;"
+        " color: palette(windowtext); background: palette(base); font-size: 13px; font-weight: 600; }"
     )
 
 
@@ -380,31 +387,42 @@ class LatexLabel(QLabel):
             self.clear()
             self._latex_image_data = None
             return
-        fig = Figure(figsize=(5.2, 0.7), dpi=150)
-        fig.patch.set_alpha(0.0)
-        fig.patch.set_facecolor("none")
-        ax = fig.add_axes([0, 0, 1, 1])
-        ax.axis("off")
-        ax.set_facecolor("none")
-        ax.patch.set_alpha(0.0)
-        text_color = QApplication.palette().color(QPalette.WindowText)
-        color = (text_color.redF(), text_color.greenF(), text_color.blueF(), 1.0)
-        ax.text(0.0, 0.5, f"${latex}$", fontsize=12, va="center", ha="left", color=color)
-        canvas = FigureCanvasAgg(fig)
-        canvas.draw()
-        width, height = fig.get_size_inches() * fig.get_dpi()
-        image = canvas.buffer_rgba()
+        render_scale = max(1.5, float(self.devicePixelRatioF()))
+        with matplotlib.rc_context(
+            {
+                "mathtext.fontset": "stixsans",
+                "font.family": "sans-serif",
+                "font.sans-serif": ["SF Pro Text", "Helvetica Neue", "Arial", "DejaVu Sans"],
+            }
+        ):
+            fig = Figure(figsize=(2.6, 0.55), dpi=160 * render_scale)
+            fig.patch.set_alpha(0.0)
+            fig.patch.set_facecolor("none")
+            ax = fig.add_axes([0, 0, 1, 1])
+            ax.axis("off")
+            ax.set_facecolor("none")
+            ax.patch.set_alpha(0.0)
+            text_color = QApplication.palette().color(QPalette.WindowText)
+            color = (text_color.redF(), text_color.greenF(), text_color.blueF(), 1.0)
+            ax.text(0.0, 0.5, f"${latex}$", fontsize=11, va="center", ha="left", color=color)
+            canvas = FigureCanvasAgg(fig)
+            canvas.draw()
+            width, height = fig.get_size_inches() * fig.get_dpi()
+            image = canvas.buffer_rgba()
         from PySide6.QtGui import QImage, QPixmap
         self._latex_image_data = bytes(image)
+        width = int(round(width))
+        height = int(round(height))
         qimage = QImage(
             self._latex_image_data,
-            int(width),
-            int(height),
-            int(width) * 4,
+            width,
+            height,
+            width * 4,
             QImage.Format_RGBA8888,
         )
+        qimage.setDevicePixelRatio(render_scale)
         self.setPixmap(QPixmap.fromImage(qimage))
-        self.setFixedSize(int(width), int(height))
+        self.setFixedSize(int(round(width / render_scale)), int(round(height / render_scale)))
 
     def refresh_theme(self):
         if self._latex_text:
@@ -428,30 +446,42 @@ class SmallLatexLabel(QLabel):
             self.clear()
             self._latex_image_data = None
             return
-        fig = Figure(figsize=(0.8, 0.26), dpi=180)
-        fig.patch.set_alpha(0.0)
-        fig.patch.set_facecolor("none")
-        ax = fig.add_axes([0, 0, 1, 1])
-        ax.axis("off")
-        ax.set_facecolor("none")
-        ax.patch.set_alpha(0.0)
-        text_color = QApplication.palette().color(QPalette.WindowText)
-        color = (text_color.redF(), text_color.greenF(), text_color.blueF(), 1.0)
-        ax.text(0.02, 0.5, f"${latex}$", fontsize=9, va="center", ha="left", color=color)
-        canvas = FigureCanvasAgg(fig)
-        canvas.draw()
-        width, height = fig.get_size_inches() * fig.get_dpi()
-        image = canvas.buffer_rgba()
+        render_scale = max(1.5, float(self.devicePixelRatioF()))
+        with matplotlib.rc_context(
+            {
+                "mathtext.fontset": "stixsans",
+                "font.family": "sans-serif",
+                "font.sans-serif": ["SF Pro Text", "Helvetica Neue", "Arial", "DejaVu Sans"],
+            }
+        ):
+            fig = Figure(figsize=(0.75, 0.2), dpi=180 * render_scale)
+            fig.patch.set_alpha(0.0)
+            fig.patch.set_facecolor("none")
+            ax = fig.add_axes([0, 0, 1, 1])
+            ax.axis("off")
+            ax.set_facecolor("none")
+            ax.patch.set_alpha(0.0)
+            text_color = QApplication.palette().color(QPalette.WindowText)
+            color = (text_color.redF(), text_color.greenF(), text_color.blueF(), 1.0)
+            ax.text(0.02, 0.5, f"${latex}$", fontsize=8, va="center", ha="left", color=color)
+            canvas = FigureCanvasAgg(fig)
+            canvas.draw()
+            width, height = fig.get_size_inches() * fig.get_dpi()
+            image = canvas.buffer_rgba()
         from PySide6.QtGui import QImage, QPixmap
         self._latex_image_data = bytes(image)
+        width = int(round(width))
+        height = int(round(height))
         qimage = QImage(
             self._latex_image_data,
-            int(width),
-            int(height),
-            int(width) * 4,
+            width,
+            height,
+            width * 4,
             QImage.Format_RGBA8888,
         )
+        qimage.setDevicePixelRatio(render_scale)
         self.setPixmap(QPixmap.fromImage(qimage))
+        self.setFixedSize(int(round(width / render_scale)), int(round(height / render_scale)))
 
     def refresh_theme(self):
         if self._latex_text:
@@ -769,15 +799,56 @@ class SavedDatasetRow(QWidget):
             self.on_remove(self)
 
 
+class SpringIcon(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(32)
+        self.setFixedWidth(200)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        palette = QApplication.palette()
+        line_color = palette.color(QPalette.WindowText)
+        pen = QPen(line_color, 1.6)
+        painter.setPen(pen)
+
+        rect = self.rect().adjusted(8, 8, -8, -8)
+        left = rect.left()
+        right = rect.right()
+        mid = rect.center().y()
+        if right <= left:
+            return
+
+        segments = 8
+        span = right - left
+        step = span / segments
+        amplitude = max(4, min(8, rect.height() / 2 - 2))
+
+        points = []
+        points.append((left, mid))
+        for i in range(1, segments):
+            offset = amplitude if i % 2 else -amplitude
+            points.append((left + step * i, mid + offset))
+        points.append((right, mid))
+        for i in range(len(points) - 1):
+            painter.drawLine(points[i][0], points[i][1], points[i + 1][0], points[i + 1][1])
+
 class SpringWidget(QGroupBox):
-    def __init__(self, index, parent=None, on_change=None, author_provider=None):
+    def __init__(self, index, parent=None, on_change=None, author_provider=None, on_remove=None):
         super().__init__("")
         self.index = index
         self.on_change = on_change
         self.author_provider = author_provider
+        self.on_remove = on_remove
         self.model_combo = QComboBox()
         self.model_combo.addItems(["Select..."] + get_model_list())
         self.model_label = QLabel("Model")
+        self.model_combo.setEnabled(False)
+        self.model_combo.setVisible(False)
+        self.model_label.setVisible(False)
+        self.model_combo.setFixedWidth(220)
         self.strain_label = QLabel("Strain")
         self.strain_combo = QComboBox()
         self.strain_combo.addItems(list(STRAIN_CONFIGS.keys()))
@@ -788,12 +859,39 @@ class SpringWidget(QGroupBox):
         self.ogden_terms = QSpinBox()
         self.ogden_terms.setRange(1, 6)
         self.ogden_terms.setValue(1)
-        self.ogden_terms.setEnabled(False)
-        self.ogden_terms.setVisible(False)
+        self.ogden_terms.setObjectName("ogdenTerms")
+        self.ogden_terms.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.ogden_terms.setAlignment(Qt.AlignRight)
+        self.ogden_terms.lineEdit().setAlignment(Qt.AlignRight)
+        self.ogden_terms.setFixedWidth(80)
+        self.ogden_dec_btn = QToolButton()
+        self.ogden_dec_btn.setObjectName("iconButton")
+        self.ogden_dec_btn.setText("-")
+        self.ogden_dec_btn.setFixedSize(22, 22)
+        self.ogden_dec_btn.clicked.connect(self.ogden_terms.stepDown)
+        self.ogden_inc_btn = QToolButton()
+        self.ogden_inc_btn.setObjectName("iconButton")
+        self.ogden_inc_btn.setText("+")
+        self.ogden_inc_btn.setFixedSize(22, 22)
+        self.ogden_inc_btn.clicked.connect(self.ogden_terms.stepUp)
+        self.ogden_terms_widget = QWidget()
+        ogden_layout = QHBoxLayout(self.ogden_terms_widget)
+        ogden_layout.setContentsMargins(0, 0, 0, 0)
+        ogden_layout.setSpacing(4)
+        ogden_layout.addWidget(self.ogden_terms)
+        ogden_layout.addWidget(self.ogden_dec_btn)
+        ogden_layout.addWidget(self.ogden_inc_btn)
+        self.ogden_terms_widget.setEnabled(False)
+        self.ogden_terms_widget.setVisible(False)
         self.ogden_label.setVisible(False)
 
-        self.use_custom_cb = QCheckBox("Use custom model")
-        self.use_custom_cb.stateChanged.connect(self._on_model_changed)
+        self.model_source_group = QButtonGroup(self)
+        self.builtin_radio = QRadioButton("Built-in model")
+        self.custom_radio = QRadioButton("Custom model")
+        self.model_source_group.addButton(self.builtin_radio)
+        self.model_source_group.addButton(self.custom_radio)
+        self.builtin_radio.toggled.connect(self._on_model_type_changed)
+        self.custom_radio.toggled.connect(self._on_model_type_changed)
         self.custom_type_combo = QComboBox()
         self.custom_type_combo.addItem("Invariant-based", "invariant")
         self.custom_type_combo.addItem("Stretch-based", "stretch")
@@ -830,8 +928,8 @@ class SpringWidget(QGroupBox):
         self.custom_palette = QWidget()
         self.custom_palette_layout = QGridLayout(self.custom_palette)
         self.custom_palette_layout.setContentsMargins(0, 0, 0, 0)
-        self.custom_palette_layout.setHorizontalSpacing(4)
-        self.custom_palette_layout.setVerticalSpacing(4)
+        self.custom_palette_layout.setHorizontalSpacing(2)
+        self.custom_palette_layout.setVerticalSpacing(2)
         self.custom_palette_layout.setAlignment(Qt.AlignLeft)
         self.custom_add_token = QToolButton()
         self.custom_add_token.setText("+")
@@ -840,12 +938,13 @@ class SpringWidget(QGroupBox):
 
         self.custom_param_table = QGridLayout()
         self.custom_param_table.setHorizontalSpacing(8)
-        self.custom_param_table.setVerticalSpacing(6)
+        self.custom_param_table.setVerticalSpacing(4)
         self._custom_param_widgets = []
 
         self.custom_area = QWidget()
         custom_area_layout = QVBoxLayout(self.custom_area)
         custom_area_layout.setContentsMargins(0, 0, 0, 0)
+        custom_area_layout.setSpacing(4)
         custom_area_layout.addWidget(self.custom_type_combo)
         custom_area_layout.addWidget(self.custom_hint)
         custom_area_layout.addWidget(self.custom_palette)
@@ -858,11 +957,11 @@ class SpringWidget(QGroupBox):
 
         self.formula_label = LatexLabel()
         self.strain_formula_title = QLabel("Generalized Strain")
-        self.strain_formula_title.setFont(make_font(12, QFont.DemiBold))
+        self.strain_formula_title.setFont(make_font(10, QFont.DemiBold))
         self.strain_formula_title.setVisible(False)
         self.strain_formula_label = LatexLabel()
         self.reference_title = QLabel("Reference")
-        self.reference_title.setFont(make_font(12, QFont.DemiBold))
+        self.reference_title.setFont(make_font(10, QFont.DemiBold))
         self.reference_title.setVisible(False)
         self.reference_label = QLabel()
         self.reference_label.setTextFormat(Qt.RichText)
@@ -870,66 +969,111 @@ class SpringWidget(QGroupBox):
         self.reference_label.setWordWrap(True)
         self.params_layout = QGridLayout()
         self.params_layout.setContentsMargins(0, 0, 0, 0)
-        self.params_layout.setHorizontalSpacing(10)
-        self.params_layout.setVerticalSpacing(6)
+        self.params_layout.setHorizontalSpacing(8)
+        self.params_layout.setVerticalSpacing(2)
         self.params_layout.setColumnStretch(1, 1)
         self.params_layout.setColumnStretch(3, 1)
         self.params_layout.setColumnStretch(5, 1)
 
         layout = QVBoxLayout()
-        layout.setSpacing(8)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(5)
+        layout.setContentsMargins(8, 8, 8, 8)
 
+        header_row = QHBoxLayout()
         header = QLabel(f"Spring {index}")
-        header.setFont(make_font(16, QFont.DemiBold))
-        layout.addWidget(header)
+        header.setFont(make_font(13, QFont.DemiBold))
+        header_row.addWidget(header)
+        header_row.addStretch()
+        self.remove_btn = QToolButton()
+        self.remove_btn.setObjectName("iconButton")
+        self.remove_btn.setText("×")
+        self.remove_btn.setToolTip("Delete spring")
+        self.remove_btn.setFixedSize(24, 24)
+        self.remove_btn.clicked.connect(self._on_remove_clicked)
+        header_row.addWidget(self.remove_btn)
+        layout.addLayout(header_row)
+
+        self.model_source_box = QGroupBox("Model source")
+        self.model_source_box.setObjectName("springSourceBox")
+        source_layout = QHBoxLayout(self.model_source_box)
+        source_layout.setContentsMargins(8, 16, 8, 6)
+        source_layout.setSpacing(8)
+        source_layout.addWidget(self.builtin_radio)
+        source_layout.addWidget(self.custom_radio)
+        source_layout.addStretch()
 
         controls = QGridLayout()
-        controls.setHorizontalSpacing(10)
-        controls.setVerticalSpacing(6)
-        controls.addWidget(self.model_label, 0, 0)
-        controls.addWidget(self.model_combo, 0, 1)
-        controls.addWidget(self.strain_label, 0, 2)
-        controls.addWidget(self.strain_combo, 0, 3)
-        controls.addWidget(self.ogden_label, 0, 4)
-        controls.addWidget(self.ogden_terms, 0, 5)
-        controls.setColumnStretch(1, 2)
-        controls.setColumnStretch(3, 2)
+        controls.setHorizontalSpacing(4)
+        controls.setVerticalSpacing(4)
+        controls.addWidget(self.model_source_box, 0, 0, 1, 4)
+        controls.addWidget(self.model_label, 1, 0)
+        controls.addWidget(self.model_combo, 1, 1)
+        controls.addWidget(self.ogden_label, 1, 2)
+        controls.addWidget(self.ogden_terms_widget, 1, 3)
+        controls.addWidget(self.strain_label, 2, 0)
+        controls.addWidget(self.strain_combo, 2, 1)
+        controls.setColumnStretch(1, 0)
+        controls.setColumnStretch(3, 0)
         layout.addLayout(controls)
+        self.controls_layout = controls
 
         content = QGridLayout()
-        content.setHorizontalSpacing(16)
-        content.setVerticalSpacing(6)
+        content.setHorizontalSpacing(10)
+        content.setVerticalSpacing(2)
         content.setContentsMargins(0, 0, 0, 0)
 
-        params_block = QVBoxLayout()
+        self.params_block_widget = QWidget()
+        params_block = QVBoxLayout(self.params_block_widget)
+        params_block.setSpacing(0)
+        params_block.setContentsMargins(0, 0, 0, 0)
         params_label = QLabel("Parameters")
-        params_label.setFont(make_font(14, QFont.DemiBold))
+        params_label.setFont(make_font(12, QFont.DemiBold))
+        params_label.setContentsMargins(0, 0, 0, 0)
+        params_label.setStyleSheet("margin-bottom: 0px;")
         params_block.addWidget(params_label)
-        params_block.addWidget(self.use_custom_cb)
         params_block.addWidget(self.custom_area)
         self.params_widget = QWidget()
         self.params_widget.setLayout(self.params_layout)
         self.params_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         params_block.addWidget(self.params_widget)
 
-        formula_block = QVBoxLayout()
+        self.formula_block_widget = QWidget()
+        formula_block = QVBoxLayout(self.formula_block_widget)
+        formula_block.setSpacing(2)
+        formula_block.setContentsMargins(0, 0, 0, 0)
         formula_label = QLabel("Formula")
-        formula_label.setFont(make_font(14, QFont.DemiBold))
+        formula_label.setFont(make_font(12, QFont.DemiBold))
+        formula_label.setContentsMargins(0, 0, 0, 0)
         formula_block.addWidget(formula_label)
-        formula_block.addWidget(self.formula_label)
-        formula_block.addWidget(self.strain_formula_title)
-        formula_block.addWidget(self.strain_formula_label)
+        self.strain_formula_container = QWidget()
+        strain_formula_layout = QVBoxLayout(self.strain_formula_container)
+        strain_formula_layout.setContentsMargins(0, 0, 0, 0)
+        strain_formula_layout.setSpacing(2)
+        strain_formula_layout.addWidget(self.strain_formula_title)
+        strain_formula_layout.addWidget(self.strain_formula_label)
+
+        self.formula_row = QHBoxLayout()
+        self.formula_row.setContentsMargins(0, 0, 0, 0)
+        self.formula_row.setSpacing(8)
+        self.formula_row.addWidget(self.formula_label, 2)
+        self.formula_row.addWidget(self.strain_formula_container, 2)
+        formula_block.addLayout(self.formula_row)
         formula_block.addWidget(self.reference_title)
         formula_block.addWidget(self.reference_label)
 
-        content.addLayout(params_block, 0, 0)
-        content.addLayout(formula_block, 0, 1)
+        content.addWidget(self.params_block_widget, 0, 0)
+        content.addWidget(self.formula_block_widget, 0, 1)
         content.setColumnStretch(0, 2)
         content.setColumnStretch(1, 3)
         layout.addLayout(content)
+        self.custom_area.setVisible(False)
+        self.params_block_widget.setVisible(False)
+        self.formula_block_widget.setVisible(False)
+        self.strain_formula_container.setVisible(False)
 
         self.setLayout(layout)
+        self.setMaximumWidth(620)
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         self.setFlat(True)
         self.apply_theme()
         self.model_combo.currentTextChanged.connect(self._on_model_changed)
@@ -959,29 +1103,34 @@ class SpringWidget(QGroupBox):
     def _format_param_label(self, name):
         if self._param_prefix and name.startswith(self._param_prefix):
             name = name[len(self._param_prefix):]
+
+        def italic(text):
+            return f"<i>{text}</i>"
+
+        def format_base(base):
+            if base.lower() == "mu":
+                return "&mu;"
+            if base.lower() == "alpha":
+                return "&alpha;"
+            return base
+
         match = re.match(r"^([A-Za-z]+)(\d+)$", name)
         if match:
             base, idx = match.groups()
             if self._model_name == "Hill" and base.lower() in ("m", "n"):
-                return base
-            if base.lower() == "mu":
-                return f"&mu;<sub>{idx}</sub>"
-            if base.lower() == "alpha":
-                return f"&alpha;<sub>{idx}</sub>"
-            return f"{base}<sub>{idx}</sub>"
+                return f"{italic(base)}<sub>{idx}</sub>"
+            base_html = format_base(base)
+            return f"{italic(base_html)}<sub>{idx}</sub>"
         match = re.match(r"^([A-Za-z]+)_([0-9]+)$", name)
         if match:
             base, idx = match.groups()
-            if base.lower() == "mu":
-                return f"&mu;<sub>{idx}</sub>"
-            if base.lower() == "alpha":
-                return f"&alpha;<sub>{idx}</sub>"
-            return f"{base}<sub>{idx}</sub>"
+            base_html = format_base(base)
+            return f"{italic(base_html)}<sub>{idx}</sub>"
         if name.lower() == "mu":
-            return "&mu;"
+            return italic("&mu;")
         if name.lower() == "alpha":
-            return "&alpha;"
-        return name
+            return italic("&alpha;")
+        return italic(name)
 
     def _parse_custom_params(self):
         return [p.strip() for p in self.custom_param_edit.text().split(",") if p.strip()]
@@ -989,6 +1138,19 @@ class SpringWidget(QGroupBox):
     def _on_param_changed(self):
         if self.on_change:
             self.on_change(changed=True)
+
+    def _on_model_type_changed(self, checked):
+        if not checked:
+            return
+        self._on_model_changed()
+
+    def _on_remove_clicked(self):
+        if self.on_remove:
+            self.on_remove(self.index)
+
+    def set_removable(self, enabled):
+        self.remove_btn.setEnabled(enabled)
+        self.remove_btn.setVisible(enabled)
 
     def _get_custom_param_rows(self):
         rows = []
@@ -1020,6 +1182,9 @@ class SpringWidget(QGroupBox):
             guess.setMinimumWidth(90)
             min_edit.setMinimumWidth(70)
             max_edit.setMinimumWidth(70)
+            guess.setMinimumHeight(24)
+            min_edit.setMinimumHeight(24)
+            max_edit.setMinimumHeight(24)
             guess.textChanged.connect(self._on_param_changed)
             min_edit.textChanged.connect(self._on_param_changed)
             max_edit.textChanged.connect(self._on_param_changed)
@@ -1092,7 +1257,7 @@ class SpringWidget(QGroupBox):
         return CustomModel
 
     def _on_custom_definition_changed(self):
-        if not self.use_custom_cb.isChecked():
+        if not self.custom_radio.isChecked():
             return
         self._refresh_custom_param_rows()
         self._on_model_changed()
@@ -1176,30 +1341,48 @@ class SpringWidget(QGroupBox):
         display_name = self.model_combo.currentText()
         model_name = resolve_model_name(display_name)
         self._model_name = display_name
-        is_custom = self.use_custom_cb.isChecked()
+        is_custom = self.custom_radio.isChecked()
+        is_builtin = self.builtin_radio.isChecked()
+        self.model_label.setVisible(is_builtin)
+        self.model_combo.setVisible(is_builtin)
+        self.model_combo.setEnabled(is_builtin)
         is_hill = display_name == "Hill"
         is_ogden = display_name == "Ogden"
-        self.strain_combo.setEnabled(is_hill and not is_custom)
-        self.strain_combo.setVisible(is_hill and not is_custom)
-        self.strain_label.setVisible(is_hill and not is_custom)
-        self.ogden_terms.setEnabled(is_ogden and not is_custom)
-        self.ogden_terms.setVisible(is_ogden and not is_custom)
-        self.ogden_label.setVisible(is_ogden and not is_custom)
+        show_hill = is_builtin and is_hill
+        show_ogden = is_builtin and is_ogden
+        if hasattr(self, "controls_layout"):
+            if show_hill:
+                self.controls_layout.addWidget(self.strain_label, 1, 2)
+                self.controls_layout.addWidget(self.strain_combo, 1, 3)
+            else:
+                self.controls_layout.addWidget(self.strain_label, 2, 0)
+                self.controls_layout.addWidget(self.strain_combo, 2, 1)
+        self.strain_combo.setEnabled(show_hill)
+        self.strain_combo.setVisible(show_hill)
+        self.strain_label.setVisible(show_hill)
+        self.ogden_terms_widget.setEnabled(show_ogden)
+        self.ogden_terms_widget.setVisible(show_ogden)
+        self.ogden_label.setVisible(show_ogden)
         self.custom_area.setVisible(is_custom)
-        self._refresh_custom_param_rows()
+        details_visible = is_custom or (is_builtin and display_name != "Select...")
+        self.params_block_widget.setVisible(details_visible)
+        self.formula_block_widget.setVisible(details_visible)
         self._clear_params()
 
-        if display_name == "Select..." and not is_custom:
+        if not details_visible:
             self.formula_label.clear()
             self.strain_formula_label.clear()
             self.strain_formula_title.setVisible(False)
+            if hasattr(self, "strain_formula_container"):
+                self.strain_formula_container.setVisible(False)
             self.reference_title.setVisible(False)
             self.reference_label.clear()
             if self.on_change:
-                self.on_change()
+                self.on_change(changed=bool(is_custom or is_builtin))
             return
 
         if is_custom:
+            self._refresh_custom_param_rows()
             custom_kind = self.custom_type_combo.currentData()
             self.custom_hint.setText(
                 "Use variables: I1, I2." if custom_kind == "invariant" else "Use variables: lambda_1, lambda_2, lambda_3."
@@ -1233,12 +1416,17 @@ class SpringWidget(QGroupBox):
         formula = getattr(func, "formula", "")
         self.formula_label.set_latex(formula)
         strain_formula = getattr(func, "strain_formula", "")
-        if strain_formula:
+        show_strain_formula = bool(strain_formula) and show_hill
+        if show_strain_formula:
             self.strain_formula_title.setVisible(True)
             self.strain_formula_label.set_latex(strain_formula)
+            if hasattr(self, "strain_formula_container"):
+                self.strain_formula_container.setVisible(True)
         else:
             self.strain_formula_title.setVisible(False)
             self.strain_formula_label.clear()
+            if hasattr(self, "strain_formula_container"):
+                self.strain_formula_container.setVisible(False)
 
         if is_custom:
             self.reference_title.setVisible(False)
@@ -1267,8 +1455,8 @@ class SpringWidget(QGroupBox):
                 text_value = f"{float(default):.4g}"
                 edit.setText(text_value)
                 edit.setPlaceholderText(text_value)
-                edit.setMinimumWidth(140)
-                edit.setMinimumHeight(26)
+                edit.setMinimumWidth(120)
+                edit.setMinimumHeight(24)
                 edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
                 edit.textChanged.connect(self._on_param_changed)
                 self.params_layout.addWidget(label, row, col)
@@ -1295,8 +1483,8 @@ class SpringWidget(QGroupBox):
             text_value = f"{float(default):.4g}"
             edit.setText(text_value)
             edit.setPlaceholderText(text_value)
-            edit.setMinimumWidth(140)
-            edit.setMinimumHeight(26)
+            edit.setMinimumWidth(120)
+            edit.setMinimumHeight(24)
             edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             edit.textChanged.connect(self._on_param_changed)
             self.params_layout.addWidget(label, row, col)
@@ -1306,23 +1494,27 @@ class SpringWidget(QGroupBox):
             self.on_change(changed=True)
 
     def is_valid(self):
-        display_name = self.model_combo.currentText()
-        if self.use_custom_cb.isChecked():
+        if self.custom_radio.isChecked():
             return self._custom_valid
-        return self.model_combo.currentText() != "Select..."
+        if self.builtin_radio.isChecked():
+            return self.model_combo.currentText() != "Select..."
+        return False
 
     def build_config(self):
         display_name = self.model_combo.currentText()
         model_name = resolve_model_name(display_name)
-        if self.use_custom_cb.isChecked():
+        if self.custom_radio.isChecked():
             func = self._custom_cached_func or self._build_custom_model(self.custom_type_combo.currentData())
-        elif display_name == "Hill":
-            strain_name = self.strain_combo.currentText()
-            func = MaterialModels.create_hill_model(strain_name)
-        elif display_name == "Ogden":
-            func = MaterialModels.create_ogden_model(self.ogden_terms.value())
+        elif self.builtin_radio.isChecked():
+            if display_name == "Hill":
+                strain_name = self.strain_combo.currentText()
+                func = MaterialModels.create_hill_model(strain_name)
+            elif display_name == "Ogden":
+                func = MaterialModels.create_ogden_model(self.ogden_terms.value())
+            else:
+                func = getattr(MaterialModels, model_name)
         else:
-            func = getattr(MaterialModels, model_name)
+            raise ValueError("Select a model source.")
 
         user_params = []
         for _, edit, default in self.param_edits:
@@ -1338,12 +1530,18 @@ class SpringWidget(QGroupBox):
         return func, user_params
 
     def get_state(self):
+        model_source = ""
+        if self.custom_radio.isChecked():
+            model_source = "custom"
+        elif self.builtin_radio.isChecked():
+            model_source = "builtin"
         return {
             "model": self.model_combo.currentText(),
             "strain": self.strain_combo.currentText(),
             "ogden_terms": self.ogden_terms.value(),
             "params": [edit.text().strip() for _, edit, _ in self.param_edits],
-            "use_custom": self.use_custom_cb.isChecked(),
+            "model_source": model_source,
+            "use_custom": model_source == "custom",
             "custom_type": self.custom_type_combo.currentData(),
             "custom_formula": self.custom_formula_edit.text(),
             "custom_params": self.custom_param_edit.text(),
@@ -1365,7 +1563,13 @@ class SpringWidget(QGroupBox):
                 self.strain_combo.setCurrentText(strain)
         if model == "Ogden":
             self.ogden_terms.setValue(state.get("ogden_terms", 1))
-        self.use_custom_cb.setChecked(state.get("use_custom", False))
+        model_source = state.get("model_source")
+        if model_source == "custom" or state.get("use_custom"):
+            self.custom_radio.setChecked(True)
+        elif model_source == "builtin":
+            self.builtin_radio.setChecked(True)
+        elif model and model != "Select...":
+            self.builtin_radio.setChecked(True)
         custom_type = state.get("custom_type", "invariant")
         idx = self.custom_type_combo.findData(custom_type)
         if idx >= 0:
@@ -1627,10 +1831,12 @@ class MainWindow(QMainWindow):
                 label.setText(label.text())
 
     def _refresh_spring_widgets(self):
-        for i in range(self.spring_container.count()):
-            widget = self.spring_container.itemAt(i).widget()
+        for widget in getattr(self, "spring_widgets", []):
             if widget:
                 widget.apply_theme()
+        for icon in getattr(self, "spring_icons", []):
+            if icon:
+                icon.update()
 
     def _build_data_section(self):
         self.data_box = QGroupBox("1. Experimental Data")
@@ -1732,6 +1938,10 @@ class MainWindow(QMainWindow):
         source_layout.addWidget(self.builtin_widget)
         source_layout.addWidget(self.custom_widget)
         left_layout.addWidget(source_box)
+        self.data_reference_title = QLabel("Reference")
+        self.data_reference_title.setFont(make_font(12, QFont.DemiBold))
+        self.data_reference_title.setVisible(False)
+        left_layout.addWidget(self.data_reference_title)
         left_layout.addWidget(self.reference_label)
         left_layout.addStretch()
         left_layout.addWidget(self.data_next_btn, alignment=Qt.AlignRight)
@@ -1752,18 +1962,37 @@ class MainWindow(QMainWindow):
     def _build_model_section(self):
         self.model_box = QGroupBox("2. Model Architecture")
         layout = QVBoxLayout()
+        layout.setSpacing(12)
 
-        form = QFormLayout()
-        self.springs_spin = QSpinBox()
-        self.springs_spin.setRange(1, 6)
-        self.springs_spin.setValue(1)
-        self.springs_spin.valueChanged.connect(self._rebuild_springs)
-        form.addRow("Parallel Springs", self.springs_spin)
-        layout.addLayout(form)
+        self.spring_count = 1
+        self.max_springs = 6
+        self.spring_widgets = []
+        self.spring_icons = []
 
-        self.spring_container = QVBoxLayout()
-        self.spring_container.setSpacing(12)
-        layout.addLayout(self.spring_container)
+        self.add_spring_btn = QPushButton("Add Parallel Spring")
+        self.add_spring_btn.clicked.connect(self._add_spring)
+        self.add_spring_btn.setFixedWidth(200)
+        self.add_spring_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        button_row = QHBoxLayout()
+        button_row.addWidget(self.add_spring_btn)
+        button_row.addStretch()
+        layout.addLayout(button_row)
+
+        self.spring_rows_widget = QWidget()
+        self.spring_rows_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        spring_rows_layout = QHBoxLayout(self.spring_rows_widget)
+        spring_rows_layout.setContentsMargins(0, 0, 0, 0)
+        spring_rows_layout.setSpacing(0)
+        self.spring_grid = QGridLayout()
+        self.spring_grid.setContentsMargins(0, 0, 0, 0)
+        self.spring_grid.setHorizontalSpacing(12)
+        self.spring_grid.setVerticalSpacing(8)
+        self.spring_grid.setColumnStretch(0, 0)
+        self.spring_grid.setColumnStretch(1, 0)
+        spring_rows_layout.addLayout(self.spring_grid)
+        spring_rows_layout.addStretch()
+        layout.addWidget(self.spring_rows_widget)
+        layout.addStretch()
 
         self.model_next_btn = QPushButton("Next: Optimization")
         self.model_next_btn.setEnabled(False)
@@ -1772,7 +2001,7 @@ class MainWindow(QMainWindow):
 
         self.model_box.setLayout(layout)
 
-        self._rebuild_springs(self.springs_spin.value())
+        self._rebuild_springs(self.spring_count)
         return self.model_box
 
     def _build_optimization_section(self):
@@ -1897,10 +2126,14 @@ class MainWindow(QMainWindow):
             self.author_row.setVisible(use_builtin)
         if use_builtin:
             self.reference_label.setVisible(True)
+            if hasattr(self, "data_reference_title"):
+                self.data_reference_title.setVisible(bool(self.reference_label.text()))
             self._reset_custom_entries()
         else:
             self.reference_label.setText("")
             self.reference_label.setVisible(False)
+            if hasattr(self, "data_reference_title"):
+                self.data_reference_title.setVisible(False)
             self._clear_builtin_selection()
             if not self.custom_entries:
                 self._add_custom_entry(update_preview=False)
@@ -2122,12 +2355,10 @@ class MainWindow(QMainWindow):
                     lines.append(f"Custom entries: {len(self.custom_entries)}")
                 lines.append("")
                 lines.append("Model architecture:")
-                for idx in range(self.spring_container.count()):
-                    spring = self.spring_container.itemAt(idx).widget()
-                    if not spring:
-                        continue
+                for idx, spring in enumerate(self.spring_widgets):
                     state = spring.get_state()
-                    if state.get("use_custom"):
+                    is_custom = state.get("model_source") == "custom" or state.get("use_custom")
+                    if is_custom:
                         lines.append(f"  Spring {idx+1}: Custom ({state.get('custom_type')})")
                         lines.append(f"    Formula: {state.get('custom_formula')}")
                         lines.append(f"    Params: {state.get('custom_params')}")
@@ -2141,15 +2372,13 @@ class MainWindow(QMainWindow):
                 pdf.savefig(fig, bbox_inches="tight")
 
                 # Formula pages
-                for idx in range(self.spring_container.count()):
-                    spring = self.spring_container.itemAt(idx).widget()
-                    if not spring:
-                        continue
+                for idx, spring in enumerate(self.spring_widgets):
                     state = spring.get_state()
                     fig = Figure(figsize=(8.5, 5.5), dpi=150)
                     ax = fig.add_subplot(111)
                     ax.axis("off")
-                    if state.get("use_custom"):
+                    is_custom = state.get("model_source") == "custom" or state.get("use_custom")
+                    if is_custom:
                         formula = state.get("custom_formula", "")
                         title = f"Spring {idx+1} Formula (Custom)"
                     else:
@@ -2208,6 +2437,8 @@ class MainWindow(QMainWindow):
 
         if text == "Select..." or text not in self.datasets:
             self.reference_label.setText("")
+            if hasattr(self, "data_reference_title"):
+                self.data_reference_title.setVisible(False)
             self.preview_canvas.ax.clear()
             self.preview_canvas.apply_theme()
             self.preview_canvas.draw()
@@ -2228,8 +2459,12 @@ class MainWindow(QMainWindow):
         if reference:
             label, url = reference
             self.reference_label.setText(f"<a href='{url}'>{label}</a>")
+            if hasattr(self, "data_reference_title"):
+                self.data_reference_title.setVisible(True)
         else:
             self.reference_label.setText("")
+            if hasattr(self, "data_reference_title"):
+                self.data_reference_title.setVisible(False)
 
         self._update_preview()
 
@@ -2301,28 +2536,59 @@ class MainWindow(QMainWindow):
         self.data_next_btn.setEnabled(True)
         self._update_workflow_cards()
 
-    def _rebuild_springs(self, count):
+    def _rebuild_springs(self, count, states_override=None):
+        count = max(1, min(int(count), getattr(self, "max_springs", 6)))
+        self.spring_count = count
+        if hasattr(self, "add_spring_btn"):
+            self.add_spring_btn.setEnabled(count < getattr(self, "max_springs", 6))
         previous_states = []
-        for i in range(self.spring_container.count()):
-            widget = self.spring_container.itemAt(i).widget()
-            if widget:
-                previous_states.append(widget.get_state())
-        while self.spring_container.count():
-            item = self.spring_container.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
+        if states_override is not None:
+            previous_states = list(states_override)
+        else:
+            for widget in getattr(self, "spring_widgets", []):
+                if widget:
+                    previous_states.append(widget.get_state())
+        if hasattr(self, "spring_grid"):
+            while self.spring_grid.count():
+                item = self.spring_grid.takeAt(0)
+                widget = item.widget()
+                if widget:
+                    widget.deleteLater()
+        self.spring_widgets = []
+        self.spring_icons = []
 
         for i in range(1, count + 1):
+            spring_icon = SpringIcon()
+            self.spring_grid.addWidget(spring_icon, i - 1, 0, Qt.AlignTop)
             spring_widget = SpringWidget(
                 i,
                 on_change=self._on_spring_config_changed,
                 author_provider=lambda: self.author_combo.currentText(),
+                on_remove=self._remove_spring,
             )
             if i <= len(previous_states):
                 spring_widget.apply_state(previous_states[i - 1])
-            self.spring_container.addWidget(spring_widget)
+            spring_widget.set_removable(count > 1)
+            self.spring_grid.addWidget(spring_widget, i - 1, 1)
+            self.spring_icons.append(spring_icon)
+            self.spring_widgets.append(spring_widget)
         self._on_spring_config_changed()
+
+    def _add_spring(self):
+        if getattr(self, "spring_count", 1) >= getattr(self, "max_springs", 6):
+            return
+        self._rebuild_springs(self.spring_count + 1)
+
+    def _remove_spring(self, index):
+        if getattr(self, "spring_count", 1) <= 1:
+            return
+        states = [widget.get_state() for widget in self.spring_widgets]
+        if 1 <= index <= len(states):
+            states.pop(index - 1)
+        if not states:
+            self._rebuild_springs(1)
+            return
+        self._rebuild_springs(len(states), states_override=states)
 
     def _run_optimization(self):
         exp_data = self._collect_experimental_data()
@@ -2332,8 +2598,7 @@ class MainWindow(QMainWindow):
 
         execution_network = ParallelNetwork()
         initial_guess = []
-        for idx in range(self.spring_container.count()):
-            spring = self.spring_container.itemAt(idx).widget()
+        for idx, spring in enumerate(self.spring_widgets):
             if not spring.is_valid():
                 if getattr(spring, "_custom_error", ""):
                     QMessageBox.warning(self, "Model error", f"Custom model error:\n{spring._custom_error}")
@@ -2485,7 +2750,7 @@ class MainWindow(QMainWindow):
     def _on_spring_config_changed(self, changed=False):
         if changed:
             self._reset_results()
-        springs = [self.spring_container.itemAt(i).widget() for i in range(self.spring_container.count())]
+        springs = list(getattr(self, "spring_widgets", []))
         if springs and all(spring.is_valid() for spring in springs):
             self.model_next_btn.setEnabled(True)
         else:

@@ -243,7 +243,7 @@ class MaterialModels:
         Hill_Dynamic.__name__ = f"Hill_{strain_name}"
         Hill_Dynamic.model_type = 'stretch_based'
         Hill_Dynamic.category = 'phenomenological'
-        Hill_Dynamic.formula = rf"\Psi = \mu \sum_{{i=1}}^3 E_{{{strain_name}}}(\lambda_i)^2"
+        Hill_Dynamic.formula = r"\Psi = \mu \sum_{i=1}^3 E(\lambda_i)^2"
         Hill_Dynamic.strain_formula = STRAIN_FORMULAS.get(strain_name, "")
         Hill_Dynamic.param_names = full_param_names
         Hill_Dynamic.initial_guess = full_initial_guess
