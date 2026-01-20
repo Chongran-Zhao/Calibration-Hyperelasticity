@@ -7,3 +7,4 @@ sympy>=1.9
 streamlit>=1.25.0
 PySide6>=6.5.0
 tqdm>=4.60.0
+platformdirs>=4.0.0

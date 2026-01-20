@@ -13,7 +13,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        os: [macos-latest, ubuntu-20.04, windows-latest]
     env:
       TAG_NAME: ${{ github.ref_name }}
     steps:
@@ -52,7 +52,7 @@ jobs:
           pyinstaller --noconfirm --windowed --name HyperelasticCalibration --exclude PyQt5 `
             --add-data "src;src" --add-data "data/data.h5;data" --add-data "assets/icons;assets/icons" `
             --collect-all sympy --hidden-import sympy --hidden-import tqdm qt_app.py
-          Compress-Archive -Path dist/HyperelasticCalibration -DestinationPath HyperelasticCalibration-windows.zip
+          Compress-Archive -Path dist/HyperelasticCalibration/* -DestinationPath HyperelasticCalibration-windows.zip
 
       - name: Upload artifact (macOS)
         if: matrix.os == 'macos-latest'
