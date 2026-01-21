@@ -19,7 +19,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        os: [macos-latest]
     env:
       TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
@@ -45,43 +45,12 @@ jobs:
             --collect-all sympy --hidden-import sympy --hidden-import tqdm qt_app.py
           ditto -c -k --sequesterRsrc --keepParent dist/HyperelasticCalibration.app HyperelasticCalibration-macos.zip
 
-      - name: Build app (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          pyinstaller --noconfirm --windowed --name HyperelasticCalibration --exclude PyQt5 \
-            --add-data "src:src" --add-data "data/data.h5:data" --add-data "assets/icons:assets/icons" \
-            --collect-all sympy --hidden-import sympy --hidden-import tqdm qt_app.py
-          tar -czf HyperelasticCalibration-linux.tar.gz -C dist HyperelasticCalibration
-
-      - name: Build app (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          pyinstaller --noconfirm --windowed --name HyperelasticCalibration --exclude PyQt5 `
-            --add-data "src;src" --add-data "data/data.h5;data" --add-data "assets/icons;assets/icons" `
-            --collect-all sympy --hidden-import sympy --hidden-import tqdm qt_app.py
-          Compress-Archive -Path dist/HyperelasticCalibration/* -DestinationPath HyperelasticCalibration-windows.zip
-
       - name: Upload artifact (macOS)
         if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
           name: macos-zip
           path: HyperelasticCalibration-macos.zip
-
-      - name: Upload artifact (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-tar
-          path: HyperelasticCalibration-linux.tar.gz
-
-      - name: Upload artifact (Windows)
-        if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-zip
-          path: HyperelasticCalibration-windows.zip
 
   publish_release:
     needs: build
@@ -102,6 +71,4 @@ jobs:
             gh release create "${TAG_NAME}" --draft --title "${TAG_NAME}" --notes ""
           fi
           gh release upload "${TAG_NAME}" release-assets/macos-zip/HyperelasticCalibration-macos.zip --clobber
-          gh release upload "${TAG_NAME}" release-assets/linux-tar/HyperelasticCalibration-linux.tar.gz --clobber
-          gh release upload "${TAG_NAME}" release-assets/windows-zip/HyperelasticCalibration-windows.zip --clobber
           gh release edit "${TAG_NAME}" --draft=false

@@ -8,13 +8,13 @@ To continue this session, run `codex resume 019b3fbc-4d66-72f2-a04a-4d516a39a49b
 - `src/`: Core logic (material models, optimization, plotting, kinematics).
 - `data/data.h5`: Packaged datasets.
 - `assets/icons/`: App icons and icon generation script.
-- `.github/workflows/release.yml`: Multi-platform release pipeline.
+- `.github/workflows/release.yml`: macOS release pipeline.
 - `README.md`: User-facing install and usage instructions.
 
 ## Release Flow (v1.0+)
 
-This project uses a GitHub Actions workflow to build and publish release
-artifacts for macOS, Linux, and Windows. Releases are created from tags.
+This project uses a GitHub Actions workflow to build and publish the macOS
+release artifact. Releases are created from tags.
 
 Steps:
 
@@ -26,8 +26,6 @@ git push origin v1.0
 
 2) GitHub Actions builds and uploads (from tag):
 - `HyperelasticCalibration-macos.zip`
-- `HyperelasticCalibration-linux.tar.gz`
-- `HyperelasticCalibration-windows.zip`
 
 3) The release is published automatically by the workflow.
 
@@ -37,9 +35,9 @@ Workflow file:
 - `.github/workflows/release.yml`
 
 Behavior:
-- On tag push (`v*`), build runs on macOS, Linux, Windows.
-- Each job builds the app with PyInstaller and uploads its artifact.
-- A final job downloads all artifacts and creates/updates the GitHub release.
+- On tag push (`v*`), build runs on macOS.
+- The build job uses PyInstaller and uploads the macOS artifact.
+- A final job downloads the artifact and creates/updates the GitHub release.
 
 Notes:
 - macOS build includes `--icon assets/icons/app.icns`.
@@ -79,7 +77,7 @@ gh release view v1.0 --json assets
 
 - `v1.0`, `v2.0`, ... for major stable releases.
 - Tags should match the release version exactly.
-- Each tag rebuilds all artifacts.
+- Each tag rebuilds the macOS artifact.
 
 ## Release Notes (v2.0)
 
@@ -137,7 +135,7 @@ brew install --cask hyperelastic-calibration
 
 High-level summary of this session:
 - Added a README example using Zhan (non-Gaussian) and moved screenshots to `assets/examples/zhan-non-gaussian-james-1975`.
-- Built a multi-platform release workflow and iterated until release publishing was reliable.
+- Built a release workflow and iterated until release publishing was reliable.
 - Re-released as `v1.0` and updated the Homebrew cask to the new macOS asset SHA.
 - Added explicit bundling of `tqdm` in the PyInstaller build to fix runtime errors.
 - Ensured app startup shows a progress dialog and sets the app name/icon during initialization.
