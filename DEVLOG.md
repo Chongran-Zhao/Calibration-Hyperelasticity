@@ -64,6 +64,24 @@ git commit -am "Bump hyperelastic-calibration to v1.0"
 git push
 ```
 
+## Session Log (2026-01-21)
+
+High-level summary of this session:
+- Released v2.0 with updated datasets and UI refinements already captured in the v2.0 notes.
+- Fixed the release workflow to support manual tag builds and then limited releases to macOS only.
+- Removed Linux/Windows assets from GitHub releases (v2.0 and v1.0) due to known issues.
+- Updated the Homebrew cask SHA for v2.0 to match the macOS release asset.
+- Clarified README usage paths: Homebrew app (Launchpad) vs running from source.
+- Noted that README figures are not yet updated in the GitHub preview.
+
+Release workflow notes (v2.0):
+- Added `workflow_dispatch` with a tag input to rebuild an existing tag.
+- macOS-only build/upload in `.github/workflows/release.yml`.
+
+Release asset status:
+- v2.0: macOS zip only.
+- v1.0: macOS zip only.
+
 ## Updating the Homebrew SHA
 
 1) Fetch the new macOS asset hash:
