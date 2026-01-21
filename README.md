@@ -1,20 +1,29 @@
 # Hyperelastic Material Calibration
 
-## Install (macOS App)
+## Two ways to use
+
+### 1) Install the macOS app (recommended)
+
+Install via Homebrew and launch it like a normal app from Launchpad:
 
 ```
 brew install --cask Chongran-Zhao/hyperelastic/hyperelastic-calibration
 ```
 
-## Update (macOS App)
+Update the app:
 
 ```
 brew update && brew upgrade --cask hyperelastic-calibration
 ```
 
-## Launch (from source)
+### 2) Run from source
 
-Clone this repo and run the GUI locally:
+Clone this repo, install dependencies, and launch from Terminal:
+
+```
+git clone https://github.com/Chongran-Zhao/Calibration-Hyperelasticity.git
+cd Calibration-Hyperelasticity
+```
 
 1) Install dependencies:
 ```
