@@ -81,6 +81,16 @@ gh release view v1.0 --json assets
 - Tags should match the release version exactly.
 - Each tag rebuilds all artifacts.
 
+## Release Notes (v2.0)
+
+- UI refresh with Apple-style layout, updated workflow cards, and modernized controls.
+- Step layouts reworked (data, model, optimization, prediction) with clearer panels and behavior.
+- Custom datasets: tabbed editor, save list, delete controls, and improved validation flow.
+- Parallel spring model builder with add/remove, model selection, and formula/parameter panels.
+- Optimization view: iteration log, R² annotation, stricter failure checks, and cleaner state resets.
+- Dataset updates: Jones BT uses Cauchy sigma_11 - sigma_22, Katashima PS/BT prediction paths aligned to published protocol.
+- Known limitation: Custom model support is still a prototype and not fully implemented.
+
 ## Building Locally (macOS)
 
 Suggested clean build:

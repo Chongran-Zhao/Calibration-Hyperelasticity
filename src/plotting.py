@@ -48,6 +48,8 @@ def plot_comparison(experimental_data, kinematics_solver, fitted_params, title="
         exp_stress = dataset['stress_exp']
         f_list = dataset['F_list'] # Tensors at experimental points
         stress_type = dataset.get('stress_type', 'PK1')
+        bt_diff = dataset.get('bt_component') == 'diff' and mode == 'BT'
+        component = dataset.get('component')
         
         # --- 1. Calculate R^2 for this dataset ---
         # We need model predictions exactly at the experimental stretch points
@@ -58,20 +60,67 @@ def plot_comparison(experimental_data, kinematics_solver, fitted_params, title="
             else:
                 stress_tensor = kinematics_solver.get_1st_PK_stress(F, fitted_params)
             comps = get_stress_components(stress_tensor, mode)
-            if np.ndim(exp_stress) == 1:
+            if bt_diff:
+                model_stress_at_exp.append(comps[0] - comps[1])
+            elif component == "22":
+                model_stress_at_exp.append(comps[1])
+            elif component == "11":
+                model_stress_at_exp.append(comps[0])
+            elif np.ndim(exp_stress) == 1:
                 model_stress_at_exp.append(comps[0])
             else:
                 model_stress_at_exp.append(comps[:exp_stress.shape[1]])
         model_stress_at_exp = np.array(model_stress_at_exp)
-        
-        r2 = calculate_r2(exp_stress, model_stress_at_exp)
+
+        if bt_diff and np.ndim(exp_stress) > 1:
+            exp_values = exp_stress[:, 0] - exp_stress[:, 1]
+        else:
+            exp_values = exp_stress
+
+        r2 = calculate_r2(exp_values, model_stress_at_exp)
         
         # --- 2. Plot Experimental Data (Scatter) ---
         # Add R^2 to the label
         stress_label = "Cauchy" if stress_type == "cauchy" else "Nominal"
         label_text = f"Exp: {tag} ({stress_label}, $R^2={r2:.3f}$)"
         
-        if np.ndim(exp_stress) == 1:
+        if bt_diff:
+            comp_label = r"$\sigma_{11}-\sigma_{22}$" if stress_type == "cauchy" else r"$P_{11}-P_{22}$"
+            plt.scatter(
+                exp_stretch,
+                exp_values,
+                label=f"{label_text} {comp_label}",
+                marker=markers.get(mode, 'o'),
+                facecolors='none',
+                edgecolors=colors.get(mode, 'black'),
+                s=60,
+                zorder=2
+            )
+        elif component == "22":
+            comp_label = r"$\sigma_{22}$" if stress_type == "cauchy" else r"$P_{22}$"
+            plt.scatter(
+                exp_stretch,
+                exp_stress,
+                label=f"{label_text} {comp_label}",
+                marker=markers.get(mode, 'o'),
+                facecolors='none',
+                edgecolors=colors.get(mode, 'black'),
+                s=60,
+                zorder=2
+            )
+        elif component == "11":
+            comp_label = r"$\sigma_{11}$" if stress_type == "cauchy" else r"$P_{11}$"
+            plt.scatter(
+                exp_stretch,
+                exp_stress,
+                label=f"{label_text} {comp_label}",
+                marker=markers.get(mode, 'o'),
+                facecolors='none',
+                edgecolors=colors.get(mode, 'black'),
+                s=60,
+                zorder=2
+            )
+        elif np.ndim(exp_stress) == 1:
             plt.scatter(
                 exp_stretch,
                 exp_stress,
@@ -109,6 +158,25 @@ def plot_comparison(experimental_data, kinematics_solver, fitted_params, title="
         min_lam = np.min(exp_stretch)
         max_lam = np.max(exp_stretch)
         smooth_stretch = np.linspace(1.0, max_lam * 1.05, 100)
+
+        if component is not None:
+            model_stress_at_exp = []
+            for F in f_list:
+                if stress_type == 'cauchy':
+                    stress_tensor = kinematics_solver.get_Cauchy_stress(F, fitted_params)
+                else:
+                    stress_tensor = kinematics_solver.get_1st_PK_stress(F, fitted_params)
+                comps = get_stress_components(stress_tensor, mode)
+                model_stress_at_exp.append(comps[1] if component == "22" else comps[0])
+            plt.plot(
+                exp_stretch,
+                model_stress_at_exp,
+                color=colors.get(mode, 'black'),
+                linestyle='-',
+                linewidth=2,
+                zorder=1
+            )
+            continue
         
         model_stress_smooth = []
         model_stress_smooth_2 = []
@@ -123,9 +191,14 @@ def plot_comparison(experimental_data, kinematics_solver, fitted_params, title="
             else:
                 stress_tensor = kinematics_solver.get_1st_PK_stress(F_smooth, fitted_params)
             comps = get_stress_components(stress_tensor, mode)
-            model_stress_smooth.append(comps[0])
-            if len(comps) > 1:
-                model_stress_smooth_2.append(comps[1])
+            if bt_diff:
+                model_stress_smooth.append(comps[0] - comps[1])
+            elif component == "22":
+                model_stress_smooth.append(comps[1])
+            else:
+                model_stress_smooth.append(comps[0])
+                if len(comps) > 1:
+                    model_stress_smooth_2.append(comps[1])
 
         plt.plot(
             smooth_stretch,
@@ -135,7 +208,7 @@ def plot_comparison(experimental_data, kinematics_solver, fitted_params, title="
             linewidth=2,
             zorder=1
         )
-        if model_stress_smooth_2:
+        if model_stress_smooth_2 and not bt_diff and component is None:
             plt.plot(
                 smooth_stretch,
                 model_stress_smooth_2,

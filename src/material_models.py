@@ -111,7 +111,7 @@ class MaterialModels:
         category='micromechanical',
         formula_str=r"\Psi = \mu\sqrt{N}\int_{\mathbb{S}^2} \left( \lambda_i \beta + \ln\left( \beta / \sinh(\beta) \right) \right) d\Omega",
         param_names=["mu", "N"],
-        initial_guess=[0.5, 10.0],
+        initial_guess=[0.5, 60.0],
         bounds=[(1e-6, None), (1.0, None)]
     )
     def ZhanNonGaussian(lambda_1, lambda_2, lambda_3, params):

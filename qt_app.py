@@ -182,6 +182,19 @@ def get_bt_component_labels(stress_type):
         return r"$\sigma_{11}$", r"$\sigma_{22}$"
     return r"$P_{11}$", r"$P_{22}$"
 
+def get_component_label(stress_type, component):
+    comp_11, comp_22 = get_bt_component_labels(stress_type)
+    if component == "22":
+        return comp_22
+    if component == "11":
+        return comp_11
+    return get_uniaxial_component_label(stress_type)
+
+def get_bt_diff_label(stress_type):
+    if stress_type == "cauchy":
+        return r"$\sigma_{11}-\sigma_{22}$"
+    return r"$P_{11}-P_{22}$"
+
 def get_uniaxial_component_label(stress_type):
     return r"$\sigma_{11}$" if stress_type == "cauchy" else r"$P_{11}$"
 
@@ -277,12 +290,20 @@ def build_app_stylesheet():
         "QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus, QAbstractSpinBox:focus {"
         " border: 1px solid palette(highlight); }"
         "QComboBox { background: palette(base); color: palette(text); border: 1px solid palette(mid);"
-        " border-radius: 10px; padding: 6px 28px 6px 10px; }"
+        " border-radius: 12px; padding: 7px 32px 7px 12px; min-height: 22px; }"
+        "QComboBox:hover { background: palette(alternate-base); }"
         "QComboBox:focus { border: 1px solid palette(highlight); }"
-        "QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: top right; width: 20px; border: none; }"
-        "QComboBox::down-arrow { width: 8px; height: 8px; }"
+        "QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: top right; width: 24px; border: none; }"
+        "QComboBox::down-arrow { width: 10px; height: 10px; }"
+        "QComboBox:disabled { color: palette(mid); background: palette(base); }"
         "QComboBox QAbstractItemView { background: palette(base); color: palette(text);"
-        " selection-background-color: palette(highlight); selection-color: palette(highlighted-text); }"
+        " selection-background-color: palette(highlight); selection-color: palette(highlighted-text);"
+        " border: 1px solid palette(mid); border-radius: 10px; outline: 0; padding: 4px; }"
+        "QComboBox QAbstractItemView::item { padding: 6px 8px; border-radius: 8px; margin: 2px; }"
+        "QComboBox QAbstractItemView::item:hover { background: palette(alternate-base);"
+        " border: 1px solid palette(mid); }"
+        "QComboBox QAbstractItemView::item:selected { background: palette(highlight);"
+        " color: palette(highlighted-text); }"
         "QPushButton { background: palette(button); border: 1px solid palette(mid);"
         " border-radius: 10px; padding: 8px 14px; }"
         "QPushButton:hover { background: palette(alternate-base); }"
@@ -578,6 +599,7 @@ class SpringConfig:
 class OptimizerWorker(QThread):
     finished = Signal(object, object)
     failed = Signal(str)
+    progress = Signal(int, float, object)
 
     def __init__(self, optimizer, initial_guess, bounds, method):
         super().__init__()
@@ -588,10 +610,22 @@ class OptimizerWorker(QThread):
 
     def run(self):
         try:
-            result = self.optimizer.fit(self.initial_guess, self.bounds, method=self.method)
+            result = self.optimizer.fit(
+                self.initial_guess,
+                self.bounds,
+                method=self.method,
+                progress_cb=self._emit_progress,
+            )
             self.finished.emit(result, self.optimizer)
         except Exception as exc:
             self.failed.emit(str(exc))
+
+    def _emit_progress(self, iteration, params, loss):
+        try:
+            params_list = list(params)
+        except Exception:
+            params_list = params
+        self.progress.emit(int(iteration), float(loss), params_list)
 
 
 class MatplotlibCanvas(FigureCanvas):
@@ -883,6 +917,14 @@ class SpringWidget(QGroupBox):
         ogden_layout.addWidget(self.ogden_inc_btn)
         self.ogden_terms_widget.setEnabled(False)
         self.ogden_terms_widget.setVisible(False)
+        self.ogden_row = QWidget()
+        ogden_row_layout = QHBoxLayout(self.ogden_row)
+        ogden_row_layout.setContentsMargins(0, 0, 0, 0)
+        ogden_row_layout.setSpacing(6)
+        ogden_row_layout.addWidget(self.ogden_label)
+        ogden_row_layout.addWidget(self.ogden_terms_widget)
+        ogden_row_layout.addStretch()
+        self.ogden_row.setVisible(False)
         self.ogden_label.setVisible(False)
 
         self.model_source_group = QButtonGroup(self)
@@ -1008,8 +1050,7 @@ class SpringWidget(QGroupBox):
         controls.addWidget(self.model_source_box, 0, 0, 1, 4)
         controls.addWidget(self.model_label, 1, 0)
         controls.addWidget(self.model_combo, 1, 1)
-        controls.addWidget(self.ogden_label, 1, 2)
-        controls.addWidget(self.ogden_terms_widget, 1, 3)
+        controls.addWidget(self.ogden_row, 1, 2, 1, 2)
         controls.addWidget(self.strain_label, 2, 0)
         controls.addWidget(self.strain_combo, 2, 1)
         controls.setColumnStretch(1, 0)
@@ -1363,6 +1404,7 @@ class SpringWidget(QGroupBox):
         self.ogden_terms_widget.setEnabled(show_ogden)
         self.ogden_terms_widget.setVisible(show_ogden)
         self.ogden_label.setVisible(show_ogden)
+        self.ogden_row.setVisible(show_ogden)
         self.custom_area.setVisible(is_custom)
         details_visible = is_custom or (is_builtin and display_name != "Select...")
         self.params_block_widget.setVisible(details_visible)
@@ -1474,7 +1516,11 @@ class SpringWidget(QGroupBox):
         for idx, (name, default) in enumerate(zip(temp_net.param_names, temp_net.initial_guess)):
             row = idx
             col = 0
-            if n_guess is not None and (name.lower().endswith("_n") or name.lower().endswith("n")):
+            if (
+                n_guess is not None
+                and model_name != "ZhanNonGaussian"
+                and (name.lower().endswith("_n") or name.lower().endswith("n"))
+            ):
                 default = n_guess
             label = QLabel()
             label.setTextFormat(Qt.RichText)
@@ -1611,6 +1657,7 @@ class MainWindow(QMainWindow):
         self._bt_mix_warned = False
         self._custom_source_warned = False
         self._dark_mode = False
+        self.prediction_selection = {}
 
         root = QWidget()
         root_layout = QHBoxLayout(root)
@@ -1926,6 +1973,7 @@ class MainWindow(QMainWindow):
         preview_actions = QHBoxLayout()
         preview_actions.addStretch()
         self.preview_save_btn = QPushButton("Save Preview Plot")
+        self.preview_save_btn.setEnabled(False)
         self.preview_save_btn.clicked.connect(lambda: self._save_figure(self.preview_canvas, "preview_plot"))
         preview_actions.addWidget(self.preview_save_btn)
 
@@ -2006,29 +2054,24 @@ class MainWindow(QMainWindow):
 
     def _build_optimization_section(self):
         self.opt_box = QGroupBox("3. Optimization")
-        layout = QVBoxLayout()
+        outer_layout = QVBoxLayout()
+        body_layout = QHBoxLayout()
+        body_layout.setSpacing(16)
 
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(10)
+        left_panel.setMaximumWidth(380)
+
+        method_label = QLabel("Optimization method")
+        method_label.setFont(make_font(12, QFont.DemiBold))
         self.method_combo = QComboBox()
         self.method_combo.addItems(["L-BFGS-B"])
-        layout.addWidget(self.method_combo)
+        left_layout.addWidget(method_label)
+        left_layout.addWidget(self.method_combo)
 
-        self.run_button = QPushButton("Start Calibration")
-        self.run_button.clicked.connect(self._run_optimization)
-        layout.addWidget(self.run_button)
-
-        self.report_button = QPushButton("Export Report (PDF)")
-        self.report_button.clicked.connect(self._export_report)
-        layout.addWidget(self.report_button)
-
-        self.opt_status = QLabel("")
-        layout.addWidget(self.opt_status)
-
-        self.loss_label = QLabel("Final Loss: -")
-        layout.addWidget(self.loss_label)
-
-        self.calib_results_box = QGroupBox("Calibration Results")
-        calib_layout = QHBoxLayout()
-        self.calib_params_box = QGroupBox("Optimized Parameters")
+        self.calib_params_box = QGroupBox("Parameters")
         params_layout = QVBoxLayout()
         self.calib_params_area = QScrollArea()
         self.calib_params_area.setWidgetResizable(True)
@@ -2039,38 +2082,71 @@ class MainWindow(QMainWindow):
         self.calib_params_area.setWidget(self.calib_params_widget)
         params_layout.addWidget(self.calib_params_area)
         self.calib_params_box.setLayout(params_layout)
-        calib_layout.addWidget(self.calib_params_box, 1)
+        left_layout.addWidget(self.calib_params_box, 1)
 
+        self.run_button = QPushButton("Start Calibration")
+        self.run_button.clicked.connect(self._run_optimization)
+        left_layout.addWidget(self.run_button)
+
+        self.opt_status = QLabel("")
+        left_layout.addWidget(self.opt_status)
+
+        self.loss_label = QLabel("Loss: -")
+        left_layout.addWidget(self.loss_label)
+
+        self.opt_log_box = QGroupBox("Iteration log")
+        log_layout = QVBoxLayout()
+        self.opt_log = QPlainTextEdit()
+        self.opt_log.setReadOnly(True)
+        self.opt_log.setMaximumBlockCount(2000)
+        log_layout.addWidget(self.opt_log)
+        self.opt_log_box.setLayout(log_layout)
+        left_layout.addWidget(self.opt_log_box, 2)
+
+        left_layout.addStretch()
+
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.calib_results_box = QGroupBox("Calibration Plot")
+        calib_layout = QVBoxLayout()
         self.calib_canvas = MatplotlibCanvas(width=8.0, height=4.4)
         self.calib_canvas.setMinimumHeight(340)
-        calib_plot_container = QWidget()
-        calib_plot_layout = QVBoxLayout(calib_plot_container)
-        calib_plot_layout.setContentsMargins(0, 0, 0, 0)
-        calib_plot_layout.addWidget(self.calib_canvas, 1)
+        calib_layout.addWidget(self.calib_canvas, 1)
         calib_actions = QHBoxLayout()
         calib_actions.addStretch()
         self.calib_save_btn = QPushButton("Save Calibration Plot")
+        self.calib_save_btn.setEnabled(False)
         self.calib_save_btn.clicked.connect(lambda: self._save_figure(self.calib_canvas, "calibration_plot"))
         calib_actions.addWidget(self.calib_save_btn)
-        calib_plot_layout.addLayout(calib_actions)
-        calib_layout.addWidget(calib_plot_container, 2)
+        calib_layout.addLayout(calib_actions)
         self.calib_results_box.setLayout(calib_layout)
-        self.calib_results_box.setVisible(False)
-        layout.addWidget(self.calib_results_box)
+        right_layout.addWidget(self.calib_results_box, 1)
+
+        body_layout.addWidget(left_panel, 1)
+        body_layout.addWidget(right_panel, 3)
+
+        outer_layout.addLayout(body_layout)
 
         self.opt_next_btn = QPushButton("Next: Prediction")
         self.opt_next_btn.setEnabled(False)
         self.opt_next_btn.clicked.connect(lambda: self._set_step(3))
-        layout.addWidget(self.opt_next_btn, alignment=Qt.AlignRight)
+        outer_layout.addWidget(self.opt_next_btn, alignment=Qt.AlignRight)
 
-        self.opt_box.setLayout(layout)
+        self.opt_box.setLayout(outer_layout)
+        self._refresh_opt_params_from_springs()
         return self.opt_box
 
     def _build_prediction_section(self):
         self.prediction_box = QGroupBox("4. Prediction")
         layout = QHBoxLayout()
 
-        left_panel = QVBoxLayout()
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(10)
+        left_panel.setMaximumWidth(360)
         self.prediction_params_box = QGroupBox("Parameters")
         pred_params_layout = QVBoxLayout()
         self.prediction_params_area = QScrollArea()
@@ -2082,21 +2158,26 @@ class MainWindow(QMainWindow):
         self.prediction_params_area.setWidget(self.prediction_params_widget)
         pred_params_layout.addWidget(self.prediction_params_area)
         self.prediction_params_box.setLayout(pred_params_layout)
-        left_panel.addWidget(self.prediction_params_box)
+        left_layout.addWidget(self.prediction_params_box)
 
         self.prediction_modes_box = QGroupBox("Prediction Data")
         modes_layout = QVBoxLayout()
+        self.prediction_author_label = QLabel("Author: -")
+        self.prediction_author_label.setFont(make_font(13, QFont.DemiBold))
+        modes_layout.addWidget(self.prediction_author_label)
         self.prediction_modes_widget = QWidget()
-        self.prediction_modes_layout = QGridLayout(self.prediction_modes_widget)
+        self.prediction_modes_layout = QVBoxLayout(self.prediction_modes_widget)
+        self.prediction_modes_layout.setContentsMargins(0, 6, 0, 6)
+        self.prediction_modes_layout.setSpacing(10)
         modes_layout.addWidget(self.prediction_modes_widget)
         self.prediction_button = QPushButton("Update Prediction")
         self.prediction_button.clicked.connect(self._update_prediction_plot)
         modes_layout.addWidget(self.prediction_button)
         self.prediction_modes_box.setLayout(modes_layout)
-        left_panel.addWidget(self.prediction_modes_box)
-        left_panel.addStretch()
+        left_layout.addWidget(self.prediction_modes_box)
+        left_layout.addStretch()
 
-        layout.addLayout(left_panel, 1)
+        layout.addWidget(left_panel, 1)
 
         self.prediction_canvas = MatplotlibCanvas(width=8.0, height=4.4)
         self.prediction_canvas.setMinimumHeight(340)
@@ -2106,14 +2187,12 @@ class MainWindow(QMainWindow):
         pred_plot_layout.addWidget(self.prediction_canvas, 1)
         pred_actions = QHBoxLayout()
         pred_actions.addStretch()
-        self.pred_report_btn = QPushButton("Export Report (PDF)")
-        self.pred_report_btn.clicked.connect(self._export_report)
-        pred_actions.addWidget(self.pred_report_btn)
         self.pred_save_btn = QPushButton("Save Prediction Plot")
+        self.pred_save_btn.setEnabled(False)
         self.pred_save_btn.clicked.connect(lambda: self._save_figure(self.prediction_canvas, "prediction_plot"))
         pred_actions.addWidget(self.pred_save_btn)
         pred_plot_layout.addLayout(pred_actions)
-        layout.addWidget(pred_plot_container, 2)
+        layout.addWidget(pred_plot_container, 3)
 
         self.prediction_box.setLayout(layout)
         return self.prediction_box
@@ -2489,6 +2568,7 @@ class MainWindow(QMainWindow):
             self.preview_canvas.apply_theme()
             self.preview_canvas.draw()
             self.data_next_btn.setEnabled(False)
+            self.preview_save_btn.setEnabled(False)
             self._update_workflow_cards()
             return
         bt_selected = any(d["mode"] == "BT" for d in data)
@@ -2507,6 +2587,7 @@ class MainWindow(QMainWindow):
             self.preview_canvas.figure.tight_layout()
             self.preview_canvas.draw()
             self.data_next_btn.setEnabled(True)
+            self.preview_save_btn.setEnabled(True)
             self._update_workflow_cards()
             return
 
@@ -2517,22 +2598,40 @@ class MainWindow(QMainWindow):
         for idx, d in enumerate(data):
             stretch = d["stretch"]
             stress = d["stress_exp"]
+            stress_type = d.get("stress_type", "PK1")
+            component = d.get("component")
             label = d.get("label") or format_mode_label(d.get("mode_raw", d["mode"]))
             if d["mode"] == "BT":
-                comp_11, comp_22 = get_bt_component_labels(d.get("stress_type", "PK1"))
-                if np.ndim(stress) == 1:
-                    ax.plot(stretch, stress, "o", label=f"{label} {comp_11}")
+                if component:
+                    comp_label = get_component_label(stress_type, component)
+                    ax.plot(stretch, stress, "o", label=f"{label} {comp_label}")
                 else:
+                    comp_11, comp_22 = get_bt_component_labels(stress_type)
+                    if np.ndim(stress) == 1:
+                        ax.plot(stretch, stress, "o", label=f"{label} {comp_11}")
+                    else:
+                        ax.plot(stretch, stress[:, 0], "o", label=f"{label} {comp_11}")
+                        ax.plot(stretch, stress[:, 1], "^", label=f"{label} {comp_22}")
+                ax.set_xlabel(r"$\lambda_1$")
+            else:
+                if component:
+                    comp_label = get_component_label(stress_type, component)
+                    ax.plot(stretch, stress, "o", label=f"{label} {comp_label}")
+                elif np.ndim(stress) == 1:
+                    ax.plot(stretch, stress, "o", label=label)
+                else:
+                    comp_11, comp_22 = get_bt_component_labels(stress_type)
                     ax.plot(stretch, stress[:, 0], "o", label=f"{label} {comp_11}")
                     ax.plot(stretch, stress[:, 1], "^", label=f"{label} {comp_22}")
                 ax.set_xlabel(r"$\lambda_1$")
+            if component or np.ndim(stress) > 1:
+                ax.set_ylabel(r"$\sigma$" if stress_type == "cauchy" else r"$P$")
             else:
-                ax.plot(stretch, stress, "o", label=label)
-                ax.set_xlabel(r"$\lambda_1$")
-            ax.set_ylabel(get_uniaxial_component_label(d.get("stress_type", "PK1")))
+                ax.set_ylabel(get_uniaxial_component_label(stress_type))
         ax.legend(fontsize=8)
         self.preview_canvas.figure.tight_layout()
         self.preview_canvas.draw()
+        self.preview_save_btn.setEnabled(True)
         self.data_next_btn.setEnabled(True)
         self._update_workflow_cards()
 
@@ -2591,6 +2690,10 @@ class MainWindow(QMainWindow):
         self._rebuild_springs(len(states), states_override=states)
 
     def _run_optimization(self):
+        self._reset_prediction_results()
+        self._clear_prediction_selection()
+        if hasattr(self, "calib_save_btn"):
+            self.calib_save_btn.setEnabled(False)
         exp_data = self._collect_experimental_data()
         if not exp_data:
             QMessageBox.warning(self, "Missing data", "Select at least one dataset or load custom data.")
@@ -2615,10 +2718,16 @@ class MainWindow(QMainWindow):
 
         method = self.method_combo.currentText()
         self.opt_status.setText("Running optimization...")
+        self.opt_status.setStyleSheet("color: palette(windowtext);")
+        self.loss_label.setText("Loss: -")
+        if hasattr(self, "opt_log"):
+            self.opt_log.clear()
+        self._populate_calibration_params(execution_network.param_names, initial_guess)
         self.run_button.setEnabled(False)
         self._set_step(2)
 
         self.worker = OptimizerWorker(optimizer, initial_guess, bounds, method)
+        self.worker.progress.connect(self._on_optimization_progress)
         self.worker.finished.connect(self._on_optimization_finished)
         self.worker.failed.connect(self._on_optimization_failed)
         self.worker.start()
@@ -2626,12 +2735,17 @@ class MainWindow(QMainWindow):
     def _on_optimization_finished(self, result, optimizer):
         self.run_button.setEnabled(True)
         if not result.success:
-            self.opt_status.setText(f"Optimization failed: {result.message}")
+            self.opt_status.setText("Optimization failed")
+            self.opt_status.setStyleSheet("color: #dc2626;")
+            QMessageBox.warning(
+                self,
+                "Optimization failed",
+                "Calibration did not converge. Return to Step 2 and adjust the initial parameters.",
+            )
+            self._update_workflow_cards()
             return
-        message = "Optimization completed."
-        if result.fun > 0.1:
-            message += " Loss is high; consider adjusting initial guesses and rerun."
-        self.opt_status.setText(message)
+        self.opt_status.setText("Optimization completed")
+        self.opt_status.setStyleSheet("color: palette(highlight);")
         self.loss_label.setText(f"Final Loss: {result.fun:.6f}")
         self.opt_next_btn.setEnabled(True)
         self.latest_optimizer = optimizer
@@ -2641,14 +2755,27 @@ class MainWindow(QMainWindow):
         self._populate_prediction_params(optimizer.param_names, result.x)
         self._refresh_prediction_modes()
         self._plot_calibration_results()
-        self.calib_results_box.setVisible(True)
         self._update_workflow_cards()
 
     def _on_optimization_failed(self, message):
         self.run_button.setEnabled(True)
-        self.opt_status.setText(f"Optimization failed: {message}")
+        self.opt_status.setText("Optimization failed")
+        self.opt_status.setStyleSheet("color: #dc2626;")
+        QMessageBox.warning(
+            self,
+            "Optimization failed",
+            "Calibration did not converge. Return to Step 2 and adjust the initial parameters.",
+        )
         self.opt_next_btn.setEnabled(False)
         self._update_workflow_cards()
+
+    def _on_optimization_progress(self, iteration, loss, params):
+        self.opt_status.setText(f"Running optimization... Iter {iteration}")
+        self.opt_status.setStyleSheet("color: palette(windowtext);")
+        self.loss_label.setText(f"Loss: {loss:.6f}")
+        self._update_calibration_params_values(params)
+        if hasattr(self, "opt_log"):
+            self.opt_log.appendPlainText(f"Iter {iteration}: Loss {loss:.6f}")
 
     def _on_step_selected(self, index):
         if index < 0:
@@ -2720,7 +2847,14 @@ class MainWindow(QMainWindow):
         for idx, card in enumerate(self.step_cards):
             complete = self._is_step_complete(idx)
             unlocked = self._is_step_unlocked(idx)
-            if not unlocked:
+            if idx == 3:
+                if not unlocked:
+                    state = "locked"
+                    status = "Locked"
+                else:
+                    state = "ready"
+                    status = ""
+            elif not unlocked:
                 state = "locked"
                 status = "Locked"
             elif complete:
@@ -2756,25 +2890,70 @@ class MainWindow(QMainWindow):
         else:
             self.model_next_btn.setEnabled(False)
         self._update_workflow_cards()
+        self._refresh_opt_params_from_springs()
+
+    def _collect_initial_params(self):
+        param_names = []
+        values = []
+        for idx, spring in enumerate(self.spring_widgets):
+            if not spring.is_valid():
+                return [], []
+            try:
+                func, params = spring.build_config()
+            except Exception:
+                return [], []
+            prefix = f"{func.__name__}_{idx + 1}"
+            model_params = getattr(func, "param_names", [])
+            for name, value in zip(model_params, params):
+                param_names.append(f"{prefix}_{name}")
+                values.append(value)
+        return param_names, values
+
+    def _refresh_opt_params_from_springs(self):
+        if not hasattr(self, "calib_params_layout"):
+            return
+        param_names, values = self._collect_initial_params()
+        if not param_names:
+            self._clear_calibration_params()
+            return
+        self._populate_calibration_params(param_names, values)
 
     def _format_result_param_label(self, name):
         parts = name.split("_")
-        short = parts[-1] if parts else name
-        match = re.match(r"^([A-Za-z]+)(\d+)$", short)
+        for idx, part in enumerate(parts[:-1]):
+            if part.isdigit():
+                name = "_".join(parts[idx + 1:])
+                break
+
+        def italic(text):
+            return f"<i>{text}</i>"
+
+        def format_base(base):
+            if base.lower() == "mu":
+                return "&mu;"
+            if base.lower() == "alpha":
+                return "&alpha;"
+            return base
+
+        match = re.match(r"^([A-Za-z]+)(\d+)$", name)
         if match:
             base, idx = match.groups()
-            if base.lower() == "mu":
-                return f"&mu;<sub>{idx}</sub>"
-            if base.lower() == "alpha":
-                return f"&alpha;<sub>{idx}</sub>"
-            return f"{base}<sub>{idx}</sub>"
-        if short.lower() == "mu":
-            return "&mu;"
-        if short.lower() == "alpha":
-            return "&alpha;"
-        return short
+            base_html = format_base(base)
+            return f"{italic(base_html)}<sub>{idx}</sub>"
+        match = re.match(r"^([A-Za-z]+)_([0-9]+)$", name)
+        if match:
+            base, idx = match.groups()
+            base_html = format_base(base)
+            return f"{italic(base_html)}<sub>{idx}</sub>"
+        if name.lower() == "mu":
+            return italic("&mu;")
+        if name.lower() == "alpha":
+            return italic("&alpha;")
+        return italic(name)
 
     def _clear_calibration_params(self):
+        self.calib_param_edits = []
+        self.calib_param_names = []
         while self.calib_params_layout.count():
             item = self.calib_params_layout.takeAt(0)
             widget = item.widget()
@@ -2783,6 +2962,7 @@ class MainWindow(QMainWindow):
 
     def _populate_calibration_params(self, param_names, values):
         self._clear_calibration_params()
+        self.calib_param_names = list(param_names)
         for name, value in zip(param_names, values):
             row = QWidget()
             row_layout = QHBoxLayout(row)
@@ -2792,13 +2972,24 @@ class MainWindow(QMainWindow):
             label.setText(self._format_result_param_label(name))
             edit = QLineEdit(f"{value:.6g}")
             edit.setReadOnly(True)
-            edit.setMinimumWidth(140)
-            edit.setMinimumHeight(26)
+            edit.setMinimumWidth(120)
+            edit.setMinimumHeight(24)
             edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             row_layout.addWidget(label)
             row_layout.addWidget(edit, 1)
             self.calib_params_layout.addWidget(row)
+            self.calib_param_edits.append(edit)
         self.calib_params_layout.addStretch()
+
+    def _update_calibration_params_values(self, values):
+        edits = getattr(self, "calib_param_edits", [])
+        if not edits or len(values) != len(edits):
+            return
+        for edit, value in zip(edits, values):
+            try:
+                edit.setText(f"{float(value):.6g}")
+            except (TypeError, ValueError):
+                edit.setText(str(value))
 
     def _clear_prediction_params(self):
         while self.prediction_params_layout.count():
@@ -2820,33 +3011,79 @@ class MainWindow(QMainWindow):
             edit.setMinimumWidth(140)
             edit.setMinimumHeight(26)
             edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            edit.textEdited.connect(self._on_prediction_param_edited)
             row_layout.addWidget(label)
             row_layout.addWidget(edit, 1)
             self.prediction_params_layout.addWidget(row)
         self.prediction_params_layout.addStretch()
 
+    def _store_prediction_selection(self):
+        if not hasattr(self, "prediction_selection"):
+            self.prediction_selection = {}
+        if not hasattr(self, "prediction_modes_layout") or not hasattr(self, "author_combo"):
+            return
+        author = self.author_combo.currentText()
+        if author == "Select...":
+            return
+        selected = set()
+        for i in range(self.prediction_modes_layout.count()):
+            widget = self.prediction_modes_layout.itemAt(i).widget()
+            if isinstance(widget, QCheckBox) and widget.isChecked():
+                mode_key = widget.property("mode_key") or widget.text()
+                selected.add(str(mode_key))
+        self.prediction_selection[author] = selected
+
+    def _clear_prediction_selection(self):
+        if not hasattr(self, "prediction_selection"):
+            self.prediction_selection = {}
+        author = self.author_combo.currentText() if hasattr(self, "author_combo") else None
+        if author and author != "Select...":
+            self.prediction_selection[author] = set()
+        if hasattr(self, "prediction_modes_layout"):
+            for i in range(self.prediction_modes_layout.count()):
+                widget = self.prediction_modes_layout.itemAt(i).widget()
+                if isinstance(widget, QCheckBox):
+                    widget.blockSignals(True)
+                    widget.setChecked(False)
+                    widget.blockSignals(False)
+
     def _refresh_prediction_modes(self):
+        self._store_prediction_selection()
         for i in reversed(range(self.prediction_modes_layout.count())):
             widget = self.prediction_modes_layout.itemAt(i).widget()
             if widget:
                 widget.setParent(None)
         author = self.author_combo.currentText()
+        if hasattr(self, "prediction_author_label"):
+            if author == "Select...":
+                self.prediction_author_label.setText("Author: -")
+            else:
+                self.prediction_author_label.setText(f"Author: {author}")
         if author == "Select...":
             return
         available = self.datasets.get(author, [])
+        saved = self.prediction_selection.get(author, set())
         for idx, mode in enumerate(available):
             checkbox = QCheckBox(format_mode_label(mode))
+            checkbox.setObjectName("modeOption")
+            checkbox.setMinimumHeight(26)
             checkbox.setProperty("mode_key", mode)
             checkbox.stateChanged.connect(self._on_prediction_mode_toggled)
-            row = idx // 2
-            col = idx % 2
-            self.prediction_modes_layout.addWidget(checkbox, row, col)
+            if mode in saved:
+                checkbox.setChecked(True)
+            self.prediction_modes_layout.addWidget(checkbox)
         self._apply_prediction_mode_rules()
 
     def _on_prediction_mode_toggled(self, _state):
+        if hasattr(self, "pred_save_btn"):
+            self.pred_save_btn.setEnabled(False)
         self._apply_prediction_mode_rules()
 
     def _apply_prediction_mode_rules(self):
+        author = ""
+        if hasattr(self, "author_combo"):
+            author = self.author_combo.currentText()
+        allow_mixed_bt = author == "Katashima_2012"
         bt_selected = False
         non_bt_selected = False
         checkboxes = []
@@ -2861,6 +3098,11 @@ class MainWindow(QMainWindow):
                     else:
                         non_bt_selected = True
                 checkboxes.append((widget, is_bt))
+
+        if allow_mixed_bt:
+            for checkbox, _is_bt in checkboxes:
+                checkbox.setEnabled(True)
+            return
 
         for checkbox, is_bt in checkboxes:
             if bt_selected and not is_bt and not checkbox.isChecked():
@@ -2913,21 +3155,59 @@ class MainWindow(QMainWindow):
         if not bt_only:
             self.calib_canvas.ax.set_xlabel(r"$\lambda_1$")
             stress_types = {d.get("stress_type", "PK1") for d in calib_data if d["mode"] != "BT"}
-            if len(stress_types) == 1:
-                self.calib_canvas.ax.set_ylabel(get_uniaxial_component_label(stress_types.pop()))
+            has_multi = any(
+                d["mode"] != "BT" and (np.ndim(d.get("stress_exp")) > 1 or d.get("component"))
+                for d in calib_data
+            )
+            if has_multi:
+                if len(stress_types) == 1:
+                    stress_type = stress_types.pop()
+                    y_label = r"$\sigma$" if stress_type == "cauchy" else r"$P$"
+                else:
+                    y_label = r"$P$"
+            elif len(stress_types) == 1:
+                y_label = get_uniaxial_component_label(stress_types.pop())
             else:
-                self.calib_canvas.ax.set_ylabel(r"$P_{11}$")
+                y_label = r"$P_{11}$"
+            self.calib_canvas.ax.set_ylabel(y_label)
             self.calib_canvas.ax.legend(fontsize=7)
             self.calib_canvas.figure.tight_layout()
+        r2_total = getattr(self.latest_result, "r2_total", None)
+        if r2_total is None and hasattr(optimizer, "compute_r2"):
+            try:
+                r2_total, _ = optimizer.compute_r2(self.latest_result.x)
+                self.latest_result.r2_total = r2_total
+            except Exception:
+                r2_total = None
+        if r2_total is not None and np.isfinite(r2_total):
+            text_color = QApplication.palette().color(QPalette.WindowText)
+            color = (text_color.redF(), text_color.greenF(), text_color.blueF(), 1.0)
+            self.calib_canvas.figure.text(
+                0.98,
+                0.02,
+                f"$R^2 = {r2_total * 100:.1f}\\%$",
+                ha="right",
+                va="bottom",
+                fontsize=9,
+                color=color,
+            )
+        if hasattr(self, "calib_save_btn"):
+            self.calib_save_btn.setEnabled(True)
         self.calib_canvas.draw()
 
     def _reset_results(self):
         self.latest_optimizer = None
         self.latest_result = None
         self.latest_network = None
-        self.loss_label.setText("Final Loss: -")
+        self.opt_status.setText("")
+        self.opt_status.setStyleSheet("color: palette(windowtext);")
+        self.loss_label.setText("Loss: -")
         self.opt_next_btn.setEnabled(False)
-        self.calib_results_box.setVisible(False)
+        self._clear_prediction_selection()
+        if hasattr(self, "calib_save_btn"):
+            self.calib_save_btn.setEnabled(False)
+        if hasattr(self, "opt_log"):
+            self.opt_log.clear()
         self.calib_canvas.figure.clear()
         ax = self.calib_canvas.figure.add_subplot(111)
         self.calib_canvas.set_axes([ax])
@@ -2938,12 +3218,41 @@ class MainWindow(QMainWindow):
         self.prediction_canvas.set_axes([ax])
         self.prediction_canvas.apply_theme()
         self.prediction_canvas.draw()
+        if hasattr(self, "pred_save_btn"):
+            self.pred_save_btn.setEnabled(False)
         self._clear_calibration_params()
         self._clear_prediction_params()
+        self._refresh_opt_params_from_springs()
         self._update_workflow_cards()
+
+    def _reset_prediction_results(self):
+        if hasattr(self, "prediction_canvas"):
+            self.prediction_canvas.figure.clear()
+            ax = self.prediction_canvas.figure.add_subplot(111)
+            self.prediction_canvas.set_axes([ax])
+            self.prediction_canvas.apply_theme()
+            self.prediction_canvas.draw()
+        if hasattr(self, "pred_save_btn"):
+            self.pred_save_btn.setEnabled(False)
+        self._clear_prediction_params()
+
+    def _invalidate_prediction_plot(self):
+        if hasattr(self, "prediction_canvas"):
+            self.prediction_canvas.figure.clear()
+            ax = self.prediction_canvas.figure.add_subplot(111)
+            self.prediction_canvas.set_axes([ax])
+            self.prediction_canvas.apply_theme()
+            self.prediction_canvas.draw()
+        if hasattr(self, "pred_save_btn"):
+            self.pred_save_btn.setEnabled(False)
+
+    def _on_prediction_param_edited(self, _text):
+        self._invalidate_prediction_plot()
 
     def _update_prediction_plot(self):
         if not self.latest_optimizer or not self.latest_result:
+            if hasattr(self, "pred_save_btn"):
+                self.pred_save_btn.setEnabled(False)
             return
         optimizer = self.latest_optimizer
         param_values = self._get_prediction_param_values()
@@ -2970,21 +3279,35 @@ class MainWindow(QMainWindow):
             self.prediction_canvas.ax.set_xlabel(r"$\lambda_1$")
             if pred_modes:
                 stress_types = {d.get("stress_type", "PK1") for d in pred_data if d["mode"] != "BT"}
-                if len(stress_types) == 1:
-                    self.prediction_canvas.ax.set_ylabel(get_uniaxial_component_label(stress_types.pop()))
+                has_multi = any(
+                    d["mode"] != "BT" and (np.ndim(d.get("stress_exp")) > 1 or d.get("component"))
+                    for d in pred_data
+                )
+                if has_multi:
+                    if len(stress_types) == 1:
+                        stress_type = stress_types.pop()
+                        y_label = r"$\sigma$" if stress_type == "cauchy" else r"$P$"
+                    else:
+                        y_label = r"$P$"
+                elif len(stress_types) == 1:
+                    y_label = get_uniaxial_component_label(stress_types.pop())
                 else:
-                    self.prediction_canvas.ax.set_ylabel(r"$P_{11}$")
+                    y_label = r"$P_{11}$"
+                self.prediction_canvas.ax.set_ylabel(y_label)
             else:
                 self.prediction_canvas.ax.set_ylabel(r"$P_{11}$")
             self.prediction_canvas.ax.legend(fontsize=7)
             self.prediction_canvas.figure.tight_layout()
         self.prediction_canvas.draw()
+        if hasattr(self, "pred_save_btn"):
+            self.pred_save_btn.setEnabled(bool(pred_modes))
 
     def _plot_bt_preview(self, canvas, data):
-        is_jones = all(d.get("author") == "Jones_1975" for d in data)
+        use_diff = all(d.get("bt_component") == "diff" for d in data)
+        use_component = any(d.get("component") for d in data)
         fig = canvas.figure
         fig.clear()
-        if is_jones:
+        if use_diff:
             ax = fig.add_subplot(111)
             canvas.set_axes([ax])
             canvas.apply_theme()
@@ -2995,14 +3318,34 @@ class MainWindow(QMainWindow):
                 if np.ndim(stress) == 1:
                     y = stress
                 else:
-                    y = stress[:, 0]
+                    y = stress[:, 0] - stress[:, 1]
                 lam2 = parse_lambda2(d.get("mode_raw", ""))
                 label = f"λ₂={lam2}" if lam2 else "BT"
                 marker = markers[idx % len(markers)]
                 color = colors[idx % len(colors)]
                 ax.plot(d["stretch"], y, marker, color=color, label=label, linestyle="None")
             ax.set_xlabel(r"$\lambda_1$")
-            ax.set_ylabel(r"$\sigma_{11}-\sigma_{22}$")
+            diff_label = get_bt_diff_label(data[0].get("stress_type", "PK1"))
+            ax.set_ylabel(diff_label)
+            ax.legend(fontsize=8)
+            fig.tight_layout()
+            return
+
+        if use_component:
+            ax = fig.add_subplot(111)
+            canvas.set_axes([ax])
+            canvas.apply_theme()
+            stress_type = data[0].get("stress_type", "PK1")
+            markers = ["s", "v", "^", "D", "o", "P", "X"]
+            colors = ["#7f8c8d", "#2980b9", "#c0392b", "#27ae60", "#8e44ad", "#d35400", "#2c3e50"]
+            for idx, d in enumerate(data):
+                component = d.get("component")
+                comp_label = get_component_label(stress_type, component)
+                marker = markers[idx % len(markers)]
+                color = colors[idx % len(colors)]
+                ax.plot(d["stretch"], d["stress_exp"], marker, color=color, label=comp_label, linestyle="None")
+            ax.set_xlabel(r"$\lambda_1$")
+            ax.set_ylabel(r"$\sigma$" if stress_type == "cauchy" else r"$P$")
             ax.legend(fontsize=8)
             fig.tight_layout()
             return
@@ -3034,10 +3377,12 @@ class MainWindow(QMainWindow):
         fig.tight_layout()
 
     def _plot_bt_dataset(self, canvas, data, solver, params, colors, exp_label, fit_label):
-        is_jones = all(d.get("author") == "Jones_1975" for d in data)
+        use_diff = all(d.get("bt_component") == "diff" for d in data)
+        use_component = any(d.get("component") for d in data)
+        use_single_axis = all(d.get("author") == "Katashima_2012" for d in data)
         fig = canvas.figure
         fig.clear()
-        if is_jones:
+        if use_diff:
             ax = fig.add_subplot(111)
             canvas.set_axes([ax])
             canvas.apply_theme()
@@ -3048,7 +3393,7 @@ class MainWindow(QMainWindow):
                 if np.ndim(stress) == 1:
                     y = stress
                 else:
-                    y = stress[:, 0]
+                    y = stress[:, 0] - stress[:, 1]
                 lam2 = parse_lambda2(d.get("mode_raw", ""))
                 label = f"λ₂={lam2}" if lam2 else "BT"
                 marker = markers[idx % len(markers)]
@@ -3059,12 +3404,84 @@ class MainWindow(QMainWindow):
                 for lam in smooth:
                     lam2_val = float(d["stretch_secondary"][0])
                     F = get_deformation_gradient((lam, lam2_val), "BT")
-                    stress_tensor = solver.get_Cauchy_stress(F, params)
+                    stress_type = d.get("stress_type", "PK1")
+                    if stress_type == "cauchy":
+                        stress_tensor = solver.get_Cauchy_stress(F, params)
+                    else:
+                        stress_tensor = solver.get_1st_PK_stress(F, params)
                     comps = get_stress_components(stress_tensor, "BT")
                     model.append(comps[0] - comps[1])
                 ax.plot(smooth, model, "-", color=color, label="_nolegend_")
             ax.set_xlabel(r"$\lambda_1$")
-            ax.set_ylabel(r"$\sigma_{11}-\sigma_{22}$")
+            diff_label = get_bt_diff_label(data[0].get("stress_type", "PK1"))
+            ax.set_ylabel(diff_label)
+            ax.legend(fontsize=8)
+            fig.tight_layout()
+            return
+        if use_component:
+            ax = fig.add_subplot(111)
+            canvas.set_axes([ax])
+            canvas.apply_theme()
+            stress_type = data[0].get("stress_type", "PK1")
+            markers = ["s", "v", "^", "D", "o", "P", "X"]
+            colors_seq = ["#7f8c8d", "#2980b9", "#c0392b", "#27ae60", "#8e44ad", "#d35400", "#2c3e50"]
+            for idx, d in enumerate(data):
+                component = d.get("component")
+                comp_label = get_component_label(stress_type, component)
+                marker = markers[idx % len(markers)]
+                color = colors_seq[idx % len(colors_seq)]
+                ax.plot(d["stretch"], d["stress_exp"], marker, color=color, label=f"{exp_label} {comp_label}", linestyle="None")
+                model = []
+                for F in d["F_list"]:
+                    if stress_type == "cauchy":
+                        stress_tensor = solver.get_Cauchy_stress(F, params)
+                    else:
+                        stress_tensor = solver.get_1st_PK_stress(F, params)
+                    comps = get_stress_components(stress_tensor, "BT")
+                    model.append(comps[1] if component == "22" else comps[0])
+                ax.plot(d["stretch"], model, "-", color=color, label=f"{fit_label} {comp_label}")
+            ax.set_xlabel(r"$\lambda_1$")
+            ax.set_ylabel(r"$\sigma$" if stress_type == "cauchy" else r"$P$")
+            ax.legend(fontsize=8)
+            fig.tight_layout()
+            return
+        if use_single_axis:
+            ax = fig.add_subplot(111)
+            canvas.set_axes([ax])
+            canvas.apply_theme()
+            stress_type = data[0].get("stress_type", "PK1")
+            comp_11, comp_22 = get_bt_component_labels(stress_type)
+            markers = ["s", "v", "^", "D", "o", "P", "X"]
+            colors_seq = ["#7f8c8d", "#2980b9", "#c0392b", "#27ae60", "#8e44ad", "#d35400", "#2c3e50"]
+            for idx, d in enumerate(data):
+                stress = d["stress_exp"]
+                lam2 = parse_lambda2(d.get("mode_raw", ""))
+                label = f"λ₂={lam2}" if lam2 else "BT"
+                marker = markers[idx % len(markers)]
+                color = colors_seq[idx % len(colors_seq)]
+                if np.ndim(stress) == 1:
+                    ax.plot(d["stretch"], stress, marker, color=color, label=f"{exp_label} {label} {comp_11}", linestyle="None")
+                else:
+                    ax.plot(d["stretch"], stress[:, 0], marker, color=color, label=f"{exp_label} {label} {comp_11}", linestyle="None")
+                    ax.plot(d["stretch"], stress[:, 1], "^", color=color, label=f"{exp_label} {label} {comp_22}", linestyle="None")
+
+                model_11 = []
+                model_22 = []
+                for F in d["F_list"]:
+                    if stress_type == "cauchy":
+                        stress_tensor = solver.get_Cauchy_stress(F, params)
+                    else:
+                        stress_tensor = solver.get_1st_PK_stress(F, params)
+                    comps = get_stress_components(stress_tensor, "BT")
+                    model_11.append(comps[0])
+                    if len(comps) > 1:
+                        model_22.append(comps[1])
+                ax.plot(d["stretch"], model_11, "-", color=color, label=f"{fit_label} {label} {comp_11}")
+                if model_22 and np.ndim(stress) > 1:
+                    ax.plot(d["stretch"], model_22, "--", color=color, label=f"{fit_label} {label} {comp_22}")
+
+            ax.set_xlabel(r"$\lambda_1$")
+            ax.set_ylabel(r"$\sigma$" if stress_type == "cauchy" else r"$P$")
             ax.legend(fontsize=8)
             fig.tight_layout()
             return
@@ -3124,17 +3541,112 @@ class MainWindow(QMainWindow):
             stretch = d["stretch"]
             stress = d["stress_exp"]
             label = d.get("label") or format_mode_label(d.get("mode_raw", mode))
+            component = d.get("component")
+            has_two = np.ndim(stress) > 1 and component is None
 
             color = colors.get(mode, "black")
             if mode == "BT":
+                bt_diff = d.get("bt_component") == "diff"
+                if bt_diff:
+                    diff_label = get_bt_diff_label(stress_type)
+                    if np.ndim(stress) == 1:
+                        exp_values = stress
+                    else:
+                        exp_values = stress[:, 0] - stress[:, 1]
+                    ax.plot(stretch, exp_values, "o", color=color, label=f"{exp_label} {label} {diff_label}")
+                    smooth = np.linspace(min(stretch), max(stretch), 120)
+                    model = []
+                    for lam in smooth:
+                        lam2 = float(d["stretch_secondary"][0])
+                        F = get_deformation_gradient((lam, lam2), mode)
+                        if stress_type == "cauchy":
+                            stress_tensor = solver.get_Cauchy_stress(F, params)
+                        else:
+                            stress_tensor = solver.get_1st_PK_stress(F, params)
+                        comps = get_stress_components(stress_tensor, mode)
+                        model.append(comps[0] - comps[1])
+                    ax.plot(smooth, model, "-", color=color, label=f"{fit_label} {label} {diff_label}")
+                    continue
                 comp_11, comp_22 = get_bt_component_labels(stress_type)
+                if component:
+                    comp_label = get_component_label(stress_type, component)
+                    ax.plot(stretch, stress, "o", color=color, label=f"{exp_label} {label} {comp_label}")
+                    model = []
+                    for F in d["F_list"]:
+                        if stress_type == "cauchy":
+                            stress_tensor = solver.get_Cauchy_stress(F, params)
+                        else:
+                            stress_tensor = solver.get_1st_PK_stress(F, params)
+                        comps = get_stress_components(stress_tensor, mode)
+                        model.append(comps[1] if component == "22" else comps[0])
+                    ax.plot(stretch, model, "-", color=color, label=f"{fit_label} {label} {comp_label}")
+                    continue
                 if np.ndim(stress) == 1:
                     ax.plot(stretch, stress, "o", color=color, label=f"{exp_label} {label} {comp_11}")
                 else:
                     ax.plot(stretch, stress[:, 0], "o", color=color, label=f"{exp_label} {label} {comp_11}")
                     ax.plot(stretch, stress[:, 1], "^", color=color, label=f"{exp_label} {label} {comp_22}")
+                bt_variable = False
+                lam2_vals = d.get("stretch_secondary")
+                if lam2_vals is not None:
+                    try:
+                        bt_variable = np.ptp(lam2_vals) > 1e-6
+                    except Exception:
+                        bt_variable = False
+                if d.get("author") == "Katashima_2012":
+                    bt_variable = True
+                if bt_variable:
+                    model = []
+                    model2 = []
+                    for F in d["F_list"]:
+                        if stress_type == "cauchy":
+                            stress_tensor = solver.get_Cauchy_stress(F, params)
+                        else:
+                            stress_tensor = solver.get_1st_PK_stress(F, params)
+                        comps = get_stress_components(stress_tensor, mode)
+                        model.append(comps[0])
+                        if len(comps) > 1:
+                            model2.append(comps[1])
+                    ax.plot(stretch, model, "-", color=color, label=f"{fit_label} {label} {comp_11}")
+                    if model2 and np.ndim(stress) > 1:
+                        ax.plot(stretch, model2, "--", color=color, label=f"{fit_label} {label} {comp_22}")
+                    continue
             else:
-                ax.plot(stretch, stress, "o", color=color, label=f"{exp_label} {label}")
+                comp_11, comp_22 = get_bt_component_labels(stress_type)
+                if component:
+                    comp_label = get_component_label(stress_type, component)
+                    ax.plot(stretch, stress, "o", color=color, label=f"{exp_label} {label} {comp_label}")
+                elif has_two:
+                    ax.plot(stretch, stress[:, 0], "o", color=color, label=f"{exp_label} {label} {comp_11}")
+                    ax.plot(stretch, stress[:, 1], "^", color=color, label=f"{exp_label} {label} {comp_22}")
+                else:
+                    ax.plot(stretch, stress, "o", color=color, label=f"{exp_label} {label}")
+                stretch_secondary = d.get("stretch_secondary")
+                if stretch_secondary is not None or component:
+                    model = []
+                    model2 = []
+                    for F in d["F_list"]:
+                        if stress_type == "cauchy":
+                            stress_tensor = solver.get_Cauchy_stress(F, params)
+                        else:
+                            stress_tensor = solver.get_1st_PK_stress(F, params)
+                        comps = get_stress_components(stress_tensor, mode)
+                        if component == "22":
+                            model.append(comps[1])
+                        else:
+                            model.append(comps[0])
+                        if has_two and len(comps) > 1:
+                            model2.append(comps[1])
+                    if component:
+                        comp_label = get_component_label(stress_type, component)
+                        ax.plot(stretch, model, "-", color=color, label=f"{fit_label} {label} {comp_label}")
+                    elif has_two:
+                        ax.plot(stretch, model, "-", color=color, label=f"{fit_label} {label} {comp_11}")
+                        if model2:
+                            ax.plot(stretch, model2, "--", color=color, label=f"{fit_label} {label} {comp_22}")
+                    else:
+                        ax.plot(stretch, model, "-", color=color, label=f"{fit_label} {label}")
+                    continue
 
             smooth = np.linspace(min(stretch), max(stretch), 120)
             model = []
@@ -3150,13 +3662,22 @@ class MainWindow(QMainWindow):
                 else:
                     stress_tensor = solver.get_1st_PK_stress(F, params)
                 comps = get_stress_components(stress_tensor, mode)
-                model.append(comps[0])
-                if len(comps) > 1:
+                if component == "22":
+                    model.append(comps[1])
+                else:
+                    model.append(comps[0])
+                if (mode == "BT" or has_two) and len(comps) > 1:
                     model2.append(comps[1])
             if mode == "BT":
                 ax.plot(smooth, model, "-", color=color, label=f"{fit_label} {label} {comp_11}")
             else:
-                ax.plot(smooth, model, "-", color=color, label=f"{fit_label} {label}")
+                if component:
+                    comp_label = get_component_label(stress_type, component)
+                    ax.plot(smooth, model, "-", color=color, label=f"{fit_label} {label} {comp_label}")
+                elif has_two:
+                    ax.plot(smooth, model, "-", color=color, label=f"{fit_label} {label} {comp_11}")
+                else:
+                    ax.plot(smooth, model, "-", color=color, label=f"{fit_label} {label}")
             if model2:
                 ax.plot(smooth, model2, "--", color=color, label=f"{fit_label} {label} {comp_22}")
         return False
