@@ -7,7 +7,7 @@ class Kinematics:
     Automatically detects model type (invariant vs stretch) from function tags.
     """
 
-    def __init__(self, energy_function, param_names):
+    def __init__(self, energy_function, param_names, use_spectral_stretch=True, spectral_tol=1e-10):
         """
         Args:
             energy_function: Function from MaterialModels (must have @register_model tags).
@@ -15,6 +15,8 @@ class Kinematics:
         """
         self.energy_function = energy_function
         self.param_names_ordered = param_names
+        self.use_spectral_stretch = use_spectral_stretch
+        self.spectral_tol = spectral_tol
         
         # 1. Detect Model Type from Tags
         if not hasattr(energy_function, 'model_type'):
@@ -77,6 +79,12 @@ class Kinematics:
         self.calc_dPsi_dl2 = sp.lambdify(inputs, dPsi_dl2_sym, modules='numpy')
         self.calc_dPsi_dl3 = sp.lambdify(inputs, dPsi_dl3_sym, modules='numpy')
 
+    def _should_use_spectral_stretch(self, F):
+        if not self.use_spectral_stretch:
+            return False
+        off_diag = F - np.diag(np.diag(F))
+        return np.any(np.abs(off_diag) > self.spectral_tol)
+
     def get_2nd_PK_stress(self, F, params):
         p_vals = [params[name] for name in self.param_names_ordered]
         
@@ -93,13 +101,26 @@ class Kinematics:
             S_hyper = 2.0 * ((psi1 + I1 * psi2) * Identity - psi2 * C)
             
         elif self.model_type == 'stretch':
-            l1, l2, l3 = F[0,0], F[1,1], F[2,2]
-            
-            s1 = self.calc_dPsi_dl1(l1, l2, l3, *p_vals)
-            s2 = self.calc_dPsi_dl2(l1, l2, l3, *p_vals)
-            s3 = self.calc_dPsi_dl3(l1, l2, l3, *p_vals)
-            
-            S_hyper = np.diag([s1/l1, s2/l2, s3/l3])
+            if self._should_use_spectral_stretch(F):
+                C = F.T @ F
+                eigvals, eigvecs = np.linalg.eigh(C)
+                lambdas = np.sqrt(np.clip(eigvals, 1e-12, None))
+
+                l1, l2, l3 = lambdas
+                s1 = self.calc_dPsi_dl1(l1, l2, l3, *p_vals)
+                s2 = self.calc_dPsi_dl2(l1, l2, l3, *p_vals)
+                s3 = self.calc_dPsi_dl3(l1, l2, l3, *p_vals)
+
+                S_diag = np.diag([s1 / l1, s2 / l2, s3 / l3])
+                S_hyper = eigvecs @ S_diag @ eigvecs.T
+            else:
+                l1, l2, l3 = F[0, 0], F[1, 1], F[2, 2]
+
+                s1 = self.calc_dPsi_dl1(l1, l2, l3, *p_vals)
+                s2 = self.calc_dPsi_dl2(l1, l2, l3, *p_vals)
+                s3 = self.calc_dPsi_dl3(l1, l2, l3, *p_vals)
+
+                S_hyper = np.diag([s1 / l1, s2 / l2, s3 / l3])
         else:
             P = self.energy_function.custom_pk1(F, params)
             return np.linalg.solve(F, P)

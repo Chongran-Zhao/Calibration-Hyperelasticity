@@ -38,8 +38,8 @@ def plot_comparison(experimental_data, kinematics_solver, fitted_params, title="
     """
     plt.figure(figsize=(10, 7))
     
-    markers = {'UT': 'o', 'ET': 's', 'PS': '^', 'BT': 'D'}
-    colors = {'UT': 'blue', 'ET': 'red', 'PS': 'green', 'BT': 'purple'}
+    markers = {'UT': 'o', 'ET': 's', 'PS': '^', 'SS': 'v', 'CSS': 'x', 'BT': 'D'}
+    colors = {'UT': 'blue', 'ET': 'red', 'PS': 'green', 'SS': 'teal', 'CSS': 'teal', 'BT': 'purple'}
     
     for dataset in experimental_data:
         mode = dataset['mode']
@@ -157,7 +157,10 @@ def plot_comparison(experimental_data, kinematics_solver, fitted_params, title="
         # Generate smooth stretch range for better visualization
         min_lam = np.min(exp_stretch)
         max_lam = np.max(exp_stretch)
-        smooth_stretch = np.linspace(1.0, max_lam * 1.05, 100)
+        if mode in ("SS", "CSS"):
+            smooth_stretch = np.linspace(min_lam, max_lam, 100)
+        else:
+            smooth_stretch = np.linspace(1.0, max_lam * 1.05, 100)
 
         if component is not None:
             model_stress_at_exp = []
@@ -218,8 +221,13 @@ def plot_comparison(experimental_data, kinematics_solver, fitted_params, title="
                 zorder=1
             )
 
-    plt.xlabel(r"Stretch $\lambda$ [-]")
-    plt.ylabel("Nominal Stress $P$ [MPa]")
+    modes = {d["mode"] for d in experimental_data}
+    if modes.issubset({"SS", "CSS"}):
+        plt.xlabel(r"Shear strain $\gamma$ [-]")
+        plt.ylabel(r"Shear stress $P_{12}$ [MPa]")
+    else:
+        plt.xlabel(r"Stretch $\lambda$ [-]")
+        plt.ylabel("Nominal Stress $P$ [MPa]")
     plt.title(title)
     plt.legend()
     plt.grid(True, linestyle='--', alpha=0.5)

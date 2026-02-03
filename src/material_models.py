@@ -145,6 +145,21 @@ class MaterialModels:
         return psi
 
     @staticmethod
+    @register_model(
+        model_type='stretch_based',
+        category='phenomenological',
+        formula_str=r"\Psi = \frac{2\mu}{\alpha^2}\left(\lambda_1^{\alpha} + \lambda_2^{\alpha} + \lambda_3^{\alpha} - 3\right)",
+        param_names=["mu", "alpha"],
+        initial_guess=[0.5, 2.0],
+        bounds=[(1e-6, None), (None, None)]
+    )
+    def ModifiedOgden(lambda_1, lambda_2, lambda_3, params):
+        """Modified Ogden Model (Budday et al.)"""
+        mu = params['mu']
+        alpha = params['alpha']
+        return (2.0 * mu / (alpha**2)) * (lambda_1**alpha + lambda_2**alpha + lambda_3**alpha - 3)
+
+    @staticmethod
     def create_ogden_model(n_terms):
         """
         Factory method to generate an Ogden model with n_terms.

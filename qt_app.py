@@ -105,7 +105,22 @@ MODE_DISPLAY_MAP = {
     "UC": "Uniaxial Compression",
     "ET": "Equibiaxial Tension",
     "PS": "Pure Shear",
+    "SS": "Simple Shear",
+    "CSS": "Compound Simple Shear",
     "BT": "Biaxial Tension",
+}
+
+COMPONENT_AUTHOR_CONFIG = {
+    "Budday_2017": {
+        "component_label": "Region",
+        "mode_prefixes": ("SS_", "UT_T_", "UT_C_", "CSS_"),
+        "mode_labels": {
+            "SS_": "Simple Shear",
+            "UT_T_": "Uniaxial Tension",
+            "UT_C_": "Uniaxial Compression",
+            "CSS_": "Compound Simple Shear",
+        },
+    }
 }
 
 DATASET_REFERENCES = {
@@ -116,6 +131,7 @@ DATASET_REFERENCES = {
     "Jones_1975": ("Jones & Treloar 1975, J. Phys. D", "https://doi.org/10.1088/0022-3727/8/11/007"),
     "Kawamura_2001": ("Kawamura et al. 2001, Macromolecules", "https://doi.org/10.1021/ma002165y"),
     "Katashima_2012": ("Katashima et al. 2012, Soft Matter", "https://doi.org/10.1039/c2sm25340b"),
+    "Budday_2017": ("Budday et al. 2017, Acta Biomaterialia", "https://doi.org/10.1016/j.actbio.2016.10.036"),
 }
 
 DATASET_N_GUESS = {
@@ -134,6 +150,7 @@ MODEL_REFERENCES = {
     "Yeoh": ("Yeoh 1993, Rubber Chemistry and Technology", "https://doi.org/10.5254/1.3538343"),
     "ArrudaBoyce": ("Arruda & Boyce 1993, J. Mech. Phys. Solids", "https://doi.org/10.1016/0022-5096(93)90013-6"),
     "Ogden": ("Ogden 1972, Proc. R. Soc. A", "https://doi.org/10.1098/rspa.1972.0026"),
+    "ModifiedOgden": ("Budday et al. 2017, Acta Biomaterialia", "https://doi.org/10.1016/j.actbio.2016.10.036"),
     "Hill": (
         "Liu, Guan, Zhao, Luo 2024, Computer Methods in Applied Mechanics and Engineering 430:117248",
         "https://doi.org/10.1016/j.cma.2024.117248",
@@ -145,6 +162,7 @@ MODEL_REFERENCES = {
 MODEL_DISPLAY_NAMES = {
     "ZhanGaussian": "Zhan (Gaussian)",
     "ZhanNonGaussian": "Zhan (non-Gaussian)",
+    "ModifiedOgden": "Modified Ogden",
 }
 MODEL_DISPLAY_LOOKUP = {v: k for k, v in MODEL_DISPLAY_NAMES.items()}
 
@@ -171,7 +189,29 @@ def format_mode_label(mode_key):
     if mode_key.startswith("BT_lambda_"):
         lam2 = mode_key.replace("BT_lambda_", "").replace("d", ".")
         return f"Biaxial Tension, λ₂={lam2}"
+    if mode_key.startswith("UT_T_"):
+        return "Uniaxial Tension"
+    if mode_key.startswith("UT_C_"):
+        return "Uniaxial Compression"
+    if mode_key.startswith("CSS_") and "_lambda_" in mode_key:
+        lam = mode_key.split("_lambda_")[-1].replace("d", ".")
+        return f"Simple shear under λ₁ = {lam}"
+    if mode_key.startswith("UT_"):
+        return "Uniaxial (Tension/Compression)"
+    if mode_key.startswith("SS_"):
+        return "Simple Shear"
     return MODE_DISPLAY_MAP.get(mode_key, mode_key)
+
+def format_component_label(component_key):
+    return component_key.replace("_", " ").title()
+
+def extract_component_from_mode(mode_key, prefixes):
+    for prefix in prefixes:
+        if prefix == "CSS_" and mode_key.startswith(prefix) and "_lambda_" in mode_key:
+            return mode_key[len(prefix):].split("_lambda_")[0]
+        if mode_key.startswith(prefix):
+            return mode_key[len(prefix):]
+    return None
 
 
 def get_stress_type_label(stress_type):
@@ -197,6 +237,17 @@ def get_bt_diff_label(stress_type):
 
 def get_uniaxial_component_label(stress_type):
     return r"$\sigma_{11}$" if stress_type == "cauchy" else r"$P_{11}$"
+
+def get_shear_component_label(stress_type):
+    return r"$\sigma_{12}$" if stress_type == "cauchy" else r"$P_{12}$"
+
+def get_mode_xlabel(mode):
+    return r"$\gamma$" if mode == "SS" else r"$\lambda_1$"
+
+def choose_xlabel_for_modes(modes):
+    if modes and all(m in ("SS", "CSS") for m in modes):
+        return r"$\gamma$"
+    return r"$\lambda_1$"
 
 def parse_lambda2(mode_raw):
     if mode_raw.startswith("BT_lambda_"):
@@ -680,6 +731,7 @@ class CustomDataEntry(QWidget):
         self.mode_combo.addItem("Uniaxial Compression", "UC")
         self.mode_combo.addItem("Equibiaxial Tension", "ET")
         self.mode_combo.addItem("Pure Shear", "PS")
+        self.mode_combo.addItem("Simple Shear", "SS")
         self.mode_combo.addItem("Biaxial Tension", "BT")
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         self.stress_combo = QComboBox()
@@ -737,6 +789,10 @@ class CustomDataEntry(QWidget):
                 "0.0\n0.2\n0.4\n0.6",
                 "0.0\n0.1\n0.2\n0.3",
             ]
+        elif mode == "SS":
+            stress_label = r"$P_{12}$" if stress_type != "cauchy" else r"$\sigma_{12}$"
+            labels = [r"$\gamma$", stress_label]
+            placeholders = ["0.0\n0.1\n0.2\n0.3", "0.0\n0.2\n0.4\n0.6"]
         else:
             stress_label = r"$P_{11}$" if stress_type != "cauchy" else r"$\sigma_{11}$"
             labels = [r"$\lambda_1$", stress_label]
@@ -1912,6 +1968,15 @@ class MainWindow(QMainWindow):
         author_layout = QFormLayout(self.author_row)
         author_layout.addRow("Author / Dataset", self.author_combo)
         source_layout.addWidget(self.author_row)
+
+        self.component_row = QWidget()
+        component_layout = QFormLayout(self.component_row)
+        self.component_label = QLabel("Component")
+        self.component_combo = QComboBox()
+        self.component_combo.currentIndexChanged.connect(self._on_component_changed)
+        component_layout.addRow(self.component_label, self.component_combo)
+        self.component_row.setVisible(False)
+        source_layout.addWidget(self.component_row)
         source_box.setLayout(source_layout)
 
         self.builtin_widget = QWidget()
@@ -2067,7 +2132,10 @@ class MainWindow(QMainWindow):
         method_label = QLabel("Optimization method")
         method_label.setFont(make_font(12, QFont.DemiBold))
         self.method_combo = QComboBox()
-        self.method_combo.addItems(["L-BFGS-B"])
+        self.method_combo.addItem("L-BFGS-B", "L-BFGS-B")
+        self.method_combo.addItem("Trust-Region Reflective (lsqnonlin)", "trf")
+        self.method_combo.addItem("Levenberg-Marquardt (lsqnonlin)", "lm")
+        self.method_combo.addItem("Dogbox (lsqnonlin)", "dogbox")
         left_layout.addWidget(method_label)
         left_layout.addWidget(self.method_combo)
 
@@ -2111,6 +2179,11 @@ class MainWindow(QMainWindow):
 
         self.calib_results_box = QGroupBox("Calibration Plot")
         calib_layout = QVBoxLayout()
+        self.calib_dataset_label = QLabel("Dataset: -")
+        self.calib_dataset_label.setFont(make_font(12, QFont.DemiBold))
+        self.calib_dataset_label.setWordWrap(True)
+        self.calib_dataset_label.setStyleSheet("color: palette(windowText);")
+        calib_layout.addWidget(self.calib_dataset_label)
         self.calib_canvas = MatplotlibCanvas(width=8.0, height=4.4)
         self.calib_canvas.setMinimumHeight(340)
         calib_layout.addWidget(self.calib_canvas, 1)
@@ -2165,6 +2238,14 @@ class MainWindow(QMainWindow):
         self.prediction_author_label = QLabel("Author: -")
         self.prediction_author_label.setFont(make_font(13, QFont.DemiBold))
         modes_layout.addWidget(self.prediction_author_label)
+        self.prediction_component_row = QWidget()
+        pred_component_layout = QFormLayout(self.prediction_component_row)
+        self.prediction_component_label = QLabel("Component")
+        self.prediction_component_combo = QComboBox()
+        self.prediction_component_combo.currentIndexChanged.connect(self._on_prediction_component_changed)
+        pred_component_layout.addRow(self.prediction_component_label, self.prediction_component_combo)
+        self.prediction_component_row.setVisible(False)
+        modes_layout.addWidget(self.prediction_component_row)
         self.prediction_modes_widget = QWidget()
         self.prediction_modes_layout = QVBoxLayout(self.prediction_modes_widget)
         self.prediction_modes_layout.setContentsMargins(0, 6, 0, 6)
@@ -2506,9 +2587,65 @@ class MainWindow(QMainWindow):
             self.author_combo.addItem(author)
         self.author_combo.blockSignals(False)
 
+    def _on_component_changed(self, _index):
+        if not hasattr(self, "component_combo") or not hasattr(self, "modes_grid"):
+            return
+        author = self.author_combo.currentText()
+        component_key = self.component_combo.currentData()
+        if not author or author == "Select..." or not component_key:
+            return
+        self._build_component_modes(author, component_key)
+        self._update_preview()
+
+    def _build_component_modes(self, author, component_key):
+        for i in reversed(range(self.modes_grid.count())):
+            widget = self.modes_grid.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        config = COMPONENT_AUTHOR_CONFIG.get(author)
+        if not config:
+            return
+        prefixes = config.get("mode_prefixes", ())
+        mode_labels = config.get("mode_labels", {})
+        available = set(self.datasets.get(author, []))
+        row = 0
+        for prefix in prefixes:
+            if prefix == "CSS_":
+                compound_modes = [
+                    m for m in available
+                    if m.startswith(prefix) and extract_component_from_mode(m, (prefix,)) == component_key
+                ]
+                for mode_key in sorted(compound_modes):
+                    label = format_mode_label(mode_key)
+                    checkbox = QCheckBox(label)
+                    checkbox.setObjectName("modeOption")
+                    checkbox.setMinimumHeight(26)
+                    checkbox.setProperty("mode_key", mode_key)
+                    checkbox.stateChanged.connect(self._update_preview)
+                    self.modes_grid.addWidget(checkbox, row, 0)
+                    row += 1
+                continue
+            mode_key = f"{prefix}{component_key}"
+            if mode_key not in available:
+                continue
+            label = mode_labels.get(prefix, format_mode_label(mode_key))
+            checkbox = QCheckBox(label)
+            checkbox.setObjectName("modeOption")
+            checkbox.setMinimumHeight(26)
+            checkbox.setProperty("mode_key", mode_key)
+            checkbox.stateChanged.connect(self._update_preview)
+            self.modes_grid.addWidget(checkbox, row, 0)
+            row += 1
+
     def _on_author_changed(self, text):
         self._reset_results()
         self._bt_mix_warned = False
+        if hasattr(self, "component_row"):
+            self.component_row.setVisible(False)
+        if hasattr(self, "component_combo"):
+            self.component_combo.blockSignals(True)
+            self.component_combo.clear()
+            self.component_combo.blockSignals(False)
         for i in reversed(range(self.modes_grid.count())):
             widget = self.modes_grid.itemAt(i).widget()
             if widget:
@@ -2525,19 +2662,47 @@ class MainWindow(QMainWindow):
             return
 
         modes = self.datasets[text]
-        for idx, mode in enumerate(modes):
-            checkbox = QCheckBox(format_mode_label(mode))
-            checkbox.setObjectName("modeOption")
-            checkbox.setMinimumHeight(26)
-            checkbox.stateChanged.connect(self._update_preview)
-            row = idx
-            col = 0
-            self.modes_grid.addWidget(checkbox, row, col)
+        component_config = COMPONENT_AUTHOR_CONFIG.get(text)
+        if component_config:
+            prefixes = component_config.get("mode_prefixes", ())
+            component_modes = [m for m in modes if extract_component_from_mode(m, prefixes)]
+            if component_modes:
+                self.component_label.setText(component_config.get("component_label", "Component"))
+                self.component_combo.blockSignals(True)
+                self.component_combo.clear()
+                component_keys = []
+                for mode in component_modes:
+                    component = extract_component_from_mode(mode, prefixes)
+                    if component:
+                        component_keys.append(component)
+                for component in sorted(set(component_keys)):
+                    self.component_combo.addItem(format_component_label(component), component)
+                self.component_combo.setCurrentIndex(0)
+                self.component_combo.blockSignals(False)
+                self.component_row.setVisible(True)
+                component_key = self.component_combo.currentData()
+                if component_key:
+                    self._build_component_modes(text, component_key)
+            else:
+                component_config = None
+        if not component_config:
+            for idx, mode in enumerate(modes):
+                checkbox = QCheckBox(format_mode_label(mode))
+                checkbox.setObjectName("modeOption")
+                checkbox.setMinimumHeight(26)
+                checkbox.setProperty("mode_key", mode)
+                checkbox.stateChanged.connect(self._update_preview)
+                row = idx
+                col = 0
+                self.modes_grid.addWidget(checkbox, row, col)
 
         reference = DATASET_REFERENCES.get(text)
         if reference:
             label, url = reference
-            self.reference_label.setText(f"<a href='{url}'>{label}</a>")
+            if url:
+                self.reference_label.setText(f"<a href='{url}'>{label}</a>")
+            else:
+                self.reference_label.setText(label)
             if hasattr(self, "data_reference_title"):
                 self.data_reference_title.setVisible(True)
         else:
@@ -2552,10 +2717,45 @@ class MainWindow(QMainWindow):
         for i in range(self.modes_grid.count()):
             widget = self.modes_grid.itemAt(i).widget()
             if isinstance(widget, QCheckBox) and widget.isChecked():
-                modes.append(widget.text())
-        # Map displayed labels back to mode keys
-        mapping = {format_mode_label(m): m for m in self.datasets.get(self.author_combo.currentText(), [])}
-        return [mapping.get(m, m) for m in modes]
+                mode_key = widget.property("mode_key") or widget.text()
+                modes.append(str(mode_key))
+        return modes
+
+    def _format_modes_summary(self, modes):
+        if not modes:
+            return ""
+        labels = [format_mode_label(m) for m in modes]
+        if len(labels) <= 3:
+            return ", ".join(labels)
+        return ", ".join(labels[:3]) + f", +{len(labels) - 3} more"
+
+    def _format_calibration_dataset_label(self):
+        if not hasattr(self, "use_builtin_radio") or not hasattr(self, "author_combo"):
+            return "Dataset: -"
+        if self.use_builtin_radio.isChecked():
+            author = self.author_combo.currentText()
+            if not author or author == "Select...":
+                return "Dataset: -"
+            parts = [f"Dataset: {author}"]
+            component_key = None
+            if hasattr(self, "component_combo") and self.component_combo.isVisible():
+                component_key = self.component_combo.currentData()
+            if not component_key:
+                component_config = COMPONENT_AUTHOR_CONFIG.get(author)
+                prefixes = component_config.get("mode_prefixes", ()) if component_config else ()
+                for mode in self._selected_modes():
+                    component_key = extract_component_from_mode(mode, prefixes)
+                    if component_key:
+                        break
+            if component_key:
+                parts.append(f"Component: {format_component_label(component_key)}")
+            modes = self._selected_modes()
+            summary = self._format_modes_summary(modes)
+            if summary:
+                parts.append(f"Modes: {summary}")
+            return " • ".join(parts)
+        count = len(getattr(self, "custom_entries", []))
+        return f"Dataset: Custom • Entries: {count}"
 
     def _update_preview(self):
         self._reset_results()
@@ -2612,7 +2812,6 @@ class MainWindow(QMainWindow):
                     else:
                         ax.plot(stretch, stress[:, 0], "o", label=f"{label} {comp_11}")
                         ax.plot(stretch, stress[:, 1], "^", label=f"{label} {comp_22}")
-                ax.set_xlabel(r"$\lambda_1$")
             else:
                 if component:
                     comp_label = get_component_label(stress_type, component)
@@ -2623,11 +2822,28 @@ class MainWindow(QMainWindow):
                     comp_11, comp_22 = get_bt_component_labels(stress_type)
                     ax.plot(stretch, stress[:, 0], "o", label=f"{label} {comp_11}")
                     ax.plot(stretch, stress[:, 1], "^", label=f"{label} {comp_22}")
-                ax.set_xlabel(r"$\lambda_1$")
-            if component or np.ndim(stress) > 1:
+        non_bt_modes = [d["mode"] for d in data if d["mode"] != "BT"]
+        ax.set_xlabel(choose_xlabel_for_modes(non_bt_modes))
+        stress_types = {d.get("stress_type", "PK1") for d in data if d["mode"] != "BT"}
+        has_multi = any(
+            d["mode"] != "BT" and (np.ndim(d.get("stress_exp")) > 1 or d.get("component"))
+            for d in data
+        )
+        if non_bt_modes and all(m in ("SS", "CSS") for m in non_bt_modes) and not has_multi:
+            if len(stress_types) == 1:
+                ax.set_ylabel(get_shear_component_label(next(iter(stress_types))))
+            else:
+                ax.set_ylabel(r"$P_{12}$")
+        elif has_multi:
+            if len(stress_types) == 1:
+                stress_type = next(iter(stress_types))
                 ax.set_ylabel(r"$\sigma$" if stress_type == "cauchy" else r"$P$")
             else:
-                ax.set_ylabel(get_uniaxial_component_label(stress_type))
+                ax.set_ylabel(r"$P$")
+        elif len(stress_types) == 1:
+            ax.set_ylabel(get_uniaxial_component_label(next(iter(stress_types))))
+        else:
+            ax.set_ylabel(r"$P_{11}$")
         ax.legend(fontsize=8)
         self.preview_canvas.figure.tight_layout()
         self.preview_canvas.draw()
@@ -2694,6 +2910,8 @@ class MainWindow(QMainWindow):
         self._clear_prediction_selection()
         if hasattr(self, "calib_save_btn"):
             self.calib_save_btn.setEnabled(False)
+        if hasattr(self, "calib_dataset_label"):
+            self.calib_dataset_label.setText(self._format_calibration_dataset_label())
         exp_data = self._collect_experimental_data()
         if not exp_data:
             QMessageBox.warning(self, "Missing data", "Select at least one dataset or load custom data.")
@@ -2716,7 +2934,7 @@ class MainWindow(QMainWindow):
         optimizer = MaterialOptimizer(solver, exp_data)
         bounds = execution_network.bounds
 
-        method = self.method_combo.currentText()
+        method = self.method_combo.currentData() or self.method_combo.currentText()
         self.opt_status.setText("Running optimization...")
         self.opt_status.setStyleSheet("color: palette(windowtext);")
         self.loss_label.setText("Loss: -")
@@ -3053,6 +3271,12 @@ class MainWindow(QMainWindow):
             widget = self.prediction_modes_layout.itemAt(i).widget()
             if widget:
                 widget.setParent(None)
+        if hasattr(self, "prediction_component_row"):
+            self.prediction_component_row.setVisible(False)
+        if hasattr(self, "prediction_component_combo"):
+            self.prediction_component_combo.blockSignals(True)
+            self.prediction_component_combo.clear()
+            self.prediction_component_combo.blockSignals(False)
         author = self.author_combo.currentText()
         if hasattr(self, "prediction_author_label"):
             if author == "Select...":
@@ -3063,6 +3287,31 @@ class MainWindow(QMainWindow):
             return
         available = self.datasets.get(author, [])
         saved = self.prediction_selection.get(author, set())
+        component_config = COMPONENT_AUTHOR_CONFIG.get(author)
+        if component_config:
+            prefixes = component_config.get("mode_prefixes", ())
+            component_modes = [m for m in available if extract_component_from_mode(m, prefixes)]
+            if component_modes:
+                self.prediction_component_label.setText(component_config.get("component_label", "Component"))
+                self.prediction_component_combo.blockSignals(True)
+                self.prediction_component_combo.clear()
+                component_keys = []
+                for mode in component_modes:
+                    component = extract_component_from_mode(mode, prefixes)
+                    if component:
+                        component_keys.append(component)
+                component_keys = sorted(set(component_keys))
+                for component in component_keys:
+                    self.prediction_component_combo.addItem(format_component_label(component), component)
+                selected_mode = next((m for m in component_modes if m in saved), component_modes[0])
+                selected_component = extract_component_from_mode(selected_mode, prefixes)
+                if selected_component in component_keys:
+                    self.prediction_component_combo.setCurrentIndex(component_keys.index(selected_component))
+                self.prediction_component_combo.blockSignals(False)
+                self.prediction_component_row.setVisible(True)
+                if selected_component:
+                    self._build_prediction_component_modes(author, selected_component, saved)
+                    return
         for idx, mode in enumerate(available):
             checkbox = QCheckBox(format_mode_label(mode))
             checkbox.setObjectName("modeOption")
@@ -3112,13 +3361,70 @@ class MainWindow(QMainWindow):
             else:
                 checkbox.setEnabled(True)
 
+    def _on_prediction_component_changed(self, _index):
+        if not hasattr(self, "prediction_component_combo") or not hasattr(self, "prediction_modes_layout"):
+            return
+        author = self.author_combo.currentText()
+        component_key = self.prediction_component_combo.currentData()
+        if not author or author == "Select..." or not component_key:
+            return
+        saved = self.prediction_selection.get(author, set()) if hasattr(self, "prediction_selection") else set()
+        self._build_prediction_component_modes(author, component_key, saved)
+        if hasattr(self, "pred_save_btn"):
+            self.pred_save_btn.setEnabled(False)
+        self._apply_prediction_mode_rules()
+
+    def _build_prediction_component_modes(self, author, component_key, saved):
+        for i in reversed(range(self.prediction_modes_layout.count())):
+            widget = self.prediction_modes_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        config = COMPONENT_AUTHOR_CONFIG.get(author)
+        if not config:
+            return
+        prefixes = config.get("mode_prefixes", ())
+        mode_labels = config.get("mode_labels", {})
+        available = set(self.datasets.get(author, []))
+        row = 0
+        for prefix in prefixes:
+            if prefix == "CSS_":
+                compound_modes = [
+                    m for m in available
+                    if m.startswith(prefix) and extract_component_from_mode(m, (prefix,)) == component_key
+                ]
+                for mode_key in sorted(compound_modes):
+                    label = format_mode_label(mode_key)
+                    checkbox = QCheckBox(label)
+                    checkbox.setObjectName("modeOption")
+                    checkbox.setMinimumHeight(26)
+                    checkbox.setProperty("mode_key", mode_key)
+                    checkbox.stateChanged.connect(self._on_prediction_mode_toggled)
+                    if mode_key in saved:
+                        checkbox.setChecked(True)
+                    self.prediction_modes_layout.addWidget(checkbox)
+                    row += 1
+                continue
+            mode_key = f"{prefix}{component_key}"
+            if mode_key not in available:
+                continue
+            label = mode_labels.get(prefix, format_mode_label(mode_key))
+            checkbox = QCheckBox(label)
+            checkbox.setObjectName("modeOption")
+            checkbox.setMinimumHeight(26)
+            checkbox.setProperty("mode_key", mode_key)
+            checkbox.stateChanged.connect(self._on_prediction_mode_toggled)
+            if mode_key in saved:
+                checkbox.setChecked(True)
+            self.prediction_modes_layout.addWidget(checkbox)
+            row += 1
+
     def _get_prediction_modes(self):
         modes = []
-        mapping = {format_mode_label(m): m for m in self.datasets.get(self.author_combo.currentText(), [])}
         for i in range(self.prediction_modes_layout.count()):
             widget = self.prediction_modes_layout.itemAt(i).widget()
             if isinstance(widget, QCheckBox) and widget.isChecked():
-                modes.append(mapping.get(widget.text(), widget.text()))
+                mode_key = widget.property("mode_key") or widget.text()
+                modes.append(str(mode_key))
         return modes
     def _get_prediction_param_values(self):
         values = []
@@ -3143,30 +3449,39 @@ class MainWindow(QMainWindow):
         optimizer = self.latest_optimizer
         plot_params = dict(zip(optimizer.param_names, self.latest_result.x))
 
+        if hasattr(self, "calib_dataset_label"):
+            self.calib_dataset_label.setText(self._format_calibration_dataset_label())
+
         self.calib_canvas.figure.clear()
         ax = self.calib_canvas.figure.add_subplot(111)
         self.calib_canvas.set_axes([ax])
         self.calib_canvas.apply_theme()
 
-        colors_calib = {"UT": "#2980b9", "ET": "#c0392b", "PS": "#27ae60", "BT": "#8e44ad"}
+        colors_calib = {"UT": "#2980b9", "ET": "#c0392b", "PS": "#27ae60", "SS": "#16a085", "CSS": "#16a085", "BT": "#8e44ad"}
         calib_data = optimizer.data
         bt_only = self._plot_dataset(self.calib_canvas.ax, calib_data, optimizer.solver, plot_params, colors_calib, "Exp", "Fit")
 
         if not bt_only:
-            self.calib_canvas.ax.set_xlabel(r"$\lambda_1$")
+            non_bt_modes = [d["mode"] for d in calib_data if d["mode"] != "BT"]
+            self.calib_canvas.ax.set_xlabel(choose_xlabel_for_modes(non_bt_modes))
             stress_types = {d.get("stress_type", "PK1") for d in calib_data if d["mode"] != "BT"}
             has_multi = any(
                 d["mode"] != "BT" and (np.ndim(d.get("stress_exp")) > 1 or d.get("component"))
                 for d in calib_data
             )
-            if has_multi:
+            if non_bt_modes and all(m in ("SS", "CSS") for m in non_bt_modes) and not has_multi:
                 if len(stress_types) == 1:
-                    stress_type = stress_types.pop()
+                    y_label = get_shear_component_label(next(iter(stress_types)))
+                else:
+                    y_label = r"$P_{12}$"
+            elif has_multi:
+                if len(stress_types) == 1:
+                    stress_type = next(iter(stress_types))
                     y_label = r"$\sigma$" if stress_type == "cauchy" else r"$P$"
                 else:
                     y_label = r"$P$"
             elif len(stress_types) == 1:
-                y_label = get_uniaxial_component_label(stress_types.pop())
+                y_label = get_uniaxial_component_label(next(iter(stress_types)))
             else:
                 y_label = r"$P_{11}$"
             self.calib_canvas.ax.set_ylabel(y_label)
@@ -3206,6 +3521,8 @@ class MainWindow(QMainWindow):
         self._clear_prediction_selection()
         if hasattr(self, "calib_save_btn"):
             self.calib_save_btn.setEnabled(False)
+        if hasattr(self, "calib_dataset_label"):
+            self.calib_dataset_label.setText("Dataset: -")
         if hasattr(self, "opt_log"):
             self.opt_log.clear()
         self.calib_canvas.figure.clear()
@@ -3265,7 +3582,7 @@ class MainWindow(QMainWindow):
         self.prediction_canvas.set_axes([ax])
         self.prediction_canvas.apply_theme()
 
-        colors_pred = {"UT": "#3498db", "ET": "#e74c3c", "PS": "#2ecc71", "BT": "#a569bd"}
+        colors_pred = {"UT": "#3498db", "ET": "#e74c3c", "PS": "#2ecc71", "SS": "#1abc9c", "CSS": "#1abc9c", "BT": "#a569bd"}
         pred_modes = self._get_prediction_modes()
         if pred_modes:
             author = self.author_combo.currentText()
@@ -3276,25 +3593,32 @@ class MainWindow(QMainWindow):
             bt_only = False
 
         if not bt_only:
-            self.prediction_canvas.ax.set_xlabel(r"$\lambda_1$")
             if pred_modes:
+                non_bt_modes = [d["mode"] for d in pred_data if d["mode"] != "BT"]
+                self.prediction_canvas.ax.set_xlabel(choose_xlabel_for_modes(non_bt_modes))
                 stress_types = {d.get("stress_type", "PK1") for d in pred_data if d["mode"] != "BT"}
                 has_multi = any(
                     d["mode"] != "BT" and (np.ndim(d.get("stress_exp")) > 1 or d.get("component"))
                     for d in pred_data
                 )
-                if has_multi:
+                if non_bt_modes and all(m in ("SS", "CSS") for m in non_bt_modes) and not has_multi:
                     if len(stress_types) == 1:
-                        stress_type = stress_types.pop()
+                        y_label = get_shear_component_label(next(iter(stress_types)))
+                    else:
+                        y_label = r"$P_{12}$"
+                elif has_multi:
+                    if len(stress_types) == 1:
+                        stress_type = next(iter(stress_types))
                         y_label = r"$\sigma$" if stress_type == "cauchy" else r"$P$"
                     else:
                         y_label = r"$P$"
                 elif len(stress_types) == 1:
-                    y_label = get_uniaxial_component_label(stress_types.pop())
+                    y_label = get_uniaxial_component_label(next(iter(stress_types)))
                 else:
                     y_label = r"$P_{11}$"
                 self.prediction_canvas.ax.set_ylabel(y_label)
             else:
+                self.prediction_canvas.ax.set_xlabel(r"$\lambda_1$")
                 self.prediction_canvas.ax.set_ylabel(r"$P_{11}$")
             self.prediction_canvas.ax.legend(fontsize=7)
             self.prediction_canvas.figure.tight_layout()
@@ -3535,6 +3859,8 @@ class MainWindow(QMainWindow):
             if isinstance(canvas, MatplotlibCanvas):
                 self._plot_bt_dataset(canvas, data, solver, params, colors, exp_label, fit_label)
                 return True
+        css_palette = ["#1abc9c", "#2980b9", "#c0392b", "#8e44ad", "#d35400", "#2c3e50"]
+        css_index = 0
         for d in data:
             mode = d["mode"]
             stress_type = d.get("stress_type", "PK1")
@@ -3545,6 +3871,9 @@ class MainWindow(QMainWindow):
             has_two = np.ndim(stress) > 1 and component is None
 
             color = colors.get(mode, "black")
+            if mode == "CSS":
+                color = css_palette[css_index % len(css_palette)]
+                css_index += 1
             if mode == "BT":
                 bt_diff = d.get("bt_component") == "diff"
                 if bt_diff:
@@ -3612,17 +3941,20 @@ class MainWindow(QMainWindow):
                         ax.plot(stretch, model2, "--", color=color, label=f"{fit_label} {label} {comp_22}")
                     continue
             else:
-                comp_11, comp_22 = get_bt_component_labels(stress_type)
-                if component:
+                if mode in ("SS", "CSS"):
+                    shear_label = get_shear_component_label(stress_type)
+                    ax.plot(stretch, stress, "o", color=color, label=f"{exp_label} {label} {shear_label}")
+                elif component:
                     comp_label = get_component_label(stress_type, component)
                     ax.plot(stretch, stress, "o", color=color, label=f"{exp_label} {label} {comp_label}")
                 elif has_two:
+                    comp_11, comp_22 = get_bt_component_labels(stress_type)
                     ax.plot(stretch, stress[:, 0], "o", color=color, label=f"{exp_label} {label} {comp_11}")
                     ax.plot(stretch, stress[:, 1], "^", color=color, label=f"{exp_label} {label} {comp_22}")
                 else:
                     ax.plot(stretch, stress, "o", color=color, label=f"{exp_label} {label}")
                 stretch_secondary = d.get("stretch_secondary")
-                if stretch_secondary is not None or component:
+                if stretch_secondary is not None or component or mode in ("SS", "CSS"):
                     model = []
                     model2 = []
                     for F in d["F_list"]:
@@ -3640,7 +3972,11 @@ class MainWindow(QMainWindow):
                     if component:
                         comp_label = get_component_label(stress_type, component)
                         ax.plot(stretch, model, "-", color=color, label=f"{fit_label} {label} {comp_label}")
+                    elif mode in ("SS", "CSS"):
+                        shear_label = get_shear_component_label(stress_type)
+                        ax.plot(stretch, model, "-", color=color, label=f"{fit_label} {label} {shear_label}")
                     elif has_two:
+                        comp_11, comp_22 = get_bt_component_labels(stress_type)
                         ax.plot(stretch, model, "-", color=color, label=f"{fit_label} {label} {comp_11}")
                         if model2:
                             ax.plot(stretch, model2, "--", color=color, label=f"{fit_label} {label} {comp_22}")
@@ -3674,7 +4010,11 @@ class MainWindow(QMainWindow):
                 if component:
                     comp_label = get_component_label(stress_type, component)
                     ax.plot(smooth, model, "-", color=color, label=f"{fit_label} {label} {comp_label}")
+                elif mode in ("SS", "CSS"):
+                    shear_label = get_shear_component_label(stress_type)
+                    ax.plot(smooth, model, "-", color=color, label=f"{fit_label} {label} {shear_label}")
                 elif has_two:
+                    comp_11, comp_22 = get_bt_component_labels(stress_type)
                     ax.plot(smooth, model, "-", color=color, label=f"{fit_label} {label} {comp_11}")
                 else:
                     ax.plot(smooth, model, "-", color=color, label=f"{fit_label} {label}")

@@ -1,5 +1,6 @@
+import inspect
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import minimize, least_squares
 from utils import get_stress_components
 from tqdm import tqdm
 
@@ -92,6 +93,57 @@ class MaterialOptimizer:
             
         self._current_loss = total_normalized_error
         return total_normalized_error
+
+    def _residuals(self, params_array):
+        """
+        Residual vector for least_squares-based solvers.
+        Matches the objective function: sum(residuals^2) == objective.
+        """
+        params_dict = dict(zip(self.param_names, params_array))
+        residuals = []
+
+        for i, dataset in enumerate(self.data):
+            mode = dataset['mode']
+            f_list = dataset['F_list']
+            stress_type = dataset.get('stress_type', 'PK1')
+            stress_exp = dataset['stress_exp']
+            ss_tot = self.ss_tot_list[i]
+            bt_diff = dataset.get('bt_component') == 'diff' and mode == 'BT'
+            component = dataset.get('component')
+
+            model_stresses = []
+            for F in f_list:
+                if stress_type == 'cauchy':
+                    stress_tensor = self.solver.get_Cauchy_stress(F, params_dict)
+                else:
+                    stress_tensor = self.solver.get_1st_PK_stress(F, params_dict)
+                components = get_stress_components(stress_tensor, mode)
+                if bt_diff:
+                    model_stresses.append(components[0] - components[1])
+                elif component == "22":
+                    model_stresses.append(components[1])
+                elif component == "11":
+                    model_stresses.append(components[0])
+                elif np.ndim(stress_exp) == 1:
+                    model_stresses.append(components[0])
+                else:
+                    model_stresses.append(components[:stress_exp.shape[1]])
+
+            model_stresses = np.array(model_stresses)
+            if bt_diff and np.ndim(stress_exp) > 1:
+                exp_values = stress_exp[:, 0] - stress_exp[:, 1]
+            else:
+                exp_values = stress_exp
+            diff = model_stresses - exp_values
+            diff = np.array(diff, dtype=float)
+            if diff.ndim > 1:
+                diff = diff.reshape(-1)
+            norm = np.sqrt(ss_tot) if ss_tot > 0 else 1.0
+            residuals.append(diff / norm)
+
+        residuals = np.concatenate(residuals) if residuals else np.array([], dtype=float)
+        self._current_loss = float(np.sum(residuals**2))
+        return residuals
 
     def compute_r2(self, params_array):
         params_dict = dict(zip(self.param_names, params_array))
@@ -197,7 +249,29 @@ class MaterialOptimizer:
                 progress_cb(iter_count, np.array(xk, dtype=float), self._current_loss)
 
         result = None
-        supported_methods = {'L-BFGS-B', 'trust-constr', 'CG', 'Newton-CG'}
+        method_aliases = {
+            "L-BFGS-B": ("minimize", "L-BFGS-B"),
+            "trust-constr": ("minimize", "trust-constr"),
+            "CG": ("minimize", "CG"),
+            "Newton-CG": ("minimize", "Newton-CG"),
+            "trf": ("least_squares", "trf"),
+            "dogbox": ("least_squares", "dogbox"),
+            "lm": ("least_squares", "lm"),
+            "Trust-Region Reflective (lsqnonlin)": ("least_squares", "trf"),
+            "Dogbox (lsqnonlin)": ("least_squares", "dogbox"),
+            "Levenberg-Marquardt (lsqnonlin)": ("least_squares", "lm"),
+        }
+
+        method_key = (method or "L-BFGS-B").strip()
+        method_entry = method_aliases.get(method_key)
+        if method_entry is None:
+            method_entry = method_aliases.get(method_key.lower())
+        if method_entry is None:
+            method_entry = method_aliases.get(method_key.upper())
+        if method_entry is None:
+            raise ValueError(f"Unsupported method: {method}")
+
+        backend, solver_method = method_entry
 
         def numeric_grad(xk):
             eps = 1e-6
@@ -212,21 +286,73 @@ class MaterialOptimizer:
 
         had_exception = False
         try:
-            if method not in supported_methods:
-                raise ValueError(f"Unsupported method: {method}")
+            if backend == "minimize":
+                use_bounds = bounds if solver_method in {'L-BFGS-B', 'trust-constr'} else None
+                jac = numeric_grad if solver_method == 'Newton-CG' else None
 
-            use_bounds = bounds if method in {'L-BFGS-B', 'trust-constr'} else None
-            jac = numeric_grad if method == 'Newton-CG' else None
+                result = minimize(
+                    fun=self._objective_function,
+                    x0=initial_guess,
+                    method=solver_method,
+                    bounds=use_bounds,
+                    jac=jac,
+                    callback=callback_minimize,
+                    options={'maxiter': max_iter, 'disp': False}
+                )
+            elif backend == "least_squares":
+                if bounds is None:
+                    lower = np.full(len(initial_guess), -np.inf)
+                    upper = np.full(len(initial_guess), np.inf)
+                else:
+                    lower = np.array([(-np.inf if b[0] is None else b[0]) for b in bounds], dtype=float)
+                    upper = np.array([(np.inf if b[1] is None else b[1]) for b in bounds], dtype=float)
+                if solver_method == "lm":
+                    lower = np.full(len(initial_guess), -np.inf)
+                    upper = np.full(len(initial_guess), np.inf)
 
-            result = minimize(
-                fun=self._objective_function,
-                x0=initial_guess,
-                method=method,
-                bounds=use_bounds,
-                jac=jac,
-                callback=callback_minimize,
-                options={'maxiter': max_iter, 'disp': False}
-            )
+                use_callback = "callback" in inspect.signature(least_squares).parameters
+                eval_count = 0
+                report_every = 5
+
+                def residuals_with_progress(xk):
+                    nonlocal eval_count, iter_count
+                    res = self._residuals(xk)
+                    eval_count += 1
+                    if progress_cb is not None and not use_callback:
+                        if eval_count == 1 or eval_count % report_every == 0:
+                            iter_count += 1
+                            pbar.set_postfix(Loss=f"{self._current_loss:.6f}")
+                            pbar.update(1)
+                            progress_cb(iter_count, np.array(xk, dtype=float), self._current_loss)
+                    return res
+
+                lsq_callback = None
+                if use_callback:
+                    def lsq_callback(xk, *args, **kwargs):
+                        nonlocal iter_count
+                        iter_count += 1
+                        loss = float(self._objective_function(xk))
+                        pbar.set_postfix(Loss=f"{loss:.6f}")
+                        pbar.update(1)
+                        if progress_cb is not None:
+                            progress_cb(iter_count, np.array(xk, dtype=float), loss)
+
+                lsq_kwargs = {
+                    "fun": residuals_with_progress,
+                    "x0": initial_guess,
+                    "method": solver_method,
+                    "bounds": (lower, upper),
+                    "max_nfev": max_iter,
+                }
+                if use_callback:
+                    lsq_kwargs["callback"] = lsq_callback
+                result = least_squares(**lsq_kwargs)
+                final_loss = float(np.sum(result.fun**2))
+                result.fun = final_loss
+                if not hasattr(result, "nit"):
+                    result.nit = iter_count if iter_count else getattr(result, "nfev", 0)
+            else:
+                raise ValueError(f"Unsupported backend: {backend}")
 
         except Exception as e:
             print(f"\nOptimization Error: {e}")

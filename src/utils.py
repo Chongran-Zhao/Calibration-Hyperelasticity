@@ -20,6 +20,26 @@ def get_deformation_gradient(stretch, mode):
     elif mode == 'PS':
         # Pure Shear: diag(lambda, 1.0, lambda^-1)
         F = np.diag([stretch, 1.0, stretch**-1.0])
+    elif mode == 'SS':
+        # Simple Shear: gamma in x-y plane
+        F = np.array([
+            [1.0, stretch, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ])
+    elif mode == 'CSS':
+        # Compound Simple Shear: axial stretch (lambda_1) + shear gamma in x-y plane
+        if isinstance(stretch, (tuple, list, np.ndarray)) and len(stretch) == 2:
+            gamma, lam1 = float(stretch[0]), float(stretch[1])
+        else:
+            gamma = float(stretch)
+            lam1 = 1.0
+        lam2 = lam1**-0.5
+        F = np.array([
+            [lam1, gamma, 0.0],
+            [0.0, lam2, 0.0],
+            [0.0, 0.0, lam2],
+        ])
     elif mode == 'BT':
         # Biaxial Tension: diag(lambda1, lambda2, (lambda1*lambda2)^-1)
         lam1, lam2 = stretch
@@ -42,6 +62,12 @@ def get_stress_components(P_tensor, mode):
     if mode == 'PS':
         # Pure Shear (Wide strip clamped in Y, pulled in X): P_11 and P_22 if needed
         return [P_tensor[0, 0], P_tensor[1, 1]]
+    if mode == 'SS':
+        # Simple Shear: P_12
+        return [P_tensor[0, 1]]
+    if mode == 'CSS':
+        # Compound Simple Shear: P_12
+        return [P_tensor[0, 1]]
     if mode == 'BT':
         # Biaxial Tension: P_11 and P_22
         return [P_tensor[0, 0], P_tensor[1, 1]]
@@ -68,6 +94,14 @@ def inv_Langevin_Kroger(x):
 def _parse_mode(mode_raw):
     if mode_raw.startswith('BT'):
         return 'BT'
+    if mode_raw.startswith('UT'):
+        return 'UT'
+    if mode_raw.startswith('UC'):
+        return 'UC'
+    if mode_raw.startswith('CSS'):
+        return 'CSS'
+    if mode_raw.startswith('SS'):
+        return 'SS'
     return mode_raw
 
 def _text_data_path(cfg, data_root):
@@ -207,7 +241,9 @@ def _load_h5_dataset(cfg, h5f):
                 entry["bt_component"] = bt_component
         return entries
 
-    if mode == "BT":
+    if mode in ("SS", "CSS"):
+        stress_exp = stress_tensor[:, 0, 1]
+    elif mode == "BT":
         stress_exp = np.column_stack([stress_tensor[:, 0, 0], stress_tensor[:, 1, 1]])
     elif mode == "PS" and np.any(np.abs(stress_tensor[:, 1, 1]) > 1e-12):
         stress_exp = np.column_stack([stress_tensor[:, 0, 0], stress_tensor[:, 1, 1]])
@@ -301,7 +337,9 @@ def load_experimental_data_h5(configs, data_h5_path):
             else:
                 stretch_secondary = None
 
-            if mode == "BT":
+            if mode in ("SS", "CSS"):
+                stress_exp = stress_tensor[:, 0, 1]
+            elif mode == "BT":
                 stress_exp = np.column_stack([stress_tensor[:, 0, 0], stress_tensor[:, 1, 1]])
             elif mode == "PS" and np.any(np.abs(stress_tensor[:, 1, 1]) > 1e-12):
                 stress_exp = np.column_stack([stress_tensor[:, 0, 0], stress_tensor[:, 1, 1]])
