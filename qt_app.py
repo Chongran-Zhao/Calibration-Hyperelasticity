@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import re
+import gc
 import warnings
 import multiprocessing
 from pathlib import Path
@@ -16,8 +17,9 @@ except Exception:
     user_cache_dir = None
 
 from PySide6.QtCore import Qt, QThread, Signal, QUrl, QSize
-from PySide6.QtGui import QFont, QPalette, QIcon, QColor, QFontDatabase, QDesktopServices, QPainter, QPen
+from PySide6.QtGui import QFont, QPalette, QIcon, QColor, QFontDatabase, QDesktopServices, QPainter, QPen, QFontMetrics
 from PySide6.QtWidgets import (
+    QAbstractScrollArea,
     QApplication,
     QAbstractSpinBox,
     QButtonGroup,
@@ -415,6 +417,18 @@ def make_font(point_size, weight=QFont.Normal):
     return font
 
 
+def _strip_html(text):
+    plain = re.sub(r"<[^>]*>", "", text or "")
+    plain = plain.replace("&mu;", "mu").replace("&alpha;", "alpha").replace("&lambda;", "lambda")
+    return plain
+
+
+def _label_width_for_text(widget, text, padding=24, minimum=70, maximum=280):
+    metrics = QFontMetrics(widget.font())
+    width = metrics.horizontalAdvance(_strip_html(text)) + padding
+    return max(minimum, min(maximum, width))
+
+
 def select_app_font():
     if sys.platform == "darwin":
         candidates = ["SF Pro Text", "SF Pro Display", "Helvetica Neue", "Helvetica"]
@@ -658,6 +672,7 @@ class OptimizerWorker(QThread):
         self.initial_guess = initial_guess
         self.bounds = bounds
         self.method = method
+        self._stop_requested = False
 
     def run(self):
         try:
@@ -669,9 +684,22 @@ class OptimizerWorker(QThread):
             )
             self.finished.emit(result, self.optimizer)
         except Exception as exc:
+            if self._stop_requested:
+                self.failed.emit("Optimization aborted by user.")
+                return
             self.failed.emit(str(exc))
 
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
+        if hasattr(self.optimizer, "request_stop"):
+            self.optimizer.request_stop()
+
     def _emit_progress(self, iteration, params, loss):
+        if self._stop_requested or self.isInterruptionRequested():
+            if hasattr(self.optimizer, "request_stop"):
+                self.optimizer.request_stop()
+            return
         try:
             params_list = list(params)
         except Exception:
@@ -696,6 +724,24 @@ class MatplotlibCanvas(FigureCanvas):
         self.axes = axes
         if axes:
             self.ax = axes[0]
+
+    def reset_axes(self):
+        self.figure.clear()
+        ax = self.figure.add_subplot(111)
+        self.set_axes([ax])
+        self.apply_theme()
+        return ax
+
+    def teardown(self):
+        try:
+            self.figure.clear()
+            self.axes = []
+            self.ax = None
+            self.draw_idle()
+        except Exception:
+            pass
+        self.deleteLater()
+        gc.collect()
 
     def apply_theme(self):
         self.figure.patch.set_facecolor("none")
@@ -726,6 +772,7 @@ class CustomDataEntry(QWidget):
         self.set_deletable(index != 1)
 
         form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.mode_combo = QComboBox()
         self.mode_combo.addItem("Uniaxial Tension", "UT")
         self.mode_combo.addItem("Uniaxial Compression", "UC")
@@ -738,6 +785,11 @@ class CustomDataEntry(QWidget):
         self.stress_combo.addItem("Nominal (1st PK)", "PK1")
         self.stress_combo.addItem("Cauchy", "cauchy")
         self.stress_combo.currentIndexChanged.connect(self._on_mode_changed)
+        for combo in (self.mode_combo, self.stress_combo):
+            combo.setMinimumHeight(30)
+            combo.setMinimumWidth(180)
+            combo.setMaximumWidth(420)
+            combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         form.addRow("Loading mode", self.mode_combo)
         form.addRow("Stress type", self.stress_combo)
         layout.addLayout(form)
@@ -805,13 +857,13 @@ class CustomDataEntry(QWidget):
             edit.setPlaceholderText(placeholders[col] if col < len(placeholders) else "")
             edit.textChanged.connect(self._emit_change)
             edit.setMinimumHeight(80)
-            edit.setMinimumWidth(140)
-            edit.setMaximumWidth(180)
-            edit.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            edit.setMinimumWidth(150)
+            edit.setMaximumWidth(360)
+            edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             self.data_grid.addWidget(label, 0, col)
             self.data_grid.addWidget(edit, 1, col)
             self.data_inputs.append(edit)
-            self.data_grid.setColumnStretch(col, 0)
+            self.data_grid.setColumnStretch(col, 1)
             self.data_grid.setRowMinimumHeight(1, 90)
         self.data_grid.setRowMinimumHeight(0, 36)
         spacer = QWidget()
@@ -938,13 +990,20 @@ class SpringWidget(QGroupBox):
         self.model_combo.setEnabled(False)
         self.model_combo.setVisible(False)
         self.model_label.setVisible(False)
-        self.model_combo.setFixedWidth(220)
+        self.model_combo.setMinimumWidth(180)
+        self.model_combo.setMaximumWidth(340)
+        self.model_combo.setMinimumHeight(30)
+        self.model_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.strain_label = QLabel("Strain")
         self.strain_combo = QComboBox()
         self.strain_combo.addItems(list(STRAIN_CONFIGS.keys()))
         self.strain_combo.setEnabled(False)
         self.strain_combo.setVisible(False)
         self.strain_label.setVisible(False)
+        self.strain_combo.setMinimumWidth(160)
+        self.strain_combo.setMaximumWidth(320)
+        self.strain_combo.setMinimumHeight(30)
+        self.strain_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.ogden_label = QLabel("Ogden terms")
         self.ogden_terms = QSpinBox()
         self.ogden_terms.setRange(1, 6)
@@ -953,7 +1012,10 @@ class SpringWidget(QGroupBox):
         self.ogden_terms.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.ogden_terms.setAlignment(Qt.AlignRight)
         self.ogden_terms.lineEdit().setAlignment(Qt.AlignRight)
-        self.ogden_terms.setFixedWidth(80)
+        self.ogden_terms.setMinimumWidth(72)
+        self.ogden_terms.setMaximumWidth(120)
+        self.ogden_terms.setMinimumHeight(30)
+        self.ogden_terms.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.ogden_dec_btn = QToolButton()
         self.ogden_dec_btn.setObjectName("iconButton")
         self.ogden_dec_btn.setText("-")
@@ -994,11 +1056,20 @@ class SpringWidget(QGroupBox):
         self.custom_type_combo.addItem("Invariant-based", "invariant")
         self.custom_type_combo.addItem("Stretch-based", "stretch")
         self.custom_type_combo.currentIndexChanged.connect(self._on_custom_definition_changed)
+        self.custom_type_combo.setMinimumWidth(180)
+        self.custom_type_combo.setMaximumWidth(340)
+        self.custom_type_combo.setMinimumHeight(30)
+        self.custom_type_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.custom_hint = QLabel("Use variables: I1, I2 or lambda_1, lambda_2, lambda_3.")
         self.custom_formula_edit = QLineEdit()
         self.custom_formula_edit.setPlaceholderText("e.g., C1*(I1-3) + C2*(I2-3)")
         self.custom_param_edit = QLineEdit()
         self.custom_param_edit.setPlaceholderText("Parameters: C1, C2")
+        for edit in (self.custom_formula_edit, self.custom_param_edit):
+            edit.setMinimumHeight(30)
+            edit.setMinimumWidth(220)
+            edit.setMaximumWidth(560)
+            edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.custom_param_auto = QPushButton("Auto-detect params")
         self.custom_param_auto.clicked.connect(self._auto_detect_params)
         self.custom_formula_edit.textChanged.connect(self._on_custom_definition_changed)
@@ -1109,8 +1180,8 @@ class SpringWidget(QGroupBox):
         controls.addWidget(self.ogden_row, 1, 2, 1, 2)
         controls.addWidget(self.strain_label, 2, 0)
         controls.addWidget(self.strain_combo, 2, 1)
-        controls.setColumnStretch(1, 0)
-        controls.setColumnStretch(3, 0)
+        controls.setColumnStretch(1, 1)
+        controls.setColumnStretch(3, 1)
         layout.addLayout(controls)
         self.controls_layout = controls
 
@@ -1169,8 +1240,9 @@ class SpringWidget(QGroupBox):
         self.strain_formula_container.setVisible(False)
 
         self.setLayout(layout)
-        self.setMaximumWidth(620)
-        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
+        self.setMinimumWidth(520)
+        self.setMaximumWidth(980)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.setFlat(True)
         self.apply_theme()
         self.model_combo.currentTextChanged.connect(self._on_model_changed)
@@ -1276,12 +1348,15 @@ class SpringWidget(QGroupBox):
             guess = QLineEdit(guess_val)
             min_edit = QLineEdit(min_val)
             max_edit = QLineEdit(max_val)
-            guess.setMinimumWidth(90)
-            min_edit.setMinimumWidth(70)
-            max_edit.setMinimumWidth(70)
-            guess.setMinimumHeight(24)
-            min_edit.setMinimumHeight(24)
-            max_edit.setMinimumHeight(24)
+            for edit, min_width, max_width in (
+                (guess, 110, 180),
+                (min_edit, 90, 160),
+                (max_edit, 90, 160),
+            ):
+                edit.setMinimumWidth(min_width)
+                edit.setMaximumWidth(max_width)
+                edit.setMinimumHeight(28)
+                edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             guess.textChanged.connect(self._on_param_changed)
             min_edit.textChanged.connect(self._on_param_changed)
             max_edit.textChanged.connect(self._on_param_changed)
@@ -1548,13 +1623,17 @@ class SpringWidget(QGroupBox):
                 col = 0
                 label = QLabel()
                 label.setTextFormat(Qt.RichText)
-                label.setText(self._format_param_label(name))
+                label_html = self._format_param_label(name)
+                label.setText(label_html)
+                label.setMinimumWidth(_label_width_for_text(label, label_html, minimum=64, maximum=190))
+                label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
                 edit = QLineEdit()
                 text_value = f"{float(default):.4g}"
                 edit.setText(text_value)
                 edit.setPlaceholderText(text_value)
                 edit.setMinimumWidth(120)
-                edit.setMinimumHeight(24)
+                edit.setMaximumWidth(260)
+                edit.setMinimumHeight(28)
                 edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
                 edit.textChanged.connect(self._on_param_changed)
                 self.params_layout.addWidget(label, row, col)
@@ -1580,13 +1659,17 @@ class SpringWidget(QGroupBox):
                 default = n_guess
             label = QLabel()
             label.setTextFormat(Qt.RichText)
-            label.setText(self._format_param_label(name))
+            label_html = self._format_param_label(name)
+            label.setText(label_html)
+            label.setMinimumWidth(_label_width_for_text(label, label_html, minimum=64, maximum=190))
+            label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             edit = QLineEdit()
             text_value = f"{float(default):.4g}"
             edit.setText(text_value)
             edit.setPlaceholderText(text_value)
             edit.setMinimumWidth(120)
-            edit.setMinimumHeight(24)
+            edit.setMaximumWidth(260)
+            edit.setMinimumHeight(28)
             edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             edit.textChanged.connect(self._on_param_changed)
             self.params_layout.addWidget(label, row, col)
@@ -1710,6 +1793,8 @@ class MainWindow(QMainWindow):
         self.latest_optimizer = None
         self.latest_result = None
         self.latest_network = None
+        self.worker = None
+        self._optimization_running = False
         self._bt_mix_warned = False
         self._custom_source_warned = False
         self._dark_mode = False
@@ -1861,7 +1946,10 @@ class MainWindow(QMainWindow):
     def _build_content(self):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
         container = QWidget()
+        container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         layout = QVBoxLayout(container)
 
         header = QLabel("Calibration for Hyperelasticity")
@@ -2143,9 +2231,13 @@ class MainWindow(QMainWindow):
         params_layout = QVBoxLayout()
         self.calib_params_area = QScrollArea()
         self.calib_params_area.setWidgetResizable(True)
+        self.calib_params_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.calib_params_area.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
         self.calib_params_widget = QWidget()
+        self.calib_params_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.calib_params_layout = QVBoxLayout(self.calib_params_widget)
         self.calib_params_layout.setSpacing(8)
+        self.calib_params_layout.setAlignment(Qt.AlignTop)
         self.calib_params_layout.addStretch()
         self.calib_params_area.setWidget(self.calib_params_widget)
         params_layout.addWidget(self.calib_params_area)
@@ -2224,9 +2316,13 @@ class MainWindow(QMainWindow):
         pred_params_layout = QVBoxLayout()
         self.prediction_params_area = QScrollArea()
         self.prediction_params_area.setWidgetResizable(True)
+        self.prediction_params_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.prediction_params_area.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
         self.prediction_params_widget = QWidget()
+        self.prediction_params_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.prediction_params_layout = QVBoxLayout(self.prediction_params_widget)
         self.prediction_params_layout.setSpacing(8)
+        self.prediction_params_layout.setAlignment(Qt.AlignTop)
         self.prediction_params_layout.addStretch()
         self.prediction_params_area.setWidget(self.prediction_params_widget)
         pred_params_layout.addWidget(self.prediction_params_area)
@@ -2496,86 +2592,90 @@ class MainWindow(QMainWindow):
             return
         try:
             from matplotlib.backends.backend_pdf import PdfPages
-            with PdfPages(file_path) as pdf:
-                # Cover page with summary
-                fig = Figure(figsize=(8.5, 11), dpi=150)
-                ax = fig.add_subplot(111)
-                ax.axis("off")
-                optimizer = self.latest_optimizer
-                lines = []
-                lines.append("Calibration for Hyperelasticity")
-                lines.append("")
-                lines.append(f"Final loss: {self.latest_result.fun:.6g}")
-                lines.append("")
-                if self.use_builtin_radio.isChecked():
-                    lines.append(f"Dataset: {self.author_combo.currentText()}")
-                    lines.append(f"Modes: {', '.join(self._selected_modes())}")
-                else:
-                    lines.append("Dataset: Custom")
-                    lines.append(f"Custom entries: {len(self.custom_entries)}")
-                lines.append("")
-                lines.append("Model architecture:")
-                for idx, spring in enumerate(self.spring_widgets):
-                    state = spring.get_state()
-                    is_custom = state.get("model_source") == "custom" or state.get("use_custom")
-                    if is_custom:
-                        lines.append(f"  Spring {idx+1}: Custom ({state.get('custom_type')})")
-                        lines.append(f"    Formula: {state.get('custom_formula')}")
-                        lines.append(f"    Params: {state.get('custom_params')}")
-                    else:
-                        lines.append(f"  Spring {idx+1}: {state.get('model')}")
-                lines.append("")
-                lines.append("Optimized parameters:")
-                for name, value in zip(optimizer.param_names, self.latest_result.x):
-                    lines.append(f"  {name}: {value:.6g}")
-                ax.text(0.05, 0.98, "\n".join(lines), va="top", fontsize=10)
-                pdf.savefig(fig, bbox_inches="tight")
-
-                # Formula pages
-                for idx, spring in enumerate(self.spring_widgets):
-                    state = spring.get_state()
-                    fig = Figure(figsize=(8.5, 5.5), dpi=150)
+            with matplotlib.rc_context({"font.family": "Times New Roman"}):
+                with PdfPages(file_path) as pdf:
+                    # Cover page with summary
+                    fig = Figure(figsize=(8.5, 11), dpi=150)
                     ax = fig.add_subplot(111)
                     ax.axis("off")
-                    is_custom = state.get("model_source") == "custom" or state.get("use_custom")
-                    if is_custom:
-                        formula = state.get("custom_formula", "")
-                        title = f"Spring {idx+1} Formula (Custom)"
+                    optimizer = self.latest_optimizer
+                    lines = []
+                    lines.append("Calibration for Hyperelasticity")
+                    lines.append("")
+                    lines.append(f"Final loss: {self.latest_result.fun:.6g}")
+                    lines.append("")
+                    if self.use_builtin_radio.isChecked():
+                        lines.append(f"Dataset: {self.author_combo.currentText()}")
+                        lines.append(f"Modes: {', '.join(self._selected_modes())}")
                     else:
-                        model_name = resolve_model_name(state.get("model", ""))
-                        func = None
-                        if model_name == "Ogden":
-                            func = MaterialModels.create_ogden_model(state.get("ogden_terms", 1))
-                        elif model_name == "Hill":
-                            func = MaterialModels.create_hill_model(state.get("strain"))
-                        elif model_name:
-                            func = getattr(MaterialModels, model_name, None)
-                        formula = getattr(func, "formula", "") if func else ""
-                        title = f"Spring {idx+1} Formula"
-                    ax.text(0.05, 0.9, title, fontsize=12, fontweight="bold")
-                    if formula:
-                        ax.text(0.05, 0.6, f"${formula}$", fontsize=12)
+                        lines.append("Dataset: Custom")
+                        lines.append(f"Custom entries: {len(self.custom_entries)}")
+                    lines.append("")
+                    lines.append("Model architecture:")
+                    for idx, spring in enumerate(self.spring_widgets):
+                        state = spring.get_state()
+                        is_custom = state.get("model_source") == "custom" or state.get("use_custom")
+                        if is_custom:
+                            lines.append(f"  Spring {idx+1}: Custom ({state.get('custom_type')})")
+                            lines.append(f"    Formula: {state.get('custom_formula')}")
+                            lines.append(f"    Params: {state.get('custom_params')}")
+                        else:
+                            lines.append(f"  Spring {idx+1}: {state.get('model')}")
+                    lines.append("")
+                    lines.append("Optimized parameters:")
+                    for name, value in zip(optimizer.param_names, self.latest_result.x):
+                        lines.append(f"  {name}: {value:.6g}")
+                    ax.text(0.05, 0.98, "\n".join(lines), va="top", fontsize=10)
                     pdf.savefig(fig, bbox_inches="tight")
+                    fig.clear()
 
-                # Experimental data table
-                data = self._collect_experimental_data()
-                fig = Figure(figsize=(8.5, 11), dpi=150)
-                ax = fig.add_subplot(111)
-                ax.axis("off")
-                table_lines = ["Experimental data summary:"]
-                for d in data:
-                    mode_label = d.get("label") or format_mode_label(d.get("mode_raw", d.get("mode")))
-                    stress_type = get_stress_type_label(d.get("stress_type", "PK1"))
-                    table_lines.append(
-                        f"- {mode_label} ({stress_type}), points: {len(d.get('stretch', []))}"
-                    )
-                ax.text(0.05, 0.98, "\n".join(table_lines), va="top", fontsize=10)
-                pdf.savefig(fig, bbox_inches="tight")
+                    # Formula pages
+                    for idx, spring in enumerate(self.spring_widgets):
+                        state = spring.get_state()
+                        fig = Figure(figsize=(8.5, 5.5), dpi=150)
+                        ax = fig.add_subplot(111)
+                        ax.axis("off")
+                        is_custom = state.get("model_source") == "custom" or state.get("use_custom")
+                        if is_custom:
+                            formula = state.get("custom_formula", "")
+                            title = f"Spring {idx+1} Formula (Custom)"
+                        else:
+                            model_name = resolve_model_name(state.get("model", ""))
+                            func = None
+                            if model_name == "Ogden":
+                                func = MaterialModels.create_ogden_model(state.get("ogden_terms", 1))
+                            elif model_name == "Hill":
+                                func = MaterialModels.create_hill_model(state.get("strain"))
+                            elif model_name:
+                                func = getattr(MaterialModels, model_name, None)
+                            formula = getattr(func, "formula", "") if func else ""
+                            title = f"Spring {idx+1} Formula"
+                        ax.text(0.05, 0.9, title, fontsize=12, fontweight="bold")
+                        if formula:
+                            ax.text(0.05, 0.6, f"${formula}$", fontsize=12)
+                        pdf.savefig(fig, bbox_inches="tight")
+                        fig.clear()
 
-                # Plots
-                pdf.savefig(self.calib_canvas.figure, bbox_inches="tight")
-                if self.prediction_canvas and self.prediction_canvas.figure:
-                    pdf.savefig(self.prediction_canvas.figure, bbox_inches="tight")
+                    # Experimental data table
+                    data = self._collect_experimental_data()
+                    fig = Figure(figsize=(8.5, 11), dpi=150)
+                    ax = fig.add_subplot(111)
+                    ax.axis("off")
+                    table_lines = ["Experimental data summary:"]
+                    for d in data:
+                        mode_label = d.get("label") or format_mode_label(d.get("mode_raw", d.get("mode")))
+                        stress_type = get_stress_type_label(d.get("stress_type", "PK1"))
+                        table_lines.append(
+                            f"- {mode_label} ({stress_type}), points: {len(d.get('stretch', []))}"
+                        )
+                    ax.text(0.05, 0.98, "\n".join(table_lines), va="top", fontsize=10)
+                    pdf.savefig(fig, bbox_inches="tight")
+                    fig.clear()
+
+                    # Plots
+                    pdf.savefig(self.calib_canvas.figure, bbox_inches="tight")
+                    if self.prediction_canvas and self.prediction_canvas.figure:
+                        pdf.savefig(self.prediction_canvas.figure, bbox_inches="tight")
         except Exception as exc:
             QMessageBox.warning(self, "Report failed", f"Could not export report:\n{exc}")
 
@@ -2762,10 +2862,7 @@ class MainWindow(QMainWindow):
         author = self.author_combo.currentText()
         data = self._collect_experimental_data()
         if not data:
-            self.preview_canvas.figure.clear()
-            ax = self.preview_canvas.figure.add_subplot(111)
-            self.preview_canvas.set_axes([ax])
-            self.preview_canvas.apply_theme()
+            self.preview_canvas.reset_axes()
             self.preview_canvas.draw()
             self.data_next_btn.setEnabled(False)
             self.preview_save_btn.setEnabled(False)
@@ -2791,10 +2888,7 @@ class MainWindow(QMainWindow):
             self._update_workflow_cards()
             return
 
-        self.preview_canvas.figure.clear()
-        ax = self.preview_canvas.figure.add_subplot(111)
-        self.preview_canvas.set_axes([ax])
-        self.preview_canvas.apply_theme()
+        ax = self.preview_canvas.reset_axes()
         for idx, d in enumerate(data):
             stretch = d["stretch"]
             stress = d["stress_exp"]
@@ -2905,13 +2999,32 @@ class MainWindow(QMainWindow):
             return
         self._rebuild_springs(len(states), states_override=states)
 
+    def _set_optimization_controls(self, running):
+        self._optimization_running = bool(running)
+        if hasattr(self, "run_button"):
+            self.run_button.setEnabled(True)
+            self.run_button.setText("Abort Calibration" if running else "Start Calibration")
+
+    def _abort_optimization(self, wait=False):
+        worker = getattr(self, "worker", None)
+        if not worker or not worker.isRunning():
+            return
+        worker.stop()
+        if wait:
+            worker.wait(2500)
+
     def _run_optimization(self):
+        if self._optimization_running:
+            self._abort_optimization(wait=False)
+            return
         self._reset_prediction_results()
         self._clear_prediction_selection()
         if hasattr(self, "calib_save_btn"):
             self.calib_save_btn.setEnabled(False)
         if hasattr(self, "calib_dataset_label"):
-            self.calib_dataset_label.setText(self._format_calibration_dataset_label())
+            dataset_text = self._format_calibration_dataset_label()
+            self.calib_dataset_label.setText(dataset_text)
+            self.calib_dataset_label.setToolTip(dataset_text)
         exp_data = self._collect_experimental_data()
         if not exp_data:
             QMessageBox.warning(self, "Missing data", "Select at least one dataset or load custom data.")
@@ -2941,7 +3054,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "opt_log"):
             self.opt_log.clear()
         self._populate_calibration_params(execution_network.param_names, initial_guess)
-        self.run_button.setEnabled(False)
+        self._set_optimization_controls(True)
         self._set_step(2)
 
         self.worker = OptimizerWorker(optimizer, initial_guess, bounds, method)
@@ -2951,7 +3064,14 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def _on_optimization_finished(self, result, optimizer):
-        self.run_button.setEnabled(True)
+        self._set_optimization_controls(False)
+        self.worker = None
+        if getattr(result, "aborted", False):
+            self.opt_status.setText("Optimization aborted")
+            self.opt_status.setStyleSheet("color: #b45309;")
+            self.opt_next_btn.setEnabled(False)
+            self._update_workflow_cards()
+            return
         if not result.success:
             self.opt_status.setText("Optimization failed")
             self.opt_status.setStyleSheet("color: #dc2626;")
@@ -2976,7 +3096,14 @@ class MainWindow(QMainWindow):
         self._update_workflow_cards()
 
     def _on_optimization_failed(self, message):
-        self.run_button.setEnabled(True)
+        self._set_optimization_controls(False)
+        self.worker = None
+        if "aborted" in (message or "").lower():
+            self.opt_status.setText("Optimization aborted")
+            self.opt_status.setStyleSheet("color: #b45309;")
+            self.opt_next_btn.setEnabled(False)
+            self._update_workflow_cards()
+            return
         self.opt_status.setText("Optimization failed")
         self.opt_status.setStyleSheet("color: #dc2626;")
         QMessageBox.warning(
@@ -3187,11 +3314,15 @@ class MainWindow(QMainWindow):
             row_layout.setContentsMargins(0, 0, 0, 0)
             label = QLabel()
             label.setTextFormat(Qt.RichText)
-            label.setText(self._format_result_param_label(name))
+            label_html = self._format_result_param_label(name)
+            label.setText(label_html)
+            label.setMinimumWidth(_label_width_for_text(label, label_html, minimum=70, maximum=210))
+            label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             edit = QLineEdit(f"{value:.6g}")
             edit.setReadOnly(True)
             edit.setMinimumWidth(120)
-            edit.setMinimumHeight(24)
+            edit.setMaximumWidth(260)
+            edit.setMinimumHeight(28)
             edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             row_layout.addWidget(label)
             row_layout.addWidget(edit, 1)
@@ -3224,10 +3355,14 @@ class MainWindow(QMainWindow):
             row_layout.setContentsMargins(0, 0, 0, 0)
             label = QLabel()
             label.setTextFormat(Qt.RichText)
-            label.setText(self._format_result_param_label(name))
+            label_html = self._format_result_param_label(name)
+            label.setText(label_html)
+            label.setMinimumWidth(_label_width_for_text(label, label_html, minimum=70, maximum=210))
+            label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             edit = QLineEdit(f"{value:.6g}")
             edit.setMinimumWidth(140)
-            edit.setMinimumHeight(26)
+            edit.setMaximumWidth(280)
+            edit.setMinimumHeight(28)
             edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             edit.textEdited.connect(self._on_prediction_param_edited)
             row_layout.addWidget(label)
@@ -3450,12 +3585,11 @@ class MainWindow(QMainWindow):
         plot_params = dict(zip(optimizer.param_names, self.latest_result.x))
 
         if hasattr(self, "calib_dataset_label"):
-            self.calib_dataset_label.setText(self._format_calibration_dataset_label())
+            dataset_text = self._format_calibration_dataset_label()
+            self.calib_dataset_label.setText(dataset_text)
+            self.calib_dataset_label.setToolTip(dataset_text)
 
-        self.calib_canvas.figure.clear()
-        ax = self.calib_canvas.figure.add_subplot(111)
-        self.calib_canvas.set_axes([ax])
-        self.calib_canvas.apply_theme()
+        self.calib_canvas.reset_axes()
 
         colors_calib = {"UT": "#2980b9", "ET": "#c0392b", "PS": "#27ae60", "SS": "#16a085", "CSS": "#16a085", "BT": "#8e44ad"}
         calib_data = optimizer.data
@@ -3511,6 +3645,9 @@ class MainWindow(QMainWindow):
         self.calib_canvas.draw()
 
     def _reset_results(self):
+        if self._optimization_running:
+            self._abort_optimization(wait=False)
+            self._set_optimization_controls(False)
         self.latest_optimizer = None
         self.latest_result = None
         self.latest_network = None
@@ -3523,17 +3660,12 @@ class MainWindow(QMainWindow):
             self.calib_save_btn.setEnabled(False)
         if hasattr(self, "calib_dataset_label"):
             self.calib_dataset_label.setText("Dataset: -")
+            self.calib_dataset_label.setToolTip("Dataset: -")
         if hasattr(self, "opt_log"):
             self.opt_log.clear()
-        self.calib_canvas.figure.clear()
-        ax = self.calib_canvas.figure.add_subplot(111)
-        self.calib_canvas.set_axes([ax])
-        self.calib_canvas.apply_theme()
+        self.calib_canvas.reset_axes()
         self.calib_canvas.draw()
-        self.prediction_canvas.figure.clear()
-        ax = self.prediction_canvas.figure.add_subplot(111)
-        self.prediction_canvas.set_axes([ax])
-        self.prediction_canvas.apply_theme()
+        self.prediction_canvas.reset_axes()
         self.prediction_canvas.draw()
         if hasattr(self, "pred_save_btn"):
             self.pred_save_btn.setEnabled(False)
@@ -3544,10 +3676,7 @@ class MainWindow(QMainWindow):
 
     def _reset_prediction_results(self):
         if hasattr(self, "prediction_canvas"):
-            self.prediction_canvas.figure.clear()
-            ax = self.prediction_canvas.figure.add_subplot(111)
-            self.prediction_canvas.set_axes([ax])
-            self.prediction_canvas.apply_theme()
+            self.prediction_canvas.reset_axes()
             self.prediction_canvas.draw()
         if hasattr(self, "pred_save_btn"):
             self.pred_save_btn.setEnabled(False)
@@ -3555,10 +3684,7 @@ class MainWindow(QMainWindow):
 
     def _invalidate_prediction_plot(self):
         if hasattr(self, "prediction_canvas"):
-            self.prediction_canvas.figure.clear()
-            ax = self.prediction_canvas.figure.add_subplot(111)
-            self.prediction_canvas.set_axes([ax])
-            self.prediction_canvas.apply_theme()
+            self.prediction_canvas.reset_axes()
             self.prediction_canvas.draw()
         if hasattr(self, "pred_save_btn"):
             self.pred_save_btn.setEnabled(False)
@@ -3577,10 +3703,7 @@ class MainWindow(QMainWindow):
             param_values = list(self.latest_result.x)
         plot_params = dict(zip(optimizer.param_names, param_values))
 
-        self.prediction_canvas.figure.clear()
-        ax = self.prediction_canvas.figure.add_subplot(111)
-        self.prediction_canvas.set_axes([ax])
-        self.prediction_canvas.apply_theme()
+        self.prediction_canvas.reset_axes()
 
         colors_pred = {"UT": "#3498db", "ET": "#e74c3c", "PS": "#2ecc71", "SS": "#1abc9c", "CSS": "#1abc9c", "BT": "#a569bd"}
         pred_modes = self._get_prediction_modes()
@@ -4021,6 +4144,15 @@ class MainWindow(QMainWindow):
             if model2:
                 ax.plot(smooth, model2, "--", color=color, label=f"{fit_label} {label} {comp_22}")
         return False
+
+    def closeEvent(self, event):
+        self._abort_optimization(wait=True)
+        for canvas_name in ("preview_canvas", "calib_canvas", "prediction_canvas"):
+            canvas = getattr(self, canvas_name, None)
+            if canvas:
+                canvas.teardown()
+        gc.collect()
+        super().closeEvent(event)
 
 
 def main():

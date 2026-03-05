@@ -1,4 +1,5 @@
 import inspect
+import threading
 import numpy as np
 from scipy.optimize import minimize, least_squares
 from utils import get_stress_components
@@ -9,6 +10,11 @@ DEFAULT_REL_TOL = 1e-3
 DEFAULT_MAX_ITER = 2000
 DEFAULT_R2_TARGET = 0.95
 DEFAULT_MAX_LOSS = 1.0
+
+
+class OptimizationAbortedError(RuntimeError):
+    """Raised when optimization is aborted by user request."""
+
 
 class MaterialOptimizer:
     """
@@ -22,6 +28,8 @@ class MaterialOptimizer:
         self.data = experimental_data
         self.param_names = kinematics_solver.param_names_ordered
         self._current_loss = float('inf')
+        self._stop_event = threading.Event()
+        self._last_params = np.array([], dtype=float)
         
         # Pre-calculate SS_tot (Total Sum of Squares) for each dataset
         self.ss_tot_list = []
@@ -43,11 +51,23 @@ class MaterialOptimizer:
             
             self.ss_tot_list.append(ss_tot)
 
+    def request_stop(self):
+        self._stop_event.set()
+
+    def clear_stop(self):
+        self._stop_event.clear()
+
+    def _check_stop(self):
+        if self._stop_event.is_set():
+            raise OptimizationAbortedError("Optimization aborted by user.")
+
     def _objective_function(self, params_array):
         """
         Loss function to minimize.
         Minimizes Sum of (1 - R^2) for all datasets.
         """
+        self._check_stop()
+        self._last_params = np.array(params_array, dtype=float, copy=True)
         params_dict = dict(zip(self.param_names, params_array))
         total_normalized_error = 0.0
         
@@ -62,6 +82,7 @@ class MaterialOptimizer:
             
             model_stresses = []
             for F in f_list:
+                self._check_stop()
                 if stress_type == 'cauchy':
                     stress_tensor = self.solver.get_Cauchy_stress(F, params_dict)
                 else:
@@ -99,6 +120,8 @@ class MaterialOptimizer:
         Residual vector for least_squares-based solvers.
         Matches the objective function: sum(residuals^2) == objective.
         """
+        self._check_stop()
+        self._last_params = np.array(params_array, dtype=float, copy=True)
         params_dict = dict(zip(self.param_names, params_array))
         residuals = []
 
@@ -113,6 +136,7 @@ class MaterialOptimizer:
 
             model_stresses = []
             for F in f_list:
+                self._check_stop()
                 if stress_type == 'cauchy':
                     stress_tensor = self.solver.get_Cauchy_stress(F, params_dict)
                 else:
@@ -221,6 +245,8 @@ class MaterialOptimizer:
             method (str): Optimization algorithm.
         """
         print(f"Starting optimization using {method}...")
+        self.clear_stop()
+        self._last_params = np.array(initial_guess, dtype=float, copy=True)
         initial_loss = float(self._objective_function(initial_guess))
         
         # --- Progress Bar Setup ---
@@ -233,6 +259,8 @@ class MaterialOptimizer:
         # Callback wrapper for local minimizers (minimize)
         def callback_minimize(xk, *args):
             nonlocal iter_count
+            self._check_stop()
+            self._last_params = np.array(xk, dtype=float, copy=True)
             iter_count += 1
             pbar.set_postfix(Loss=f"{self._current_loss:.6f}")
             pbar.update(1)
@@ -242,6 +270,8 @@ class MaterialOptimizer:
         # Callback wrapper for differential_evolution
         def callback_de(xk, convergence):
             nonlocal iter_count
+            self._check_stop()
+            self._last_params = np.array(xk, dtype=float, copy=True)
             iter_count += 1
             pbar.set_postfix(Loss=f"{self._current_loss:.6f}", Conv=f"{convergence:.4f}")
             pbar.update(1)
@@ -285,6 +315,7 @@ class MaterialOptimizer:
             return grad
 
         had_exception = False
+        was_aborted = False
         try:
             if backend == "minimize":
                 use_bounds = bounds if solver_method in {'L-BFGS-B', 'trust-constr'} else None
@@ -316,6 +347,7 @@ class MaterialOptimizer:
 
                 def residuals_with_progress(xk):
                     nonlocal eval_count, iter_count
+                    self._last_params = np.array(xk, dtype=float, copy=True)
                     res = self._residuals(xk)
                     eval_count += 1
                     if progress_cb is not None and not use_callback:
@@ -330,6 +362,8 @@ class MaterialOptimizer:
                 if use_callback:
                     def lsq_callback(xk, *args, **kwargs):
                         nonlocal iter_count
+                        self._check_stop()
+                        self._last_params = np.array(xk, dtype=float, copy=True)
                         iter_count += 1
                         loss = float(self._objective_function(xk))
                         pbar.set_postfix(Loss=f"{loss:.6f}")
@@ -354,6 +388,13 @@ class MaterialOptimizer:
             else:
                 raise ValueError(f"Unsupported backend: {backend}")
 
+        except OptimizationAbortedError as e:
+            print(f"\nOptimization Aborted: {e}")
+            from scipy.optimize import OptimizeResult
+            x_abort = self._last_params if self._last_params.size else np.array(initial_guess, dtype=float)
+            result = OptimizeResult(success=False, message=str(e), fun=self._current_loss, x=x_abort)
+            had_exception = True
+            was_aborted = True
         except Exception as e:
             print(f"\nOptimization Error: {e}")
             from scipy.optimize import OptimizeResult
@@ -370,10 +411,14 @@ class MaterialOptimizer:
         if initial_loss > 0:
             rel_improvement = abs(initial_loss - final_loss) / max(initial_loss, 1e-12)
 
-        r2_total, r2_avg = self.compute_r2(getattr(result, "x", initial_guess))
+        if was_aborted:
+            r2_total, r2_avg = 0.0, 0.0
+        else:
+            r2_total, r2_avg = self.compute_r2(getattr(result, "x", initial_guess))
         result.r2_total = r2_total
         result.r2_avg = r2_avg
         result.r2_target = r2_target
+        result.aborted = was_aborted
 
         criteria_met = []
         max_loss_exceeded = False
@@ -389,7 +434,10 @@ class MaterialOptimizer:
         converged = bool(criteria_met) and not max_loss_exceeded
         if had_exception:
             converged = False
-        if converged:
+        if was_aborted:
+            result.success = False
+            result.message = "Optimization aborted by user."
+        elif converged:
             result.success = True
         else:
             result.success = False
