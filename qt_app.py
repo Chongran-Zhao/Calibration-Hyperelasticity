@@ -16,7 +16,7 @@ try:
 except Exception:
     user_cache_dir = None
 
-from PySide6.QtCore import Qt, QThread, Signal, QUrl, QSize
+from PySide6.QtCore import Qt, QThread, Signal, QUrl, QSize, QEvent
 from PySide6.QtGui import QFont, QPalette, QIcon, QColor, QFontDatabase, QDesktopServices, QPainter, QPen, QFontMetrics
 from PySide6.QtWidgets import (
     QAbstractScrollArea,
@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QProgressDialog,
     QPushButton,
     QListWidget,
+    QListView,
     QFileDialog,
     QInputDialog,
     QListWidgetItem,
@@ -271,36 +272,21 @@ def apply_theme_to_axis(ax):
     ax.grid(True, linestyle="--", alpha=0.25, color=(grid.redF(), grid.greenF(), grid.blueF(), 1.0))
 
 
-def build_app_palette(dark_mode):
+def build_app_palette():
     palette = QPalette()
-    if dark_mode:
-        window = QColor(15, 23, 42)
-        base = QColor(30, 41, 59)
-        alt_base = QColor(51, 65, 85)
-        text = QColor(248, 250, 252)
-        mid = QColor(71, 85, 105)
-        dark = QColor(51, 65, 85)
-        button = QColor(30, 41, 59)
-        highlight = QColor(228, 185, 118)
-        link = QColor(228, 185, 118)
-        disabled = QColor(100, 116, 139)
-        tooltip_base = QColor(30, 41, 59)
-        tooltip_text = text
-        bright = QColor(239, 68, 68)
-    else:
-        window = QColor(254, 255, 254)
-        base = QColor(255, 255, 255)
-        alt_base = QColor(248, 250, 252)
-        text = QColor(15, 23, 42)
-        mid = QColor(226, 232, 240)
-        dark = QColor(203, 213, 225)
-        button = QColor(248, 250, 252)
-        highlight = QColor(212, 165, 98)
-        link = QColor(212, 165, 98)
-        disabled = QColor(148, 163, 184)
-        tooltip_base = QColor(255, 255, 255)
-        tooltip_text = text
-        bright = QColor(239, 68, 68)
+    window = QColor("#F5F5F7")
+    base = QColor("#FFFFFF")
+    alt_base = QColor("#F2F2F7")
+    text = QColor("#1C1C1E")
+    mid = QColor("#E5E5EA")
+    dark = QColor("#D1D1D6")
+    button = QColor("#FFFFFF")
+    highlight = QColor("#007AFF")
+    link = QColor("#007AFF")
+    disabled = QColor("#8E8E93")
+    tooltip_base = QColor("#FFFFFF")
+    tooltip_text = text
+    bright = QColor("#FF3B30")
 
     palette.setColor(QPalette.Window, window)
     palette.setColor(QPalette.WindowText, text)
@@ -315,7 +301,7 @@ def build_app_palette(dark_mode):
     palette.setColor(QPalette.Mid, mid)
     palette.setColor(QPalette.Dark, dark)
     palette.setColor(QPalette.Highlight, highlight)
-    palette.setColor(QPalette.HighlightedText, QColor(15, 23, 42))
+    palette.setColor(QPalette.HighlightedText, QColor("#FFFFFF"))
     palette.setColor(QPalette.Link, link)
     palette.setColor(QPalette.LinkVisited, link)
     for role in (QPalette.Text, QPalette.WindowText, QPalette.ButtonText):
@@ -327,86 +313,69 @@ def build_app_palette(dark_mode):
 
 def build_app_stylesheet():
     return (
-        "QWidget { color: palette(windowtext); }"
-        "QMainWindow, QDialog { background: palette(window); }"
-        "QGroupBox { background: palette(base); border: 1px solid palette(mid); border-radius: 12px; margin-top: 16px; }"
-        "QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px;"
-        " color: palette(windowtext); background: palette(base); font-size: 16px; font-weight: 600; }"
+        "QWidget { color: palette(windowtext); font-family: -apple-system, \"SF Pro Text\", \"Helvetica Neue\", sans-serif; }"
+        "QMainWindow, QDialog { background: #F5F5F7; }"
         "QFrame { background: transparent; }"
         "QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget { background: transparent; border: none; }"
-        "QListWidget, QTableView, QTreeView { background: palette(base); border: 1px solid palette(mid); border-radius: 10px; }"
-        "QListWidget::item:selected { background: palette(highlight); color: palette(highlighted-text); border-radius: 6px; }"
-        "QHeaderView::section { background: palette(alternate-base); padding: 4px 6px; border: none; }"
+        "QGroupBox { background: #FFFFFF; border: 1px solid #E5E5EA; border-radius: 12px; margin-top: 18px; padding-top: 8px; }"
+        "QGroupBox::title { subcontrol-origin: margin; left: 16px; padding: 0 2px;"
+        " color: #1C1C1E; background: transparent; font-size: 15px; font-weight: 700; }"
+        "QListWidget, QTableView, QTreeView { background: #FFFFFF; border: 1px solid #E5E5EA; border-radius: 10px; }"
+        "QListWidget::item:selected { background: #EAF3FF; color: #1C1C1E; border-radius: 6px; }"
+        "QHeaderView::section { background: #F2F2F7; color: #3A3A3C; padding: 6px 8px; border: none; font-weight: 600; }"
         "QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QAbstractSpinBox {"
-        " background: palette(base); color: palette(text); border: 1px solid palette(mid);"
-        " border-radius: 10px; padding: 6px 10px; }"
-        "QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus, QAbstractSpinBox:focus {"
-        " border: 1px solid palette(highlight); }"
-        "QComboBox { background: palette(base); color: palette(text); border: 1px solid palette(mid);"
-        " border-radius: 12px; padding: 7px 32px 7px 12px; min-height: 22px; }"
-        "QComboBox:hover { background: palette(alternate-base); }"
-        "QComboBox:focus { border: 1px solid palette(highlight); }"
+        " background: #FFFFFF; color: #1C1C1E; border: 1px solid #D1D1D6; border-radius: 8px; padding: 6px 10px; }"
+        "QLineEdit:hover, QPlainTextEdit:hover, QTextEdit:hover, QSpinBox:hover, QAbstractSpinBox:hover { border: 1px solid #B9B9C1; }"
+        "QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus, QAbstractSpinBox:focus { border: 1px solid #007AFF; }"
+        "QComboBox { background: #FFFFFF; color: #1C1C1E; border: 1px solid #D1D1D6;"
+        " border-radius: 8px; padding: 6px 30px 6px 10px; min-height: 24px; }"
+        "QComboBox:hover { border: 1px solid #B9B9C1; }"
+        "QComboBox:focus { border: 1px solid #007AFF; }"
         "QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: top right; width: 24px; border: none; }"
         "QComboBox::down-arrow { width: 10px; height: 10px; }"
-        "QComboBox:disabled { color: palette(mid); background: palette(base); }"
-        "QComboBox QAbstractItemView { background: palette(base); color: palette(text);"
-        " selection-background-color: palette(highlight); selection-color: palette(highlighted-text);"
-        " border: 1px solid palette(mid); border-radius: 10px; outline: 0; padding: 4px; }"
-        "QComboBox QAbstractItemView::item { padding: 6px 8px; border-radius: 8px; margin: 2px; }"
-        "QComboBox QAbstractItemView::item:hover { background: palette(alternate-base);"
-        " border: 1px solid palette(mid); }"
-        "QComboBox QAbstractItemView::item:selected { background: palette(highlight);"
-        " color: palette(highlighted-text); }"
-        "QPushButton { background: palette(button); border: 1px solid palette(mid);"
-        " border-radius: 10px; padding: 8px 14px; }"
-        "QPushButton:hover { background: palette(alternate-base); }"
-        "QPushButton:pressed { background: palette(base); }"
-        "QPushButton:disabled { color: palette(mid); }"
-        "QPushButton#secondaryButton { background: transparent; border: 1px solid palette(mid);"
-        " border-radius: 9px; padding: 5px 10px; }"
-        "QPushButton#secondaryButton:hover { background: palette(alternate-base); }"
-        "QPushButton#secondaryButton:pressed { background: palette(base); }"
-        "QToolButton#iconButton { background: palette(base); border: 1px solid palette(mid);"
-        " border-radius: 9px; padding: 4px 8px; }"
-        "QToolButton#iconButton:hover { background: palette(alternate-base); }"
-        "QToolButton#iconButton:pressed { background: palette(base); }"
-        "QCheckBox, QRadioButton { spacing: 8px; }"
+        "QComboBox QAbstractItemView { border: 1px solid #D1D1D6; border-radius: 8px; padding: 4px; background: #FFFFFF; }"
+        "QComboBox QAbstractItemView::item { min-height: 28px; border-radius: 6px; margin: 2px 4px; padding: 4px 8px; color: #1C1C1E; }"
+        "QComboBox QAbstractItemView::item:hover, QComboBox QAbstractItemView::item:selected { background-color: #007AFF; color: #FFFFFF; }"
+        "QPushButton { background: #FFFFFF; color: #1C1C1E; border: 1px solid #D1D1D6;"
+        " border-radius: 8px; padding: 8px 14px; font-weight: 600; }"
+        "QPushButton:hover { background: #F2F2F7; border: 1px solid #B9B9C1; }"
+        "QPushButton:pressed { background: #ECECF1; }"
+        "QPushButton:disabled { color: #8E8E93; background: #F7F7FA; border: 1px solid #E5E5EA; }"
+        "QPushButton#primaryButton { background: #007AFF; color: #FFFFFF; border: 1px solid #007AFF;"
+        " border-radius: 8px; padding: 8px 16px; font-weight: 700; }"
+        "QPushButton#primaryButton:hover { background: #0A84FF; border: 1px solid #0A84FF; }"
+        "QPushButton#primaryButton:pressed { background: #0062CC; border: 1px solid #0062CC; }"
+        "QPushButton#primaryButton:disabled { background: #AFCFFF; border: 1px solid #AFCFFF; color: #F7FBFF; }"
+        "QPushButton#secondaryButton { background: #FFFFFF; color: #3A3A3C; border: 1px solid #D1D1D6;"
+        " border-radius: 8px; padding: 6px 12px; }"
+        "QPushButton#secondaryButton:hover { background: #F2F2F7; }"
+        "QToolButton#iconButton { background: #FFFFFF; border: 1px solid #D1D1D6; border-radius: 8px; padding: 4px 8px; }"
+        "QToolButton#iconButton:hover { background: #F2F2F7; border: 1px solid #B9B9C1; }"
+        "QCheckBox, QRadioButton { spacing: 8px; color: #1C1C1E; }"
         "QCheckBox#modeOption { padding: 4px 0; }"
-        "QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid palette(mid);"
-        " border-radius: 4px; background: palette(base); }"
-        "QCheckBox::indicator:checked { border: 1px solid palette(highlight); background: palette(highlight); }"
-        "QRadioButton::indicator { width: 16px; height: 16px; border: 1px solid palette(mid);"
-        " border-radius: 8px; background: palette(base); }"
-        "QRadioButton::indicator:checked { border: 1px solid palette(highlight); background: palette(highlight); }"
-        "QProgressBar { background: palette(base); border: 1px solid palette(mid); border-radius: 6px; text-align: center; }"
-        "QProgressBar::chunk { background: palette(highlight); border-radius: 6px; }"
-        "QLabel { color: palette(windowtext); }"
-        "QLabel a { color: palette(link); }"
-        "QToolButton#aboutIcon { background: palette(base); border: 1px solid palette(mid);"
-        " border-radius: 10px; padding: 6px; }"
-        "QToolButton#aboutIcon:hover { background: palette(alternate-base); }"
-        "QToolButton#aboutIcon:pressed { background: palette(base); }"
-        "QTabWidget::pane { border: 1px solid palette(mid); border-radius: 12px; padding: 6px;"
-        " background: palette(base); }"
-        "QTabBar::tab { background: palette(base); border: 1px solid palette(mid);"
-        " border-radius: 10px; padding: 4px 10px; margin-right: 6px; min-width: 24px; min-height: 22px;"
-        " font-size: 12px; font-weight: 600; }"
-        "QTabBar::tab:selected { background: palette(highlight); color: palette(highlighted-text);"
-        " border: 1px solid palette(highlight); }"
-        "QTabBar::tab:hover { background: palette(alternate-base); }"
-        "QFrame#stepCard { background: palette(base); border: 1px solid palette(mid); border-radius: 12px; }"
-        "QFrame#stepCard[state=\"active\"] { background: palette(alternate-base); border: 1px solid palette(highlight); }"
-        "QFrame#stepCard[state=\"locked\"] { background: palette(alternate-base); border: 1px dashed palette(mid); }"
-        "QFrame#stepCard QLabel { color: palette(windowtext); }"
-        "QFrame#stepCard QLabel#stepTitle { color: palette(windowtext); }"
-        "QFrame#stepCard QLabel#stepStatus { color: palette(mid); }"
-        "QFrame#stepCard QLabel#stepArrow { color: palette(highlight); }"
-        "QFrame#stepCard[state=\"complete\"] QLabel#stepStatus { color: palette(highlight); }"
-        "QFrame#stepCard[state=\"locked\"] QLabel#stepStatus { color: #475569; }"
-        "QFrame#stepConnector { background: palette(mid); border-radius: 1px; }"
-        "QGroupBox#springSourceBox { margin-top: 18px; border-radius: 10px; }"
-        "QGroupBox#springSourceBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px;"
-        " color: palette(windowtext); background: palette(base); font-size: 13px; font-weight: 600; }"
+        "QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #C7C7CC; border-radius: 4px; background: #FFFFFF; }"
+        "QCheckBox::indicator:checked { border: 1px solid #007AFF; background: #007AFF; }"
+        "QRadioButton::indicator { width: 16px; height: 16px; border: 1px solid #C7C7CC; border-radius: 8px; background: #FFFFFF; }"
+        "QRadioButton::indicator:checked { border: 1px solid #007AFF; background: #007AFF; }"
+        "QProgressBar { background: #F2F2F7; border: 1px solid #E5E5EA; border-radius: 6px; text-align: center; color: #3A3A3C; }"
+        "QProgressBar::chunk { background: #007AFF; border-radius: 6px; }"
+        "QLabel { color: #1C1C1E; }"
+        "QLabel a { color: #007AFF; }"
+        "QTabWidget::pane { border: 1px solid #E5E5EA; border-radius: 10px; padding: 6px; background: #FFFFFF; }"
+        "QTabBar::tab { background: #FFFFFF; border: 1px solid #E5E5EA;"
+        " border-radius: 8px; padding: 6px 12px; margin-right: 6px; min-height: 22px; font-size: 12px; font-weight: 600; color: #3A3A3C; }"
+        "QTabBar::tab:selected { background: #007AFF; color: #FFFFFF; border: 1px solid #007AFF; }"
+        "QTabBar::tab:hover { background: #F2F2F7; }"
+        "QFrame#stepCard { background: #FFFFFF; border: 1px solid #E5E5EA; border-radius: 12px; }"
+        "QFrame#stepCard[state=\"active\"] { background: #F9FAFF; border: 1px solid #007AFF; }"
+        "QFrame#stepCard[state=\"locked\"] { background: #FAFAFC; border: 1px dashed #D1D1D6; }"
+        "QFrame#stepCard QLabel#stepStatus { color: #8E8E93; }"
+        "QFrame#stepCard QLabel#stepArrow { color: #007AFF; }"
+        "QFrame#stepCard[state=\"complete\"] QLabel#stepStatus { color: #007AFF; }"
+        "QFrame#stepConnector { background: #D1D1D6; border-radius: 1px; }"
+        "QGroupBox#springSourceBox { margin-top: 16px; border-radius: 10px; }"
+        "QGroupBox#springSourceBox::title { subcontrol-origin: margin; left: 12px; padding: 0 2px;"
+        " color: #3A3A3C; background: transparent; font-size: 13px; font-weight: 700; }"
     )
 
 
@@ -508,7 +477,7 @@ class LatexLabel(QLabel):
         )
         qimage.setDevicePixelRatio(render_scale)
         self.setPixmap(QPixmap.fromImage(qimage))
-        self.setFixedSize(int(round(width / render_scale)), int(round(height / render_scale)))
+        self.resize(int(round(width / render_scale)), int(round(height / render_scale)))
 
     def refresh_theme(self):
         if self._latex_text:
@@ -567,11 +536,100 @@ class SmallLatexLabel(QLabel):
         )
         qimage.setDevicePixelRatio(render_scale)
         self.setPixmap(QPixmap.fromImage(qimage))
-        self.setFixedSize(int(round(width / render_scale)), int(round(height / render_scale)))
+        self.resize(int(round(width / render_scale)), int(round(height / render_scale)))
 
     def refresh_theme(self):
         if self._latex_text:
             self.set_latex(self._latex_text)
+
+
+class LatexParameterCard(QFrame):
+    removed = Signal(str)
+
+    def __init__(self, raw_name, latex_text, parent=None):
+        super().__init__(parent)
+        self.raw_name = raw_name
+        self.setObjectName("latexParameterCard")
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.setStyleSheet(
+            "QFrame#latexParameterCard {"
+            " background: #EAF3FF;"
+            " border: 1px solid #CFE3FF;"
+            " border-radius: 6px;"
+            "}"
+            "QToolButton#latexParameterCardDelete {"
+            " background: transparent;"
+            " border: none;"
+            " color: #007AFF;"
+            " font-weight: 700;"
+            " padding: 0px 2px;"
+            "}"
+            "QToolButton#latexParameterCardDelete:hover { color: #005FCC; }"
+        )
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 2, 6, 2)
+        layout.setSpacing(4)
+
+        self.label = SmallLatexLabel()
+        self.label.set_latex(latex_text)
+        self.delete_btn = QToolButton()
+        self.delete_btn.setObjectName("latexParameterCardDelete")
+        self.delete_btn.setText("×")
+        self.delete_btn.setCursor(Qt.PointingHandCursor)
+        self.delete_btn.clicked.connect(self._emit_removed)
+
+        layout.addWidget(self.label)
+        layout.addWidget(self.delete_btn)
+        self.adjustSize()
+
+    def _emit_removed(self):
+        self.removed.emit(self.raw_name)
+
+    def refresh_theme(self):
+        if self.label:
+            self.label.refresh_theme()
+
+
+class ClickableLatexBadge(QFrame):
+    insert_requested = Signal(str)
+
+    def __init__(self, latex_text, raw_text, parent=None):
+        super().__init__(parent)
+        self.raw_text = raw_text
+        self.setObjectName("clickableLatexBadge")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.setStyleSheet(
+            "QFrame#clickableLatexBadge {"
+            " background: #F2F2F7;"
+            " border: 1px solid #D1D1D6;"
+            " border-radius: 6px;"
+            "}"
+            "QFrame#clickableLatexBadge:hover {"
+            " background: #E5E5EA;"
+            " border: 1px solid #C7C7CC;"
+            "}"
+        )
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 2, 8, 2)
+        layout.setSpacing(0)
+
+        self.label = SmallLatexLabel()
+        self.label.set_latex(latex_text)
+        layout.addWidget(self.label)
+        self.adjustSize()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.insert_requested.emit(self.raw_text)
+        super().mousePressEvent(event)
+
+    def refresh_theme(self):
+        if self.label:
+            self.label.refresh_theme()
 
 
 class SmallHtmlLabel(QLabel):
@@ -624,7 +682,6 @@ class StepCard(QFrame):
         self.arrow_label = QLabel(">")
         self.arrow_label.setObjectName("stepArrow")
         self.arrow_label.setFont(make_font(16, QFont.DemiBold))
-        self.arrow_label.setFixedWidth(20)
         self.arrow_label.setAlignment(Qt.AlignCenter)
         self.arrow_label.setStyleSheet("background: transparent;")
         self.arrow_label.setVisible(False)
@@ -756,17 +813,23 @@ class CustomDataEntry(QWidget):
         self.index = index
         self.on_change = on_change
         self.on_remove = on_remove
+        self._normal_editor_style = "QPlainTextEdit { border: 1px solid #D1D1D6; background-color: #FFFFFF; }"
+        self._invalid_editor_style = "QPlainTextEdit { border: 2px solid #FF3B30; background-color: #FFF0F0; }"
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         header = QHBoxLayout()
         self.title_label = QLabel(f"Dataset {index}")
         self.title_label.setFont(make_font(15, QFont.DemiBold))
+        self.import_btn = QPushButton("Import CSV/TXT...")
+        self.import_btn.setObjectName("secondaryButton")
+        self.import_btn.clicked.connect(self._import_from_file)
         self.remove_btn = QPushButton("Delete")
         self.remove_btn.setObjectName("secondaryButton")
         self.remove_btn.clicked.connect(self._remove)
         header.addWidget(self.title_label)
         header.addStretch()
+        header.addWidget(self.import_btn)
         header.addWidget(self.remove_btn)
         layout.addLayout(header)
         self.set_deletable(index != 1)
@@ -774,6 +837,7 @@ class CustomDataEntry(QWidget):
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.mode_combo = QComboBox()
+        self.mode_combo.setView(QListView())
         self.mode_combo.addItem("Uniaxial Tension", "UT")
         self.mode_combo.addItem("Uniaxial Compression", "UC")
         self.mode_combo.addItem("Equibiaxial Tension", "ET")
@@ -782,13 +846,13 @@ class CustomDataEntry(QWidget):
         self.mode_combo.addItem("Biaxial Tension", "BT")
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         self.stress_combo = QComboBox()
+        self.stress_combo.setView(QListView())
         self.stress_combo.addItem("Nominal (1st PK)", "PK1")
         self.stress_combo.addItem("Cauchy", "cauchy")
         self.stress_combo.currentIndexChanged.connect(self._on_mode_changed)
         for combo in (self.mode_combo, self.stress_combo):
             combo.setMinimumHeight(30)
             combo.setMinimumWidth(180)
-            combo.setMaximumWidth(420)
             combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         form.addRow("Loading mode", self.mode_combo)
         form.addRow("Stress type", self.stress_combo)
@@ -801,6 +865,7 @@ class CustomDataEntry(QWidget):
         layout.addLayout(self.data_grid)
 
         self._build_data_fields()
+        self._validate_data()
 
     def set_index(self, index):
         self.index = index
@@ -855,11 +920,11 @@ class CustomDataEntry(QWidget):
             label.set_latex(text.strip("$"))
             edit = QPlainTextEdit()
             edit.setPlaceholderText(placeholders[col] if col < len(placeholders) else "")
-            edit.textChanged.connect(self._emit_change)
             edit.setMinimumHeight(80)
             edit.setMinimumWidth(150)
-            edit.setMaximumWidth(360)
-            edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            edit.setStyleSheet(self._normal_editor_style)
+            edit.textChanged.connect(self._on_data_text_changed)
             self.data_grid.addWidget(label, 0, col)
             self.data_grid.addWidget(edit, 1, col)
             self.data_inputs.append(edit)
@@ -872,6 +937,112 @@ class CustomDataEntry(QWidget):
 
     def _on_mode_changed(self):
         self._build_data_fields()
+        self._validate_data()
+        self._emit_change()
+
+    def _on_data_text_changed(self):
+        self._validate_data()
+        self._emit_change()
+
+    @staticmethod
+    def _non_empty_lines(text):
+        return [line.strip() for line in text.splitlines() if line.strip()]
+
+    def _validate_data(self):
+        if not hasattr(self, "data_inputs"):
+            return True
+
+        columns = [self._non_empty_lines(edit.toPlainText()) for edit in self.data_inputs]
+        invalid_columns = set()
+
+        lengths = [len(col) for col in columns]
+        non_zero_lengths = [length for length in lengths if length > 0]
+        if non_zero_lengths:
+            expected_length = non_zero_lengths[0]
+            for index, length in enumerate(lengths):
+                if length not in (0, expected_length):
+                    invalid_columns.add(index)
+
+        for index, column in enumerate(columns):
+            for value in column:
+                try:
+                    float(value)
+                except ValueError:
+                    invalid_columns.add(index)
+                    break
+
+        for index, edit in enumerate(self.data_inputs):
+            edit.setStyleSheet(self._invalid_editor_style if index in invalid_columns else self._normal_editor_style)
+        return not invalid_columns
+
+    def _import_from_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Data File",
+            "",
+            "Data Files (*.csv *.txt *.dat);;All Files (*)",
+        )
+        if not file_path:
+            return
+
+        content = None
+        for encoding in ("utf-8", "utf-8-sig", "latin-1"):
+            try:
+                with open(file_path, "r", encoding=encoding) as handle:
+                    content = handle.read()
+                break
+            except (OSError, UnicodeDecodeError):
+                continue
+
+        if content is None:
+            QMessageBox.warning(self, "Import Failed", "Could not read the selected file.")
+            return
+
+        expected_columns = len(self.data_inputs)
+        parsed_rows = []
+        for line_number, raw_line in enumerate(content.splitlines(), start=1):
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            tokens = [token for token in re.split(r"[,\t ]+", stripped) if token]
+            if not tokens:
+                continue
+            if len(tokens) < expected_columns:
+                QMessageBox.warning(
+                    self,
+                    "Import Failed",
+                    f"Line {line_number} has {len(tokens)} columns, expected at least {expected_columns}.",
+                )
+                return
+            parsed_rows.append(tokens[:expected_columns])
+
+        if not parsed_rows:
+            QMessageBox.warning(self, "Import Failed", "No valid numeric rows were found in the selected file.")
+            return
+
+        for line_number, row in enumerate(parsed_rows, start=1):
+            for value in row:
+                try:
+                    float(value)
+                except ValueError:
+                    QMessageBox.warning(
+                        self,
+                        "Import Failed",
+                        f"Line {line_number} contains a non-numeric value: {value}",
+                    )
+                    return
+
+        columns = [[] for _ in range(expected_columns)]
+        for row in parsed_rows:
+            for index, value in enumerate(row):
+                columns[index].append(value)
+
+        for index, edit in enumerate(self.data_inputs):
+            edit.blockSignals(True)
+            edit.setPlainText("\n".join(columns[index]))
+            edit.blockSignals(False)
+
+        self._validate_data()
         self._emit_change()
 
     def _parse_column(self, text):
@@ -931,7 +1102,6 @@ class SavedDatasetRow(QWidget):
         remove_btn.setText("x")
         remove_btn.setObjectName("iconButton")
         remove_btn.setToolTip("Remove")
-        remove_btn.setFixedSize(22, 22)
         remove_btn.clicked.connect(self._remove)
         layout.addWidget(self.label, 1)
         layout.addWidget(remove_btn, 0, Qt.AlignRight)
@@ -945,7 +1115,6 @@ class SpringIcon(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(32)
-        self.setFixedWidth(200)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
     def paintEvent(self, event):
@@ -985,25 +1154,24 @@ class SpringWidget(QGroupBox):
         self.author_provider = author_provider
         self.on_remove = on_remove
         self.model_combo = QComboBox()
+        self.model_combo.setView(QListView())
         self.model_combo.addItems(["Select..."] + get_model_list())
         self.model_label = QLabel("Model")
-        self.model_combo.setEnabled(False)
-        self.model_combo.setVisible(False)
-        self.model_label.setVisible(False)
         self.model_combo.setMinimumWidth(180)
-        self.model_combo.setMaximumWidth(340)
         self.model_combo.setMinimumHeight(30)
         self.model_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
         self.strain_label = QLabel("Strain")
         self.strain_combo = QComboBox()
+        self.strain_combo.setView(QListView())
         self.strain_combo.addItems(list(STRAIN_CONFIGS.keys()))
         self.strain_combo.setEnabled(False)
         self.strain_combo.setVisible(False)
         self.strain_label.setVisible(False)
         self.strain_combo.setMinimumWidth(160)
-        self.strain_combo.setMaximumWidth(320)
         self.strain_combo.setMinimumHeight(30)
         self.strain_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
         self.ogden_label = QLabel("Ogden terms")
         self.ogden_terms = QSpinBox()
         self.ogden_terms.setRange(1, 6)
@@ -1013,18 +1181,16 @@ class SpringWidget(QGroupBox):
         self.ogden_terms.setAlignment(Qt.AlignRight)
         self.ogden_terms.lineEdit().setAlignment(Qt.AlignRight)
         self.ogden_terms.setMinimumWidth(72)
-        self.ogden_terms.setMaximumWidth(120)
         self.ogden_terms.setMinimumHeight(30)
         self.ogden_terms.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
         self.ogden_dec_btn = QToolButton()
         self.ogden_dec_btn.setObjectName("iconButton")
         self.ogden_dec_btn.setText("-")
-        self.ogden_dec_btn.setFixedSize(22, 22)
         self.ogden_dec_btn.clicked.connect(self.ogden_terms.stepDown)
         self.ogden_inc_btn = QToolButton()
         self.ogden_inc_btn.setObjectName("iconButton")
         self.ogden_inc_btn.setText("+")
-        self.ogden_inc_btn.setFixedSize(22, 22)
         self.ogden_inc_btn.clicked.connect(self.ogden_terms.stepUp)
         self.ogden_terms_widget = QWidget()
         ogden_layout = QHBoxLayout(self.ogden_terms_widget)
@@ -1044,85 +1210,6 @@ class SpringWidget(QGroupBox):
         ogden_row_layout.addStretch()
         self.ogden_row.setVisible(False)
         self.ogden_label.setVisible(False)
-
-        self.model_source_group = QButtonGroup(self)
-        self.builtin_radio = QRadioButton("Built-in model")
-        self.custom_radio = QRadioButton("Custom model")
-        self.model_source_group.addButton(self.builtin_radio)
-        self.model_source_group.addButton(self.custom_radio)
-        self.builtin_radio.toggled.connect(self._on_model_type_changed)
-        self.custom_radio.toggled.connect(self._on_model_type_changed)
-        self.custom_type_combo = QComboBox()
-        self.custom_type_combo.addItem("Invariant-based", "invariant")
-        self.custom_type_combo.addItem("Stretch-based", "stretch")
-        self.custom_type_combo.currentIndexChanged.connect(self._on_custom_definition_changed)
-        self.custom_type_combo.setMinimumWidth(180)
-        self.custom_type_combo.setMaximumWidth(340)
-        self.custom_type_combo.setMinimumHeight(30)
-        self.custom_type_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.custom_hint = QLabel("Use variables: I1, I2 or lambda_1, lambda_2, lambda_3.")
-        self.custom_formula_edit = QLineEdit()
-        self.custom_formula_edit.setPlaceholderText("e.g., C1*(I1-3) + C2*(I2-3)")
-        self.custom_param_edit = QLineEdit()
-        self.custom_param_edit.setPlaceholderText("Parameters: C1, C2")
-        for edit in (self.custom_formula_edit, self.custom_param_edit):
-            edit.setMinimumHeight(30)
-            edit.setMinimumWidth(220)
-            edit.setMaximumWidth(560)
-            edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.custom_param_auto = QPushButton("Auto-detect params")
-        self.custom_param_auto.clicked.connect(self._auto_detect_params)
-        self.custom_formula_edit.textChanged.connect(self._on_custom_definition_changed)
-        self.custom_param_edit.textChanged.connect(self._on_custom_definition_changed)
-
-        self._custom_tokens = [
-            {"html": "I<sub>1</sub>", "symbol": "I1"},
-            {"html": "I<sub>2</sub>", "symbol": "I2"},
-            {"html": "&lambda;<sub>1</sub>", "symbol": "lambda_1"},
-            {"html": "&lambda;<sub>2</sub>", "symbol": "lambda_2"},
-            {"html": "&lambda;<sub>3</sub>", "symbol": "lambda_3"},
-            {"html": "&mu;", "symbol": "mu"},
-            {"html": "&alpha;", "symbol": "alpha"},
-            {"html": "C<sub>1</sub>", "symbol": "C_1"},
-            {"html": "C<sub>2</sub>", "symbol": "C_2"},
-            {"html": "N", "symbol": "N"},
-            {"html": "+", "symbol": "+"},
-            {"html": "−", "symbol": "-"},
-            {"html": "·", "symbol": "*"},
-            {"html": "/", "symbol": "/"},
-            {"html": "^", "symbol": "^"},
-            {"html": "(", "symbol": "("},
-            {"html": ")", "symbol": ")"},
-        ]
-        self.custom_palette = QWidget()
-        self.custom_palette_layout = QGridLayout(self.custom_palette)
-        self.custom_palette_layout.setContentsMargins(0, 0, 0, 0)
-        self.custom_palette_layout.setHorizontalSpacing(2)
-        self.custom_palette_layout.setVerticalSpacing(2)
-        self.custom_palette_layout.setAlignment(Qt.AlignLeft)
-        self.custom_add_token = QToolButton()
-        self.custom_add_token.setText("+")
-        self.custom_add_token.clicked.connect(self._add_custom_token_dialog)
-        self._build_custom_palette()
-
-        self.custom_param_table = QGridLayout()
-        self.custom_param_table.setHorizontalSpacing(8)
-        self.custom_param_table.setVerticalSpacing(4)
-        self._custom_param_widgets = []
-
-        self.custom_area = QWidget()
-        custom_area_layout = QVBoxLayout(self.custom_area)
-        custom_area_layout.setContentsMargins(0, 0, 0, 0)
-        custom_area_layout.setSpacing(4)
-        custom_area_layout.addWidget(self.custom_type_combo)
-        custom_area_layout.addWidget(self.custom_hint)
-        custom_area_layout.addWidget(self.custom_palette)
-        custom_area_layout.addWidget(self.custom_formula_edit)
-        param_row = QHBoxLayout()
-        param_row.addWidget(self.custom_param_edit, 1)
-        param_row.addWidget(self.custom_param_auto)
-        custom_area_layout.addLayout(param_row)
-        custom_area_layout.addLayout(self.custom_param_table)
 
         self.formula_label = LatexLabel()
         self.strain_formula_title = QLabel("Generalized Strain")
@@ -1157,30 +1244,20 @@ class SpringWidget(QGroupBox):
         self.remove_btn.setObjectName("iconButton")
         self.remove_btn.setText("×")
         self.remove_btn.setToolTip("Delete spring")
-        self.remove_btn.setFixedSize(24, 24)
         self.remove_btn.clicked.connect(self._on_remove_clicked)
         header_row.addWidget(self.remove_btn)
         layout.addLayout(header_row)
 
-        self.model_source_box = QGroupBox("Model source")
-        self.model_source_box.setObjectName("springSourceBox")
-        source_layout = QHBoxLayout(self.model_source_box)
-        source_layout.setContentsMargins(8, 16, 8, 6)
-        source_layout.setSpacing(8)
-        source_layout.addWidget(self.builtin_radio)
-        source_layout.addWidget(self.custom_radio)
-        source_layout.addStretch()
-
         controls = QGridLayout()
         controls.setHorizontalSpacing(4)
         controls.setVerticalSpacing(4)
-        controls.addWidget(self.model_source_box, 0, 0, 1, 4)
-        controls.addWidget(self.model_label, 1, 0)
-        controls.addWidget(self.model_combo, 1, 1)
-        controls.addWidget(self.ogden_row, 1, 2, 1, 2)
-        controls.addWidget(self.strain_label, 2, 0)
-        controls.addWidget(self.strain_combo, 2, 1)
+        controls.addWidget(self.model_label, 0, 0)
+        controls.addWidget(self.model_combo, 0, 1)
+        controls.addWidget(self.ogden_row, 0, 2, 1, 2)
+        controls.addWidget(self.strain_label, 1, 0)
+        controls.addWidget(self.strain_combo, 1, 1)
         controls.setColumnStretch(1, 1)
+        controls.setColumnStretch(2, 1)
         controls.setColumnStretch(3, 1)
         layout.addLayout(controls)
         self.controls_layout = controls
@@ -1194,12 +1271,11 @@ class SpringWidget(QGroupBox):
         params_block = QVBoxLayout(self.params_block_widget)
         params_block.setSpacing(0)
         params_block.setContentsMargins(0, 0, 0, 0)
-        params_label = QLabel("Parameters")
+        params_label = QLabel("Parameters (Built-in)")
         params_label.setFont(make_font(12, QFont.DemiBold))
         params_label.setContentsMargins(0, 0, 0, 0)
         params_label.setStyleSheet("margin-bottom: 0px;")
         params_block.addWidget(params_label)
-        params_block.addWidget(self.custom_area)
         self.params_widget = QWidget()
         self.params_widget.setLayout(self.params_layout)
         self.params_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
@@ -1234,14 +1310,12 @@ class SpringWidget(QGroupBox):
         content.setColumnStretch(0, 2)
         content.setColumnStretch(1, 3)
         layout.addLayout(content)
-        self.custom_area.setVisible(False)
         self.params_block_widget.setVisible(False)
         self.formula_block_widget.setVisible(False)
         self.strain_formula_container.setVisible(False)
 
         self.setLayout(layout)
         self.setMinimumWidth(520)
-        self.setMaximumWidth(980)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.setFlat(True)
         self.apply_theme()
@@ -1251,9 +1325,7 @@ class SpringWidget(QGroupBox):
         self.param_edits = []
         self._param_prefix = f"{self.model_combo.currentText()}_{self.index}_"
         self._model_name = "Select..."
-        self._custom_valid = False
         self._custom_error = ""
-        self._custom_cached_func = None
         self._on_model_changed()
 
     def apply_theme(self):
@@ -1301,17 +1373,9 @@ class SpringWidget(QGroupBox):
             return italic("&alpha;")
         return italic(name)
 
-    def _parse_custom_params(self):
-        return [p.strip() for p in self.custom_param_edit.text().split(",") if p.strip()]
-
     def _on_param_changed(self):
         if self.on_change:
             self.on_change(changed=True)
-
-    def _on_model_type_changed(self, checked):
-        if not checked:
-            return
-        self._on_model_changed()
 
     def _on_remove_clicked(self):
         if self.on_remove:
@@ -1321,214 +1385,18 @@ class SpringWidget(QGroupBox):
         self.remove_btn.setEnabled(enabled)
         self.remove_btn.setVisible(enabled)
 
-    def _get_custom_param_rows(self):
-        rows = []
-        for name, guess_edit, min_edit, max_edit in self._custom_param_widgets:
-            rows.append((name, guess_edit, min_edit, max_edit))
-        return rows
-
-    def _refresh_custom_param_rows(self):
-        previous = {name: (guess.text(), min_edit.text(), max_edit.text()) for name, guess, min_edit, max_edit in self._custom_param_widgets}
-        while self.custom_param_table.count():
-            item = self.custom_param_table.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-        self._custom_param_widgets = []
-        headers = ["Param", "Guess", "Min", "Max"]
-        for col, text in enumerate(headers):
-            label = QLabel(text)
-            label.setFont(make_font(12, QFont.DemiBold))
-            self.custom_param_table.addWidget(label, 0, col)
-
-        params = self._parse_custom_params()
-        for row, name in enumerate(params, start=1):
-            label = QLabel(name)
-            guess_val, min_val, max_val = previous.get(name, ("0.1", "", ""))
-            guess = QLineEdit(guess_val)
-            min_edit = QLineEdit(min_val)
-            max_edit = QLineEdit(max_val)
-            for edit, min_width, max_width in (
-                (guess, 110, 180),
-                (min_edit, 90, 160),
-                (max_edit, 90, 160),
-            ):
-                edit.setMinimumWidth(min_width)
-                edit.setMaximumWidth(max_width)
-                edit.setMinimumHeight(28)
-                edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            guess.textChanged.connect(self._on_param_changed)
-            min_edit.textChanged.connect(self._on_param_changed)
-            max_edit.textChanged.connect(self._on_param_changed)
-            self.custom_param_table.addWidget(label, row, 0)
-            self.custom_param_table.addWidget(guess, row, 1)
-            self.custom_param_table.addWidget(min_edit, row, 2)
-            self.custom_param_table.addWidget(max_edit, row, 3)
-            self._custom_param_widgets.append((name, guess, min_edit, max_edit))
-
-    def _build_custom_model(self, custom_kind):
-        formula_text = self.custom_formula_edit.text().strip()
-        formula_text = (
-            formula_text.replace("\\mu", "mu")
-            .replace("\\alpha", "alpha")
-            .replace("\\lambda_1", "lambda_1")
-            .replace("\\lambda_2", "lambda_2")
-            .replace("\\lambda_3", "lambda_3")
-        )
-        if not formula_text:
-            raise ValueError("Custom formula is empty.")
-        param_names = self._parse_custom_params()
-        if not param_names:
-            raise ValueError("Custom parameters are empty.")
-        params_symbols = {name: sp.Symbol(name) for name in param_names}
-        if custom_kind == "invariant":
-            I1, I2 = sp.symbols("I1 I2")
-            locals_map = {"I1": I1, "I2": I2, **params_symbols}
-        else:
-            l1, l2, l3 = sp.symbols("lambda_1 lambda_2 lambda_3")
-            locals_map = {"lambda_1": l1, "lambda_2": l2, "lambda_3": l3, **params_symbols}
-        psi_expr = sp.sympify(formula_text, locals=locals_map)
-        formula_latex = sp.latex(psi_expr)
-        guesses = []
-        bounds = []
-        rows = {name: (guess_edit, min_edit, max_edit) for name, guess_edit, min_edit, max_edit in self._get_custom_param_rows()}
-        for name in param_names:
-            guess_edit, min_edit, max_edit = rows.get(name, (None, None, None))
-            try:
-                guesses.append(float(guess_edit.text()) if guess_edit else 0.1)
-            except ValueError:
-                guesses.append(0.1)
-            lo = None
-            hi = None
-            if min_edit and min_edit.text().strip():
-                try:
-                    lo = float(min_edit.text())
-                except ValueError:
-                    lo = None
-            if max_edit and max_edit.text().strip():
-                try:
-                    hi = float(max_edit.text())
-                except ValueError:
-                    hi = None
-            bounds.append((lo, hi))
-
-        if custom_kind == "invariant":
-            def CustomModel(I1, I2, params):
-                return psi_expr
-            CustomModel.model_type = "invariant_based"
-        else:
-            def CustomModel(lambda_1, lambda_2, lambda_3, params):
-                return psi_expr
-            CustomModel.model_type = "stretch_based"
-        CustomModel.category = "custom"
-        CustomModel.formula = formula_latex
-        CustomModel.param_names = param_names
-        CustomModel.initial_guess = guesses
-        CustomModel.bounds = bounds
-        CustomModel.__name__ = f"Custom_{custom_kind}"
-        return CustomModel
-
-    def _on_custom_definition_changed(self):
-        if not self.custom_radio.isChecked():
-            return
-        self._refresh_custom_param_rows()
-        self._on_model_changed()
-
-    def _auto_detect_params(self):
-        formula_text = self.custom_formula_edit.text().strip()
-        if not formula_text:
-            return
-        try:
-            expr = sp.sympify(formula_text)
-        except Exception:
-            return
-        reserved = {"I1", "I2", "lambda_1", "lambda_2", "lambda_3"}
-        params = sorted({str(sym) for sym in expr.free_symbols if str(sym) not in reserved})
-        if params:
-            self.custom_param_edit.setText(", ".join(params))
-
-    def _build_custom_palette(self):
-        while self.custom_palette_layout.count():
-            item = self.custom_palette_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-        cols = 8
-        row = 0
-        col = 0
-        for token in self._custom_tokens:
-            wrapper = QWidget()
-            wrapper_layout = QHBoxLayout(wrapper)
-            wrapper_layout.setContentsMargins(0, 0, 0, 0)
-            label = SmallHtmlLabel()
-            label.set_html(token["html"])
-            add_btn = QToolButton()
-            add_btn.setText("+")
-            add_btn.clicked.connect(lambda _, s=token["symbol"]: self._insert_custom_token(s))
-            wrapper_layout.addWidget(label)
-            wrapper_layout.addWidget(add_btn)
-            wrapper.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            self.custom_palette_layout.addWidget(wrapper, row, col)
-            col += 1
-            if col >= cols:
-                col = 0
-                row += 1
-        self.custom_palette_layout.addWidget(self.custom_add_token, row, col)
-        self.custom_palette_layout.setColumnStretch(cols, 1)
-
-    def _add_custom_token_dialog(self):
-        latex, ok = QInputDialog.getText(self, "Custom token", "LaTeX (e.g., \\mu_1):")
-        if not ok or not latex.strip():
-            return
-        symbol, ok = QInputDialog.getText(self, "Custom token", "Symbol name (e.g., mu_1):")
-        if not ok or not symbol.strip():
-            return
-        self._custom_tokens.append({"html": self._latex_to_html(latex.strip()), "symbol": symbol.strip()})
-        params = self._parse_custom_params()
-        if symbol.strip() not in params:
-            params.append(symbol.strip())
-            self.custom_param_edit.setText(", ".join(params))
-        self._build_custom_palette()
-
-    def _insert_custom_token(self, symbol):
-        current = self.custom_formula_edit.text()
-        self.custom_formula_edit.setText(current + symbol)
-
-    def _latex_to_html(self, latex):
-        text = latex.strip().replace("$", "")
-        text = text.replace("\\lambda", "&lambda;")
-        text = text.replace("\\mu", "&mu;")
-        text = text.replace("\\alpha", "&alpha;")
-        match = re.match(r"^([A-Za-z&;]+)_\\{?(\\d+)\\}?$", text)
-        if match:
-            base, idx = match.groups()
-            return f"{base}<sub>{idx}</sub>"
-        match = re.match(r"^([A-Za-z&;]+)_(\\d+)$", text)
-        if match:
-            base, idx = match.groups()
-            return f"{base}<sub>{idx}</sub>"
-        return text
 
     def _on_model_changed(self):
         display_name = self.model_combo.currentText()
         model_name = resolve_model_name(display_name)
         self._model_name = display_name
-        is_custom = self.custom_radio.isChecked()
-        is_builtin = self.builtin_radio.isChecked()
-        self.model_label.setVisible(is_builtin)
-        self.model_combo.setVisible(is_builtin)
-        self.model_combo.setEnabled(is_builtin)
+        self.model_label.setVisible(True)
+        self.model_combo.setVisible(True)
+        self.model_combo.setEnabled(True)
         is_hill = display_name == "Hill"
         is_ogden = display_name == "Ogden"
-        show_hill = is_builtin and is_hill
-        show_ogden = is_builtin and is_ogden
-        if hasattr(self, "controls_layout"):
-            if show_hill:
-                self.controls_layout.addWidget(self.strain_label, 1, 2)
-                self.controls_layout.addWidget(self.strain_combo, 1, 3)
-            else:
-                self.controls_layout.addWidget(self.strain_label, 2, 0)
-                self.controls_layout.addWidget(self.strain_combo, 2, 1)
+        show_hill = is_hill
+        show_ogden = is_ogden
         self.strain_combo.setEnabled(show_hill)
         self.strain_combo.setVisible(show_hill)
         self.strain_label.setVisible(show_hill)
@@ -1536,8 +1404,7 @@ class SpringWidget(QGroupBox):
         self.ogden_terms_widget.setVisible(show_ogden)
         self.ogden_label.setVisible(show_ogden)
         self.ogden_row.setVisible(show_ogden)
-        self.custom_area.setVisible(is_custom)
-        details_visible = is_custom or (is_builtin and display_name != "Select...")
+        details_visible = display_name != "Select..."
         self.params_block_widget.setVisible(details_visible)
         self.formula_block_widget.setVisible(details_visible)
         self._clear_params()
@@ -1551,33 +1418,10 @@ class SpringWidget(QGroupBox):
             self.reference_title.setVisible(False)
             self.reference_label.clear()
             if self.on_change:
-                self.on_change(changed=bool(is_custom or is_builtin))
+                self.on_change(changed=False)
             return
 
-        if is_custom:
-            self._refresh_custom_param_rows()
-            custom_kind = self.custom_type_combo.currentData()
-            self.custom_hint.setText(
-                "Use variables: I1, I2." if custom_kind == "invariant" else "Use variables: lambda_1, lambda_2, lambda_3."
-            )
-            try:
-                func = self._build_custom_model(custom_kind)
-                self._custom_valid = True
-                self._custom_error = ""
-                self._custom_cached_func = func
-            except Exception as exc:
-                self._custom_valid = False
-                self._custom_error = str(exc)
-                self._custom_cached_func = None
-                self.formula_label.clear()
-                self.strain_formula_label.clear()
-                self.strain_formula_title.setVisible(False)
-                self.reference_title.setVisible(False)
-                self.reference_label.clear()
-                if self.on_change:
-                    self.on_change(changed=True)
-                return
-        elif display_name == "Hill":
+        if display_name == "Hill":
             strain_name = self.strain_combo.currentText()
             func = MaterialModels.create_hill_model(strain_name)
         elif display_name == "Ogden":
@@ -1601,47 +1445,14 @@ class SpringWidget(QGroupBox):
             if hasattr(self, "strain_formula_container"):
                 self.strain_formula_container.setVisible(False)
 
-        if is_custom:
+        reference = MODEL_REFERENCES.get(model_name)
+        if reference:
+            label, url = reference
+            self.reference_title.setVisible(True)
+            self.reference_label.setText(f"<a href='{url}'>{label}</a>")
+        else:
             self.reference_title.setVisible(False)
             self.reference_label.clear()
-        else:
-            reference = MODEL_REFERENCES.get(model_name)
-            if reference:
-                label, url = reference
-                self.reference_title.setVisible(True)
-                self.reference_label.setText(f"<a href='{url}'>{label}</a>")
-            else:
-                self.reference_title.setVisible(False)
-                self.reference_label.clear()
-
-        if is_custom:
-            self._param_prefix = f"Custom_{self.index}_"
-            param_names = getattr(func, "param_names", [])
-            defaults = getattr(func, "initial_guess", [])
-            for idx, (name, default) in enumerate(zip(param_names, defaults)):
-                row = idx
-                col = 0
-                label = QLabel()
-                label.setTextFormat(Qt.RichText)
-                label_html = self._format_param_label(name)
-                label.setText(label_html)
-                label.setMinimumWidth(_label_width_for_text(label, label_html, minimum=64, maximum=190))
-                label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-                edit = QLineEdit()
-                text_value = f"{float(default):.4g}"
-                edit.setText(text_value)
-                edit.setPlaceholderText(text_value)
-                edit.setMinimumWidth(120)
-                edit.setMaximumWidth(260)
-                edit.setMinimumHeight(28)
-                edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-                edit.textChanged.connect(self._on_param_changed)
-                self.params_layout.addWidget(label, row, col)
-                self.params_layout.addWidget(edit, row, col + 1)
-                self.param_edits.append((name, edit, default))
-            if self.on_change:
-                self.on_change(changed=True)
-            return
 
         self._param_prefix = f"{model_name}_{self.index}_"
         temp_net = ParallelNetwork()
@@ -1668,38 +1479,31 @@ class SpringWidget(QGroupBox):
             edit.setText(text_value)
             edit.setPlaceholderText(text_value)
             edit.setMinimumWidth(120)
-            edit.setMaximumWidth(260)
             edit.setMinimumHeight(28)
             edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             edit.textChanged.connect(self._on_param_changed)
             self.params_layout.addWidget(label, row, col)
             self.params_layout.addWidget(edit, row, col + 1)
             self.param_edits.append((name, edit, default))
+        self._custom_error = ""
         if self.on_change:
             self.on_change(changed=True)
 
     def is_valid(self):
-        if self.custom_radio.isChecked():
-            return self._custom_valid
-        if self.builtin_radio.isChecked():
-            return self.model_combo.currentText() != "Select..."
-        return False
+        return self.model_combo.currentText() != "Select..."
 
     def build_config(self):
         display_name = self.model_combo.currentText()
         model_name = resolve_model_name(display_name)
-        if self.custom_radio.isChecked():
-            func = self._custom_cached_func or self._build_custom_model(self.custom_type_combo.currentData())
-        elif self.builtin_radio.isChecked():
-            if display_name == "Hill":
-                strain_name = self.strain_combo.currentText()
-                func = MaterialModels.create_hill_model(strain_name)
-            elif display_name == "Ogden":
-                func = MaterialModels.create_ogden_model(self.ogden_terms.value())
-            else:
-                func = getattr(MaterialModels, model_name)
+        if display_name == "Hill":
+            strain_name = self.strain_combo.currentText()
+            func = MaterialModels.create_hill_model(strain_name)
+        elif display_name == "Ogden":
+            func = MaterialModels.create_ogden_model(self.ogden_terms.value())
+        elif display_name != "Select...":
+            func = getattr(MaterialModels, model_name)
         else:
-            raise ValueError("Select a model source.")
+            raise ValueError("Select a model.")
 
         user_params = []
         for _, edit, default in self.param_edits:
@@ -1714,26 +1518,17 @@ class SpringWidget(QGroupBox):
 
         return func, user_params
 
+    def get_model_config(self):
+        return self.build_config()
+
     def get_state(self):
-        model_source = ""
-        if self.custom_radio.isChecked():
-            model_source = "custom"
-        elif self.builtin_radio.isChecked():
-            model_source = "builtin"
         return {
             "model": self.model_combo.currentText(),
             "strain": self.strain_combo.currentText(),
             "ogden_terms": self.ogden_terms.value(),
             "params": [edit.text().strip() for _, edit, _ in self.param_edits],
-            "model_source": model_source,
-            "use_custom": model_source == "custom",
-            "custom_type": self.custom_type_combo.currentData(),
-            "custom_formula": self.custom_formula_edit.text(),
-            "custom_params": self.custom_param_edit.text(),
-            "custom_param_values": [
-                (name, guess.text(), min_edit.text(), max_edit.text())
-                for name, guess, min_edit, max_edit in self._get_custom_param_rows()
-            ],
+            "model_source": "builtin",
+            "use_custom": False,
         }
 
     def apply_state(self, state):
@@ -1748,29 +1543,7 @@ class SpringWidget(QGroupBox):
                 self.strain_combo.setCurrentText(strain)
         if model == "Ogden":
             self.ogden_terms.setValue(state.get("ogden_terms", 1))
-        model_source = state.get("model_source")
-        if model_source == "custom" or state.get("use_custom"):
-            self.custom_radio.setChecked(True)
-        elif model_source == "builtin":
-            self.builtin_radio.setChecked(True)
-        elif model and model != "Select...":
-            self.builtin_radio.setChecked(True)
-        custom_type = state.get("custom_type", "invariant")
-        idx = self.custom_type_combo.findData(custom_type)
-        if idx >= 0:
-            self.custom_type_combo.setCurrentIndex(idx)
-        self.custom_formula_edit.setText(state.get("custom_formula", ""))
-        self.custom_param_edit.setText(state.get("custom_params", ""))
         self._on_model_changed()
-        for name, guess_val, min_val, max_val in state.get("custom_param_values", []):
-            for row_name, guess_edit, min_edit, max_edit in self._get_custom_param_rows():
-                if row_name == name:
-                    if guess_val:
-                        guess_edit.setText(guess_val)
-                    if min_val:
-                        min_edit.setText(min_val)
-                    if max_val:
-                        max_edit.setText(max_val)
         # Apply params after widgets are built
         values = state.get("params", [])
         for i, (_, edit, _) in enumerate(self.param_edits):
@@ -1782,7 +1555,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Calibration for Hyperelasticity")
-        self.setMinimumSize(1400, 900)
+        self.setMinimumSize(1000, 700)
+        self.resize(1300, 850)
         icon_path = os.path.join(base_dir, "assets", "icons", "app.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
@@ -1797,11 +1571,12 @@ class MainWindow(QMainWindow):
         self._optimization_running = False
         self._bt_mix_warned = False
         self._custom_source_warned = False
-        self._dark_mode = False
         self.prediction_selection = {}
 
         root = QWidget()
         root_layout = QHBoxLayout(root)
+        root_layout.setContentsMargins(16, 16, 16, 16)
+        root_layout.setSpacing(16)
 
         sidebar = self._build_sidebar()
         root_layout.addWidget(sidebar)
@@ -1814,15 +1589,19 @@ class MainWindow(QMainWindow):
         self.datasets = get_available_datasets()
         self._populate_authors()
         self._update_data_source()
-        self._apply_theme(self._dark_mode)
+        self._apply_theme()
         self._update_workflow_cards()
 
     def _build_sidebar(self):
         sidebar = QGroupBox("Navigation")
         layout = QVBoxLayout()
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(14)
 
         about_box = QGroupBox("About")
         about_layout = QVBoxLayout()
+        about_layout.setContentsMargins(12, 12, 12, 12)
+        about_layout.setSpacing(10)
         about_title = QLabel("Hyperelastic Calibration")
         about_title.setFont(make_font(14, QFont.DemiBold))
         about_text = QLabel("Fit models to experimental data.")
@@ -1836,7 +1615,8 @@ class MainWindow(QMainWindow):
 
         workflow_box = QGroupBox("Workflow")
         workflow_layout = QVBoxLayout()
-        workflow_layout.setSpacing(10)
+        workflow_layout.setContentsMargins(12, 12, 12, 12)
+        workflow_layout.setSpacing(12)
         self.step_cards = []
         self.step_connectors = []
         for idx, name in enumerate(self.step_names):
@@ -1847,7 +1627,7 @@ class MainWindow(QMainWindow):
             if idx < len(self.step_names) - 1:
                 connector = QFrame()
                 connector.setObjectName("stepConnector")
-                connector.setFixedSize(2, 12)
+                connector.setMinimumSize(2, 12)
                 workflow_layout.addWidget(connector, alignment=Qt.AlignHCenter)
                 self.step_connectors.append(connector)
         workflow_box.setLayout(workflow_layout)
@@ -1855,11 +1635,13 @@ class MainWindow(QMainWindow):
 
         author_box = QGroupBox("Author")
         author_layout = QVBoxLayout()
+        author_layout.setContentsMargins(12, 12, 12, 12)
+        author_layout.setSpacing(10)
         name = QLabel("Chongran Zhao")
         name.setFont(make_font(15, QFont.DemiBold))
         author_layout.addWidget(name)
         link_row = QHBoxLayout()
-        link_row.setSpacing(8)
+        link_row.setSpacing(10)
         email_icon = QApplication.style().standardIcon(QStyle.SP_MessageBoxInformation)
         site_icon = QApplication.style().standardIcon(QStyle.SP_ComputerIcon)
         github_icon = QApplication.style().standardIcon(QStyle.SP_ComputerIcon)
@@ -1921,26 +1703,9 @@ class MainWindow(QMainWindow):
         author_box.setLayout(author_layout)
         layout.addWidget(author_box)
 
-        appearance_box = QGroupBox("Appearance")
-        appearance_layout = QHBoxLayout()
-        appearance_layout.addWidget(QLabel("Theme"))
-        self.theme_toggle = QToolButton()
-        self.theme_toggle.setCheckable(True)
-        self.theme_toggle.setChecked(self._dark_mode)
-        self.theme_toggle.setStyleSheet(
-            "QToolButton { border: 1px solid palette(mid); border-radius: 12px; padding: 4px 10px; }"
-            "QToolButton:checked { background: palette(highlight); color: palette(highlighted-text); }"
-        )
-        self.theme_toggle.toggled.connect(self._on_theme_toggled)
-        appearance_layout.addStretch()
-        appearance_layout.addWidget(self.theme_toggle)
-        appearance_box.setLayout(appearance_layout)
-        layout.addWidget(appearance_box)
-
         layout.addStretch()
         sidebar.setLayout(layout)
         sidebar.setMinimumWidth(260)
-        sidebar.setMaximumWidth(300)
         return sidebar
 
     def _build_content(self):
@@ -1951,6 +1716,8 @@ class MainWindow(QMainWindow):
         container = QWidget()
         container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         layout = QVBoxLayout(container)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(14)
 
         header = QLabel("Calibration for Hyperelasticity")
         header.setFont(make_font(26, QFont.DemiBold))
@@ -1977,28 +1744,15 @@ class MainWindow(QMainWindow):
         self.scroll.setWidget(container)
         return self.scroll
 
-    def _on_theme_toggled(self, checked):
-        self._dark_mode = checked
-        self._apply_theme(checked)
-
-    def _apply_theme(self, dark_mode):
+    def _apply_theme(self):
         app = QApplication.instance()
         if app:
-            app.setPalette(build_app_palette(dark_mode))
+            app.setPalette(build_app_palette())
             app.setStyleSheet(build_app_stylesheet())
-        self._update_theme_toggle(dark_mode)
         self._refresh_latex_labels()
         self._refresh_spring_widgets()
         self._refresh_canvases()
         self._update_workflow_cards()
-
-    def _update_theme_toggle(self, dark_mode):
-        if dark_mode:
-            self.theme_toggle.setText("Dark")
-            self.theme_toggle.setToolTip("Switch to light background")
-        else:
-            self.theme_toggle.setText("Light")
-            self.theme_toggle.setToolTip("Switch to dark background")
 
     def _refresh_canvases(self):
         for canvas in (
@@ -2032,10 +1786,13 @@ class MainWindow(QMainWindow):
     def _build_data_section(self):
         self.data_box = QGroupBox("1. Experimental Data")
         layout = QHBoxLayout()
+        layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(16)
 
         source_box = QGroupBox("Data source")
         source_layout = QVBoxLayout()
+        source_layout.setContentsMargins(12, 12, 12, 12)
+        source_layout.setSpacing(12)
         self.data_source_group = QButtonGroup(self)
         self.use_builtin_radio = QRadioButton("Use built-in datasets")
         self.use_custom_radio = QRadioButton("Use your own data")
@@ -2051,6 +1808,8 @@ class MainWindow(QMainWindow):
         source_layout.addLayout(source_toggle)
 
         self.author_combo = QComboBox()
+        self.author_combo.setView(QListView())
+        self.author_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.author_combo.currentTextChanged.connect(self._on_author_changed)
         self.author_row = QWidget()
         author_layout = QFormLayout(self.author_row)
@@ -2061,6 +1820,8 @@ class MainWindow(QMainWindow):
         component_layout = QFormLayout(self.component_row)
         self.component_label = QLabel("Component")
         self.component_combo = QComboBox()
+        self.component_combo.setView(QListView())
+        self.component_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.component_combo.currentIndexChanged.connect(self._on_component_changed)
         component_layout.addRow(self.component_label, self.component_combo)
         self.component_row.setVisible(False)
@@ -2069,6 +1830,8 @@ class MainWindow(QMainWindow):
 
         self.builtin_widget = QWidget()
         builtin_layout = QVBoxLayout(self.builtin_widget)
+        builtin_layout.setContentsMargins(0, 0, 0, 0)
+        builtin_layout.setSpacing(10)
         self.modes_grid = QGridLayout()
         self.modes_grid.setHorizontalSpacing(8)
         self.modes_grid.setVerticalSpacing(12)
@@ -2077,6 +1840,8 @@ class MainWindow(QMainWindow):
 
         self.custom_widget = QWidget()
         custom_layout = QVBoxLayout(self.custom_widget)
+        custom_layout.setContentsMargins(0, 0, 0, 0)
+        custom_layout.setSpacing(10)
         custom_header = QHBoxLayout()
         custom_title = QLabel("Custom datasets")
         custom_title.setFont(make_font(14, QFont.DemiBold))
@@ -2135,7 +1900,8 @@ class MainWindow(QMainWindow):
         self.data_next_btn.clicked.connect(lambda: self._set_step(1))
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setSpacing(10)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(12)
         source_layout.addWidget(self.builtin_widget)
         source_layout.addWidget(self.custom_widget)
         left_layout.addWidget(source_box)
@@ -2149,6 +1915,8 @@ class MainWindow(QMainWindow):
 
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(10)
         right_layout.addWidget(self.preview_canvas)
         right_layout.addLayout(preview_actions)
 
@@ -2163,6 +1931,7 @@ class MainWindow(QMainWindow):
     def _build_model_section(self):
         self.model_box = QGroupBox("2. Model Architecture")
         layout = QVBoxLayout()
+        layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
         self.spring_count = 1
@@ -2172,7 +1941,6 @@ class MainWindow(QMainWindow):
 
         self.add_spring_btn = QPushButton("Add Parallel Spring")
         self.add_spring_btn.clicked.connect(self._add_spring)
-        self.add_spring_btn.setFixedWidth(200)
         self.add_spring_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         button_row = QHBoxLayout()
         button_row.addWidget(self.add_spring_btn)
@@ -2183,11 +1951,11 @@ class MainWindow(QMainWindow):
         self.spring_rows_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         spring_rows_layout = QHBoxLayout(self.spring_rows_widget)
         spring_rows_layout.setContentsMargins(0, 0, 0, 0)
-        spring_rows_layout.setSpacing(0)
+        spring_rows_layout.setSpacing(8)
         self.spring_grid = QGridLayout()
         self.spring_grid.setContentsMargins(0, 0, 0, 0)
-        self.spring_grid.setHorizontalSpacing(12)
-        self.spring_grid.setVerticalSpacing(8)
+        self.spring_grid.setHorizontalSpacing(14)
+        self.spring_grid.setVerticalSpacing(12)
         self.spring_grid.setColumnStretch(0, 0)
         self.spring_grid.setColumnStretch(1, 0)
         spring_rows_layout.addLayout(self.spring_grid)
@@ -2208,6 +1976,8 @@ class MainWindow(QMainWindow):
     def _build_optimization_section(self):
         self.opt_box = QGroupBox("3. Optimization")
         outer_layout = QVBoxLayout()
+        outer_layout.setContentsMargins(16, 16, 16, 16)
+        outer_layout.setSpacing(12)
         body_layout = QHBoxLayout()
         body_layout.setSpacing(16)
 
@@ -2215,11 +1985,12 @@ class MainWindow(QMainWindow):
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(10)
-        left_panel.setMaximumWidth(380)
 
         method_label = QLabel("Optimization method")
         method_label.setFont(make_font(12, QFont.DemiBold))
         self.method_combo = QComboBox()
+        self.method_combo.setView(QListView())
+        self.method_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.method_combo.addItem("L-BFGS-B", "L-BFGS-B")
         self.method_combo.addItem("Trust-Region Reflective (lsqnonlin)", "trf")
         self.method_combo.addItem("Levenberg-Marquardt (lsqnonlin)", "lm")
@@ -2245,6 +2016,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.calib_params_box, 1)
 
         self.run_button = QPushButton("Start Calibration")
+        self.run_button.setObjectName("primaryButton")
         self.run_button.clicked.connect(self._run_optimization)
         left_layout.addWidget(self.run_button)
 
@@ -2259,6 +2031,7 @@ class MainWindow(QMainWindow):
         self.opt_log = QPlainTextEdit()
         self.opt_log.setReadOnly(True)
         self.opt_log.setMaximumBlockCount(2000)
+        self.opt_log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         log_layout.addWidget(self.opt_log)
         self.opt_log_box.setLayout(log_layout)
         left_layout.addWidget(self.opt_log_box, 2)
@@ -2306,12 +2079,13 @@ class MainWindow(QMainWindow):
     def _build_prediction_section(self):
         self.prediction_box = QGroupBox("4. Prediction")
         layout = QHBoxLayout()
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(16)
 
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(10)
-        left_panel.setMaximumWidth(360)
         self.prediction_params_box = QGroupBox("Parameters")
         pred_params_layout = QVBoxLayout()
         self.prediction_params_area = QScrollArea()
@@ -2331,6 +2105,8 @@ class MainWindow(QMainWindow):
 
         self.prediction_modes_box = QGroupBox("Prediction Data")
         modes_layout = QVBoxLayout()
+        modes_layout.setContentsMargins(12, 12, 12, 12)
+        modes_layout.setSpacing(10)
         self.prediction_author_label = QLabel("Author: -")
         self.prediction_author_label.setFont(make_font(13, QFont.DemiBold))
         modes_layout.addWidget(self.prediction_author_label)
@@ -2338,6 +2114,8 @@ class MainWindow(QMainWindow):
         pred_component_layout = QFormLayout(self.prediction_component_row)
         self.prediction_component_label = QLabel("Component")
         self.prediction_component_combo = QComboBox()
+        self.prediction_component_combo.setView(QListView())
+        self.prediction_component_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.prediction_component_combo.currentIndexChanged.connect(self._on_prediction_component_changed)
         pred_component_layout.addRow(self.prediction_component_label, self.prediction_component_combo)
         self.prediction_component_row.setVisible(False)
@@ -3321,7 +3099,6 @@ class MainWindow(QMainWindow):
             edit = QLineEdit(f"{value:.6g}")
             edit.setReadOnly(True)
             edit.setMinimumWidth(120)
-            edit.setMaximumWidth(260)
             edit.setMinimumHeight(28)
             edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             row_layout.addWidget(label)
@@ -3361,7 +3138,6 @@ class MainWindow(QMainWindow):
             label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             edit = QLineEdit(f"{value:.6g}")
             edit.setMinimumWidth(140)
-            edit.setMaximumWidth(280)
             edit.setMinimumHeight(28)
             edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             edit.textEdited.connect(self._on_prediction_param_edited)
@@ -4159,7 +3935,7 @@ def main():
     if multiprocessing.current_process().name != "MainProcess":
         return
     app = QApplication(sys.argv)
-    app.setPalette(build_app_palette(False))
+    app.setPalette(build_app_palette())
     app.setStyleSheet(build_app_stylesheet())
     app.setApplicationName("Calibration for Hyperelasticity")
     app.setApplicationDisplayName("Calibration for Hyperelasticity")
