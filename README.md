@@ -44,8 +44,6 @@ python qt_app.py
 
 ## Example: Zhan (non-Gaussian)
 
-Note: The figures in this README are not updated yet in the GitHub preview.
-
 This example reproduces Fig. 7 from Zhan (JMPS) by fitting the Zhan (non-Gaussian)
 model to James 1975 uniaxial tension data, then predicting biaxial tension.
 
