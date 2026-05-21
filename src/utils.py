@@ -275,18 +275,11 @@ def load_experimental_data(configs):
     data_root = os.environ.get("CALIBRATION_DATA_DIR", "data")
     data_h5_path = os.path.join(data_root, "data.h5")
 
-    all_tests = []
     use_h5 = h5py and os.path.exists(data_h5_path)
     if use_h5:
-        with h5py.File(data_h5_path, "r") as h5f:
-            for cfg in configs:
-                entry = _load_h5_dataset(cfg, h5f)
-                if entry:
-                    if isinstance(entry, list):
-                        all_tests.extend(entry)
-                    else:
-                        all_tests.append(entry)
+        all_tests = load_experimental_data_h5(configs, data_h5_path, announce=False)
     else:
+        all_tests = []
         for cfg in configs:
             entry = _load_text_dataset(cfg, data_root)
             if entry:
@@ -303,92 +296,19 @@ def load_experimental_data(configs):
         print(f"  Success: Loaded {len(all_tests)} datasets.")
     return all_tests
 
-def load_experimental_data_h5(configs, data_h5_path):
-    print(f"  Using HDF5 dataset: {data_h5_path}")
+def load_experimental_data_h5(configs, data_h5_path, announce=True):
+    if announce:
+        print(f"  Using HDF5 dataset: {data_h5_path}")
     all_tests = []
 
     with h5py.File(data_h5_path, "r") as h5f:
         for cfg in configs:
-            author = cfg['author']
-            mode_raw = cfg['mode']
-            mode = _parse_mode(mode_raw)
-
-            if author not in h5f or mode_raw not in h5f[author]:
-                print(f"  Warning: HDF5 group not found for {author}/{mode_raw}")
-                continue
-
-            grp = h5f[author][mode_raw]
-            F_list = grp["F"][()]
-            stress_tensor = grp["stress"][()]
-            stress_type = grp.attrs.get("stress_type", "PK1")
-            if isinstance(stress_type, bytes):
-                stress_type = stress_type.decode("utf-8")
-            bt_component = None
-            if author == "Jones_1975" and mode == "BT":
-                stress_type = "cauchy"
-                bt_component = "diff"
-
-            if "stretch" in grp:
-                stretch = grp["stretch"][()]
-            else:
-                stretch = F_list[:, 0, 0]
-            if "stretch_secondary" in grp:
-                stretch_secondary = grp["stretch_secondary"][()]
-            else:
-                stretch_secondary = None
-
-            if mode in ("SS", "CSS"):
-                stress_exp = stress_tensor[:, 0, 1]
-            elif mode == "BT":
-                stress_exp = np.column_stack([stress_tensor[:, 0, 0], stress_tensor[:, 1, 1]])
-            elif mode == "PS" and np.any(np.abs(stress_tensor[:, 1, 1]) > 1e-12):
-                stress_exp = np.column_stack([stress_tensor[:, 0, 0], stress_tensor[:, 1, 1]])
-            else:
-                stress_exp = stress_tensor[:, 0, 0]
-
-            if author == "Katashima_2012" and mode in ("BT", "PS") and stretch_secondary is not None:
-                entries = []
-                for component, lam_list, stress_list in (
-                    ("11", stretch, stress_tensor[:, 0, 0]),
-                    ("22", stretch_secondary, stress_tensor[:, 1, 1]),
-                ):
-                    f_tensors = []
-                    for lam in lam_list:
-                        if mode == "BT":
-                            lam2 = 0.5 + 0.5 * lam
-                            F = get_deformation_gradient((lam, lam2), "BT")
-                        else:
-                            F = get_deformation_gradient(lam, "PS")
-                        f_tensors.append(F)
-                    entry = {
-                        "tag": f"{author}_{mode_raw}_P{component}",
-                        "mode": mode,
-                        "mode_raw": mode_raw,
-                        "stress_type": stress_type,
-                        "stretch": lam_list,
-                        "stress_exp": stress_list,
-                        "F_list": np.array(f_tensors),
-                        "component": component,
-                    }
-                    if bt_component:
-                        entry["bt_component"] = bt_component
-                    entries.append(entry)
-                all_tests.extend(entries)
-            else:
-                entry = {
-                    "tag": f"{author}_{mode_raw}",
-                    "mode": mode,
-                    "mode_raw": mode_raw,
-                    "stress_type": stress_type,
-                    "stretch": stretch,
-                    "stress_exp": stress_exp,
-                    "F_list": F_list,
-                }
-                if stretch_secondary is not None:
-                    entry["stretch_secondary"] = stretch_secondary
-                if bt_component:
-                    entry["bt_component"] = bt_component
-                all_tests.append(entry)
+            entry = _load_h5_dataset(cfg, h5f)
+            if entry:
+                if isinstance(entry, list):
+                    all_tests.extend(entry)
+                else:
+                    all_tests.append(entry)
 
     if not all_tests:
         print("  Error: No valid data loaded from HDF5. Please check 'data/data.h5'.")

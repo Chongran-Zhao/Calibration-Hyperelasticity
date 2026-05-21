@@ -4,7 +4,9 @@ To continue this session, run `codex resume 019bda2f-96c4-7810-8ed3-3a7d726a6637
 
 ## Repository Structure (Key Paths)
 
-- `qt_app.py`: Main desktop GUI (PySide6).
+- `desktop_app.py`: Main desktop GUI (PySide6).
+- `qt_app.py`: Compatibility launcher for the desktop GUI.
+- `streamlit_app.py`: Legacy Streamlit GUI.
 - `src/`: Core logic (material models, optimization, plotting, kinematics).
 - `data/data.h5`: Packaged datasets.
 - `assets/icons/`: App icons and icon generation script.
@@ -115,7 +117,7 @@ rm -rf build dist
 /opt/homebrew/anaconda3/bin/pyinstaller --noconfirm --windowed \
   --name HyperelasticCalibration --exclude PyQt5 --icon assets/icons/app.icns \
   --add-data "src:src" --add-data "data/data.h5:data" --add-data "assets/icons:assets/icons" \
-  --collect-all sympy --hidden-import sympy --hidden-import tqdm qt_app.py
+  --collect-all sympy --hidden-import sympy --hidden-import tqdm desktop_app.py
 ```
 
 Output:

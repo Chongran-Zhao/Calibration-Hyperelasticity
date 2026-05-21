@@ -27,13 +27,15 @@ cd Calibration-Hyperelasticity
 
 1) Install dependencies:
 ```
-pip install -r requirement.txt
+pip install -r requirements.txt
 ```
 
 2) Run the GUI:
 ```
-python qt_app.py
+python desktop_app.py
 ```
+
+The old `python qt_app.py` entry point is still available for compatibility.
 
 ## User Guide
 
