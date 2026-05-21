@@ -35,8 +35,6 @@ pip install -r requirements.txt
 python desktop_app.py
 ```
 
-The old `python qt_app.py` entry point is still available for compatibility.
-
 ## User Guide
 
 1) Select experimental data (built-in or your own).

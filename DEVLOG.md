@@ -5,7 +5,6 @@ To continue this session, run `codex resume 019bda2f-96c4-7810-8ed3-3a7d726a6637
 ## Repository Structure (Key Paths)
 
 - `desktop_app.py`: Main desktop GUI (PySide6).
-- `qt_app.py`: Compatibility launcher for the desktop GUI.
 - `streamlit_app.py`: Legacy Streamlit GUI.
 - `src/`: Core logic (material models, optimization, plotting, kinematics).
 - `data/data.h5`: Packaged datasets.
