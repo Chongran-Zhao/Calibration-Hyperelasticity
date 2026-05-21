@@ -71,7 +71,16 @@ try:
 except OSError:
     cache_root = Path(tempfile.gettempdir()) / "HyperelasticCalibration"
     cache_root.mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("MPLCONFIGDIR", str(cache_root / "matplotlib"))
+matplotlib_cache = cache_root / "matplotlib"
+try:
+    matplotlib_cache.mkdir(parents=True, exist_ok=True)
+    probe = matplotlib_cache / ".write-test"
+    probe.write_text("", encoding="utf-8")
+    probe.unlink(missing_ok=True)
+except OSError:
+    matplotlib_cache = Path(tempfile.gettempdir()) / "HyperelasticCalibration" / "matplotlib"
+    matplotlib_cache.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", str(matplotlib_cache))
 os.environ.setdefault("XDG_CACHE_HOME", str(cache_root))
 # Force single-threaded math to avoid multiprocessing resource_tracker warnings.
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -974,13 +983,19 @@ class SpringWidget(QGroupBox):
         self.params_layout.setColumnStretch(5, 1)
 
         layout = QVBoxLayout()
-        layout.setSpacing(5)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(10)
+        layout.setContentsMargins(12, 12, 12, 12)
 
         header_row = QHBoxLayout()
-        header = QLabel(f"Spring {index}")
-        header.setFont(make_font(13, QFont.DemiBold))
-        header_row.addWidget(header)
+        header_text = QVBoxLayout()
+        header_text.setSpacing(1)
+        self.header_label = QLabel(f"Spring {index}")
+        self.header_label.setFont(make_font(14, QFont.DemiBold))
+        self.header_status = QLabel("No model selected")
+        self.header_status.setStyleSheet("color: #6E6E73;")
+        header_text.addWidget(self.header_label)
+        header_text.addWidget(self.header_status)
+        header_row.addLayout(header_text, 1)
         header_row.addStretch()
         self.remove_btn = QToolButton()
         self.remove_btn.setObjectName("iconButton")
@@ -991,8 +1006,8 @@ class SpringWidget(QGroupBox):
         layout.addLayout(header_row)
 
         controls = QGridLayout()
-        controls.setHorizontalSpacing(4)
-        controls.setVerticalSpacing(4)
+        controls.setHorizontalSpacing(8)
+        controls.setVerticalSpacing(8)
         controls.addWidget(self.model_label, 0, 0)
         controls.addWidget(self.model_combo, 0, 1)
         controls.addWidget(self.ogden_row, 0, 2, 1, 2)
@@ -1005,9 +1020,9 @@ class SpringWidget(QGroupBox):
         self.controls_layout = controls
 
         content = QGridLayout()
-        content.setHorizontalSpacing(10)
-        content.setVerticalSpacing(2)
-        content.setContentsMargins(0, 0, 0, 0)
+        content.setHorizontalSpacing(14)
+        content.setVerticalSpacing(8)
+        content.setContentsMargins(0, 4, 0, 0)
 
         self.params_block_widget = QWidget()
         params_block = QVBoxLayout(self.params_block_widget)
@@ -1072,7 +1087,8 @@ class SpringWidget(QGroupBox):
 
     def apply_theme(self):
         self.setStyleSheet(
-            "QGroupBox { border: 1px solid palette(mid); border-radius: 12px; background: palette(base); }"
+            "QGroupBox { border: 1px solid #E5E5EA; border-radius: 10px; background: #FFFFFF; }"
+            "QLabel { background: transparent; }"
         )
 
     def _clear_params(self):
@@ -1152,6 +1168,8 @@ class SpringWidget(QGroupBox):
         self._clear_params()
 
         if not details_visible:
+            self.header_status.setText("No model selected")
+            self.header_status.setStyleSheet("color: #6E6E73;")
             self.formula_label.clear()
             self.strain_formula_label.clear()
             self.strain_formula_title.setVisible(False)
@@ -1171,6 +1189,10 @@ class SpringWidget(QGroupBox):
         else:
             func = getattr(MaterialModels, model_name)
 
+        category = getattr(func, "category", "model")
+        model_type = getattr(func, "model_type", "stretch_based")
+        self.header_status.setText(f"{display_name} · {category} · {model_type}")
+        self.header_status.setStyleSheet("color: #007AFF;")
         self._param_prefix = f"{model_name}_{self.index}_"
         formula = getattr(func, "formula", "")
         self.formula_label.set_latex(formula)
@@ -1720,19 +1742,46 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
+        header_row = QHBoxLayout()
+        header_row.setSpacing(12)
+        title_block = QVBoxLayout()
+        title_block.setSpacing(2)
+        model_title = QLabel("Model Workspace")
+        model_title.setFont(make_font(18, QFont.DemiBold))
+        model_subtitle = QLabel("Build a parallel-spring material architecture and tune initial parameters before fitting.")
+        model_subtitle.setStyleSheet("color: #6E6E73;")
+        title_block.addWidget(model_title)
+        title_block.addWidget(model_subtitle)
+        header_row.addLayout(title_block, 1)
+
+        self.model_next_btn = QPushButton("Next: Optimization")
+        self.model_next_btn.setObjectName("primaryButton")
+        self.model_next_btn.setEnabled(False)
+        self.model_next_btn.clicked.connect(lambda: self._set_step(2))
+        header_row.addWidget(self.model_next_btn, 0, Qt.AlignRight | Qt.AlignVCenter)
+        layout.addLayout(header_row)
+
         self.spring_count = 1
         self.max_springs = 6
         self.spring_widgets = []
         self.spring_icons = []
 
-        self.add_spring_btn = QPushButton("Add Parallel Spring")
+        summary_row = QHBoxLayout()
+        summary_row.setSpacing(10)
+        self.model_status_label = QLabel("Select a material model for Spring 1.")
+        self.model_status_label.setStyleSheet("color: #6E6E73;")
+        summary_row.addWidget(self.model_status_label, 1)
+        self.add_spring_btn = QPushButton("Add Spring")
+        self.add_spring_btn.setObjectName("secondaryButton")
         self.add_spring_btn.clicked.connect(self._add_spring)
         self.add_spring_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        button_row = QHBoxLayout()
-        button_row.addWidget(self.add_spring_btn)
-        button_row.addStretch()
-        layout.addLayout(button_row)
+        summary_row.addWidget(self.add_spring_btn)
+        layout.addLayout(summary_row)
 
+        builder_box = QGroupBox("Parallel Spring Builder")
+        builder_layout = QVBoxLayout()
+        builder_layout.setContentsMargins(12, 12, 12, 12)
+        builder_layout.setSpacing(10)
         self.spring_rows_widget = QWidget()
         self.spring_rows_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         spring_rows_layout = QHBoxLayout(self.spring_rows_widget)
@@ -1746,13 +1795,10 @@ class MainWindow(QMainWindow):
         self.spring_grid.setColumnStretch(1, 0)
         spring_rows_layout.addLayout(self.spring_grid)
         spring_rows_layout.addStretch()
-        layout.addWidget(self.spring_rows_widget)
-        layout.addStretch()
-
-        self.model_next_btn = QPushButton("Next: Optimization")
-        self.model_next_btn.setEnabled(False)
-        self.model_next_btn.clicked.connect(lambda: self._set_step(2))
-        layout.addWidget(self.model_next_btn, alignment=Qt.AlignRight)
+        builder_layout.addWidget(self.spring_rows_widget)
+        builder_layout.addStretch()
+        builder_box.setLayout(builder_layout)
+        layout.addWidget(builder_box, 1)
 
         self.model_box.setLayout(layout)
 
@@ -2864,10 +2910,26 @@ class MainWindow(QMainWindow):
         if changed:
             self._reset_results()
         springs = list(getattr(self, "spring_widgets", []))
-        if springs and all(spring.is_valid() for spring in springs):
+        valid_springs = [spring for spring in springs if spring.is_valid()]
+        all_valid = bool(springs) and len(valid_springs) == len(springs)
+        if all_valid:
             self.model_next_btn.setEnabled(True)
         else:
             self.model_next_btn.setEnabled(False)
+        if hasattr(self, "model_status_label"):
+            param_names, _ = self._collect_initial_params()
+            if not springs:
+                status = "Add at least one spring."
+                color = "#6E6E73"
+            elif all_valid:
+                status = f"Ready: {len(springs)} spring(s), {len(param_names)} parameter(s)."
+                color = "#007AFF"
+            else:
+                missing = len(springs) - len(valid_springs)
+                status = f"Select a material model for {missing} spring(s)."
+                color = "#6E6E73"
+            self.model_status_label.setText(status)
+            self.model_status_label.setStyleSheet(f"color: {color};")
         self._update_workflow_cards()
         self._refresh_opt_params_from_springs()
 

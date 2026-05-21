@@ -63,7 +63,7 @@ def build_app_palette():
 
 def build_app_stylesheet():
     return (
-        "QWidget { color: palette(windowtext); font-family: -apple-system, \"SF Pro Text\", \"Helvetica Neue\", sans-serif; }"
+        "QWidget { color: palette(windowtext); font-family: \"Helvetica Neue\", \"Segoe UI\", Arial, sans-serif; }"
         "QMainWindow, QDialog { background: #F5F5F7; }"
         "QFrame { background: transparent; }"
         "QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget { background: transparent; border: none; }"
