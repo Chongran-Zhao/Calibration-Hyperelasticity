@@ -1864,11 +1864,77 @@ class MainWindow(QMainWindow):
         self._rebuild_springs(self.spring_count)
         return self.model_box
 
+    def _build_metric_card(self, title, value):
+        card = QFrame()
+        card.setObjectName("metricCard")
+        card.setAttribute(Qt.WA_StyledBackground, True)
+        card.setStyleSheet(
+            "QFrame#metricCard { background: #FFFFFF; border: 1px solid #E5E5EA; border-radius: 8px; }"
+            "QLabel { background: transparent; }"
+        )
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(2)
+        title_label = QLabel(title)
+        title_label.setStyleSheet("color: #6E6E73;")
+        title_label.setFont(make_font(11, QFont.DemiBold))
+        value_label = QLabel(value)
+        value_label.setFont(make_font(16, QFont.DemiBold))
+        layout.addWidget(title_label)
+        layout.addWidget(value_label)
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        return card, value_label
+
+    def _set_fit_metrics(self, status=None, iteration=None, loss=None, r2=None, status_color=None):
+        if status is not None and hasattr(self, "fit_status_value"):
+            self.fit_status_value.setText(status)
+            if status_color:
+                self.fit_status_value.setStyleSheet(f"color: {status_color};")
+            else:
+                self.fit_status_value.setStyleSheet("")
+        if iteration is not None and hasattr(self, "fit_iteration_value"):
+            self.fit_iteration_value.setText(str(iteration))
+        if loss is not None and hasattr(self, "fit_loss_value"):
+            self.fit_loss_value.setText(loss if isinstance(loss, str) else f"{float(loss):.6g}")
+        if r2 is not None and hasattr(self, "fit_r2_value"):
+            self.fit_r2_value.setText(r2 if isinstance(r2, str) else f"{float(r2):.4f}")
+
     def _build_optimization_section(self):
         self.opt_box = QGroupBox("3. Optimization")
         outer_layout = QVBoxLayout()
         outer_layout.setContentsMargins(16, 16, 16, 16)
         outer_layout.setSpacing(12)
+
+        header_row = QHBoxLayout()
+        header_row.setSpacing(12)
+        title_block = QVBoxLayout()
+        title_block.setSpacing(2)
+        fit_title = QLabel("Fit Workspace")
+        fit_title.setFont(make_font(18, QFont.DemiBold))
+        fit_subtitle = QLabel("Run calibration, monitor convergence, and inspect fitted parameters.")
+        fit_subtitle.setStyleSheet("color: #6E6E73;")
+        title_block.addWidget(fit_title)
+        title_block.addWidget(fit_subtitle)
+        header_row.addLayout(title_block, 1)
+        self.opt_next_btn = QPushButton("Next: Prediction")
+        self.opt_next_btn.setObjectName("primaryButton")
+        self.opt_next_btn.setEnabled(False)
+        self.opt_next_btn.clicked.connect(lambda: self._set_step(3))
+        header_row.addWidget(self.opt_next_btn, 0, Qt.AlignRight | Qt.AlignVCenter)
+        outer_layout.addLayout(header_row)
+
+        metrics_row = QHBoxLayout()
+        metrics_row.setSpacing(10)
+        self.fit_status_card, self.fit_status_value = self._build_metric_card("Status", "Idle")
+        self.fit_iteration_card, self.fit_iteration_value = self._build_metric_card("Iteration", "-")
+        self.fit_loss_card, self.fit_loss_value = self._build_metric_card("Loss", "-")
+        self.fit_r2_card, self.fit_r2_value = self._build_metric_card("R²", "-")
+        metrics_row.addWidget(self.fit_status_card)
+        metrics_row.addWidget(self.fit_iteration_card)
+        metrics_row.addWidget(self.fit_loss_card)
+        metrics_row.addWidget(self.fit_r2_card)
+        outer_layout.addLayout(metrics_row)
+
         body_layout = QHBoxLayout()
         body_layout.setSpacing(16)
 
@@ -1877,6 +1943,10 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(10)
 
+        self.fit_settings_box = QGroupBox("Solver Settings")
+        settings_layout = QVBoxLayout()
+        settings_layout.setContentsMargins(12, 12, 12, 12)
+        settings_layout.setSpacing(10)
         method_label = QLabel("Optimization method")
         method_label.setFont(make_font(12, QFont.DemiBold))
         self.method_combo = QComboBox()
@@ -1886,8 +1956,14 @@ class MainWindow(QMainWindow):
         self.method_combo.addItem("Trust-Region Reflective (lsqnonlin)", "trf")
         self.method_combo.addItem("Levenberg-Marquardt (lsqnonlin)", "lm")
         self.method_combo.addItem("Dogbox (lsqnonlin)", "dogbox")
-        left_layout.addWidget(method_label)
-        left_layout.addWidget(self.method_combo)
+        settings_layout.addWidget(method_label)
+        settings_layout.addWidget(self.method_combo)
+        self.run_button = QPushButton("Start Calibration")
+        self.run_button.setObjectName("primaryButton")
+        self.run_button.clicked.connect(self._run_optimization)
+        settings_layout.addWidget(self.run_button)
+        self.fit_settings_box.setLayout(settings_layout)
+        left_layout.addWidget(self.fit_settings_box)
 
         self.calib_params_box = QGroupBox("Parameters")
         params_layout = QVBoxLayout()
@@ -1906,26 +1982,24 @@ class MainWindow(QMainWindow):
         self.calib_params_box.setLayout(params_layout)
         left_layout.addWidget(self.calib_params_box, 1)
 
-        self.run_button = QPushButton("Start Calibration")
-        self.run_button.setObjectName("primaryButton")
-        self.run_button.clicked.connect(self._run_optimization)
-        left_layout.addWidget(self.run_button)
-
         self.opt_status = QLabel("")
+        self.opt_status.setVisible(False)
         left_layout.addWidget(self.opt_status)
 
         self.loss_label = QLabel("Loss: -")
+        self.loss_label.setVisible(False)
         left_layout.addWidget(self.loss_label)
 
         self.opt_log_box = QGroupBox("Iteration log")
         log_layout = QVBoxLayout()
+        log_layout.setContentsMargins(12, 12, 12, 12)
         self.opt_log = QPlainTextEdit()
         self.opt_log.setReadOnly(True)
         self.opt_log.setMaximumBlockCount(2000)
         self.opt_log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         log_layout.addWidget(self.opt_log)
         self.opt_log_box.setLayout(log_layout)
-        left_layout.addWidget(self.opt_log_box, 2)
+        left_layout.addWidget(self.opt_log_box, 1)
 
         left_layout.addStretch()
 
@@ -1957,11 +2031,6 @@ class MainWindow(QMainWindow):
         body_layout.addWidget(right_panel, 3)
 
         outer_layout.addLayout(body_layout)
-
-        self.opt_next_btn = QPushButton("Next: Prediction")
-        self.opt_next_btn.setEnabled(False)
-        self.opt_next_btn.clicked.connect(lambda: self._set_step(3))
-        outer_layout.addWidget(self.opt_next_btn, alignment=Qt.AlignRight)
 
         self.opt_box.setLayout(outer_layout)
         self._refresh_opt_params_from_springs()
@@ -2743,6 +2812,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, "run_button"):
             self.run_button.setEnabled(True)
             self.run_button.setText("Abort Calibration" if running else "Start Calibration")
+        if running:
+            self._set_fit_metrics(status="Running", status_color="#007AFF")
 
     def _abort_optimization(self, wait=False):
         worker = getattr(self, "worker", None)
@@ -2792,6 +2863,7 @@ class MainWindow(QMainWindow):
         self.opt_status.setText("Running optimization...")
         self.opt_status.setStyleSheet("color: palette(windowtext);")
         self.loss_label.setText("Loss: -")
+        self._set_fit_metrics(status="Running", iteration="0", loss="-", r2="-", status_color="#007AFF")
         if hasattr(self, "opt_log"):
             self.opt_log.clear()
         self._populate_calibration_params(execution_network.param_names, initial_guess)
@@ -2810,12 +2882,19 @@ class MainWindow(QMainWindow):
         if getattr(result, "aborted", False):
             self.opt_status.setText("Optimization aborted")
             self.opt_status.setStyleSheet("color: #b45309;")
+            self._set_fit_metrics(status="Aborted", status_color="#b45309")
             self.opt_next_btn.setEnabled(False)
             self._update_workflow_cards()
             return
         if not result.success:
             self.opt_status.setText("Optimization failed")
             self.opt_status.setStyleSheet("color: #dc2626;")
+            self._set_fit_metrics(
+                status="Failed",
+                loss=getattr(result, "fun", "-"),
+                r2=getattr(result, "r2_total", "-"),
+                status_color="#dc2626",
+            )
             QMessageBox.warning(
                 self,
                 "Optimization failed",
@@ -2826,6 +2905,12 @@ class MainWindow(QMainWindow):
         self.opt_status.setText("Optimization completed")
         self.opt_status.setStyleSheet("color: palette(highlight);")
         self.loss_label.setText(f"Final Loss: {result.fun:.6f}")
+        self._set_fit_metrics(
+            status="Complete",
+            loss=result.fun,
+            r2=getattr(result, "r2_total", "-"),
+            status_color="#007AFF",
+        )
         self.opt_next_btn.setEnabled(True)
         self.latest_optimizer = optimizer
         self.latest_result = result
@@ -2842,11 +2927,13 @@ class MainWindow(QMainWindow):
         if "aborted" in (message or "").lower():
             self.opt_status.setText("Optimization aborted")
             self.opt_status.setStyleSheet("color: #b45309;")
+            self._set_fit_metrics(status="Aborted", status_color="#b45309")
             self.opt_next_btn.setEnabled(False)
             self._update_workflow_cards()
             return
         self.opt_status.setText("Optimization failed")
         self.opt_status.setStyleSheet("color: #dc2626;")
+        self._set_fit_metrics(status="Failed", status_color="#dc2626")
         QMessageBox.warning(
             self,
             "Optimization failed",
@@ -2859,6 +2946,7 @@ class MainWindow(QMainWindow):
         self.opt_status.setText(f"Running optimization... Iter {iteration}")
         self.opt_status.setStyleSheet("color: palette(windowtext);")
         self.loss_label.setText(f"Loss: {loss:.6f}")
+        self._set_fit_metrics(status="Running", iteration=iteration, loss=loss, status_color="#007AFF")
         self._update_calibration_params_values(params)
         if hasattr(self, "opt_log"):
             self.opt_log.appendPlainText(f"Iter {iteration}: Loss {loss:.6f}")
@@ -3409,6 +3497,7 @@ class MainWindow(QMainWindow):
         self.opt_status.setText("")
         self.opt_status.setStyleSheet("color: palette(windowtext);")
         self.loss_label.setText("Loss: -")
+        self._set_fit_metrics(status="Idle", iteration="-", loss="-", r2="-", status_color="#1C1C1E")
         self.opt_next_btn.setEnabled(False)
         self._clear_prediction_selection()
         if hasattr(self, "calib_save_btn"):
