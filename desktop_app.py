@@ -2038,16 +2038,45 @@ class MainWindow(QMainWindow):
 
     def _build_prediction_section(self):
         self.prediction_box = QGroupBox("4. Prediction")
-        layout = QHBoxLayout()
+        layout = QVBoxLayout()
         layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(16)
+        layout.setSpacing(12)
+
+        header_row = QHBoxLayout()
+        header_row.setSpacing(12)
+        title_block = QVBoxLayout()
+        title_block.setSpacing(2)
+        prediction_title = QLabel("Prediction Workspace")
+        prediction_title.setFont(make_font(18, QFont.DemiBold))
+        prediction_subtitle = QLabel("Reuse fitted parameters, edit them manually, and compare predictions on selected datasets.")
+        prediction_subtitle.setStyleSheet("color: #6E6E73;")
+        title_block.addWidget(prediction_title)
+        title_block.addWidget(prediction_subtitle)
+        header_row.addLayout(title_block, 1)
+        self.prediction_button = QPushButton("Update Prediction")
+        self.prediction_button.setObjectName("primaryButton")
+        self.prediction_button.clicked.connect(self._update_prediction_plot)
+        header_row.addWidget(self.prediction_button, 0, Qt.AlignRight | Qt.AlignVCenter)
+        layout.addLayout(header_row)
+
+        self.prediction_status_label = QLabel("Run calibration first, then choose prediction data.")
+        self.prediction_status_label.setStyleSheet("color: #6E6E73;")
+        layout.addWidget(self.prediction_status_label)
+
+        body_layout = QHBoxLayout()
+        body_layout.setSpacing(16)
 
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(10)
-        self.prediction_params_box = QGroupBox("Parameters")
+        self.prediction_params_box = QGroupBox("Parameter Source")
         pred_params_layout = QVBoxLayout()
+        pred_params_layout.setContentsMargins(12, 12, 12, 12)
+        self.prediction_param_source_label = QLabel("Using fitted parameters from the latest calibration. Edit values below to run a what-if prediction.")
+        self.prediction_param_source_label.setWordWrap(True)
+        self.prediction_param_source_label.setStyleSheet("color: #6E6E73;")
+        pred_params_layout.addWidget(self.prediction_param_source_label)
         self.prediction_params_area = QScrollArea()
         self.prediction_params_area.setWidgetResizable(True)
         self.prediction_params_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -2085,29 +2114,32 @@ class MainWindow(QMainWindow):
         self.prediction_modes_layout.setContentsMargins(0, 6, 0, 6)
         self.prediction_modes_layout.setSpacing(10)
         modes_layout.addWidget(self.prediction_modes_widget)
-        self.prediction_button = QPushButton("Update Prediction")
-        self.prediction_button.clicked.connect(self._update_prediction_plot)
-        modes_layout.addWidget(self.prediction_button)
         self.prediction_modes_box.setLayout(modes_layout)
         left_layout.addWidget(self.prediction_modes_box)
         left_layout.addStretch()
 
-        layout.addWidget(left_panel, 1)
+        body_layout.addWidget(left_panel, 1)
 
         self.prediction_canvas = MatplotlibCanvas(width=8.0, height=4.4)
         self.prediction_canvas.setMinimumHeight(340)
-        pred_plot_container = QWidget()
-        pred_plot_layout = QVBoxLayout(pred_plot_container)
-        pred_plot_layout.setContentsMargins(0, 0, 0, 0)
+        pred_plot_container = QGroupBox("Prediction Plot")
+        pred_plot_layout = QVBoxLayout()
+        pred_plot_layout.setContentsMargins(12, 12, 12, 12)
+        pred_plot_layout.setSpacing(10)
         pred_plot_layout.addWidget(self.prediction_canvas, 1)
         pred_actions = QHBoxLayout()
+        self.prediction_plot_status = QLabel("No prediction plotted")
+        self.prediction_plot_status.setStyleSheet("color: #6E6E73;")
+        pred_actions.addWidget(self.prediction_plot_status, 1)
         pred_actions.addStretch()
-        self.pred_save_btn = QPushButton("Save Prediction Plot")
+        self.pred_save_btn = QPushButton("Save Plot")
         self.pred_save_btn.setEnabled(False)
         self.pred_save_btn.clicked.connect(lambda: self._save_figure(self.prediction_canvas, "prediction_plot"))
         pred_actions.addWidget(self.pred_save_btn)
         pred_plot_layout.addLayout(pred_actions)
-        layout.addWidget(pred_plot_container, 3)
+        pred_plot_container.setLayout(pred_plot_layout)
+        body_layout.addWidget(pred_plot_container, 3)
+        layout.addLayout(body_layout, 1)
 
         self.prediction_box.setLayout(layout)
         return self.prediction_box
@@ -3304,6 +3336,10 @@ class MainWindow(QMainWindow):
     def _on_prediction_mode_toggled(self, _state):
         if hasattr(self, "pred_save_btn"):
             self.pred_save_btn.setEnabled(False)
+        if hasattr(self, "prediction_plot_status"):
+            modes = self._get_prediction_modes()
+            self.prediction_plot_status.setText(f"{len(modes)} mode(s) selected; update prediction to plot.")
+            self.prediction_plot_status.setStyleSheet("color: #6E6E73;")
         self._apply_prediction_mode_rules()
 
     def _apply_prediction_mode_rules(self):
@@ -3524,6 +3560,12 @@ class MainWindow(QMainWindow):
             self.prediction_canvas.draw()
         if hasattr(self, "pred_save_btn"):
             self.pred_save_btn.setEnabled(False)
+        if hasattr(self, "prediction_status_label"):
+            self.prediction_status_label.setText("Run calibration first, then choose prediction data.")
+            self.prediction_status_label.setStyleSheet("color: #6E6E73;")
+        if hasattr(self, "prediction_plot_status"):
+            self.prediction_plot_status.setText("No prediction plotted")
+            self.prediction_plot_status.setStyleSheet("color: #6E6E73;")
         self._clear_prediction_params()
 
     def _invalidate_prediction_plot(self):
@@ -3532,6 +3574,9 @@ class MainWindow(QMainWindow):
             self.prediction_canvas.draw()
         if hasattr(self, "pred_save_btn"):
             self.pred_save_btn.setEnabled(False)
+        if hasattr(self, "prediction_plot_status"):
+            self.prediction_plot_status.setText("Parameters changed; update prediction to refresh plot.")
+            self.prediction_plot_status.setStyleSheet("color: #b45309;")
 
     def _on_prediction_param_edited(self, _text):
         self._invalidate_prediction_plot()
@@ -3540,6 +3585,9 @@ class MainWindow(QMainWindow):
         if not self.latest_optimizer or not self.latest_result:
             if hasattr(self, "pred_save_btn"):
                 self.pred_save_btn.setEnabled(False)
+            if hasattr(self, "prediction_status_label"):
+                self.prediction_status_label.setText("Run calibration before prediction.")
+                self.prediction_status_label.setStyleSheet("color: #b45309;")
             return
         optimizer = self.latest_optimizer
         param_values = self._get_prediction_param_values()
@@ -3556,8 +3604,10 @@ class MainWindow(QMainWindow):
             pred_configs = [{"author": author, "mode": m} for m in pred_modes]
             pred_data = load_experimental_data(pred_configs)
             bt_only = self._plot_dataset(self.prediction_canvas.ax, pred_data, optimizer.solver, plot_params, colors_pred, "Pred", "PredFit")
+            point_count = sum(len(d.get("stretch", [])) for d in pred_data)
         else:
             bt_only = False
+            point_count = 0
 
         if not bt_only:
             if pred_modes:
@@ -3592,6 +3642,22 @@ class MainWindow(QMainWindow):
         self.prediction_canvas.draw()
         if hasattr(self, "pred_save_btn"):
             self.pred_save_btn.setEnabled(bool(pred_modes))
+        if hasattr(self, "prediction_status_label"):
+            if pred_modes:
+                self.prediction_status_label.setText(
+                    f"Prediction ready: {len(pred_modes)} mode(s), {point_count} point(s), {len(param_values)} parameter(s)."
+                )
+                self.prediction_status_label.setStyleSheet("color: #007AFF;")
+            else:
+                self.prediction_status_label.setText("Select at least one prediction mode.")
+                self.prediction_status_label.setStyleSheet("color: #6E6E73;")
+        if hasattr(self, "prediction_plot_status"):
+            if pred_modes:
+                self.prediction_plot_status.setText("Prediction plot is up to date.")
+                self.prediction_plot_status.setStyleSheet("color: #007AFF;")
+            else:
+                self.prediction_plot_status.setText("No prediction modes selected")
+                self.prediction_plot_status.setStyleSheet("color: #6E6E73;")
 
     def _plot_bt_preview(self, canvas, data):
         use_diff = all(d.get("bt_component") == "diff" for d in data)
