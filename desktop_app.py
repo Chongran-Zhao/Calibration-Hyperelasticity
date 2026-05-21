@@ -977,10 +977,10 @@ class SpringWidget(QGroupBox):
         self.params_layout = QGridLayout()
         self.params_layout.setContentsMargins(0, 0, 0, 0)
         self.params_layout.setHorizontalSpacing(8)
-        self.params_layout.setVerticalSpacing(2)
+        self.params_layout.setVerticalSpacing(6)
         self.params_layout.setColumnStretch(1, 1)
+        self.params_layout.setColumnStretch(2, 1)
         self.params_layout.setColumnStretch(3, 1)
-        self.params_layout.setColumnStretch(5, 1)
 
         layout = QVBoxLayout()
         layout.setSpacing(10)
@@ -1135,6 +1135,22 @@ class SpringWidget(QGroupBox):
         if self.on_change:
             self.on_change(changed=True)
 
+    def _parse_optional_float(self, text):
+        text = (text or "").strip()
+        if not text or text.lower() in {"none", "inf", "+inf", "infinity", "+infinity"}:
+            return None
+        if text.lower() in {"-inf", "-infinity"}:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return None
+
+    def _format_bound(self, value):
+        if value is None:
+            return ""
+        return f"{float(value):.4g}"
+
     def _on_remove_clicked(self):
         if self.on_remove:
             self.on_remove(self.index)
@@ -1223,15 +1239,21 @@ class SpringWidget(QGroupBox):
         temp_net.add_model(func, f"{model_name}_{self.index}")
         author_name = self.author_provider() if self.author_provider else None
         n_guess = DATASET_N_GUESS.get(author_name, None)
-        for idx, (name, default) in enumerate(zip(temp_net.param_names, temp_net.initial_guess)):
-            row = idx
-            col = 0
+        headers = ("Parameter", "Initial", "Lower", "Upper")
+        for col, text in enumerate(headers):
+            header = QLabel(text)
+            header.setFont(make_font(11, QFont.DemiBold))
+            header.setStyleSheet("color: #6E6E73;")
+            self.params_layout.addWidget(header, 0, col)
+        for idx, (name, default, bound) in enumerate(zip(temp_net.param_names, temp_net.initial_guess, temp_net.bounds)):
+            row = idx + 1
             if (
                 n_guess is not None
                 and model_name != "ZhanNonGaussian"
                 and (name.lower().endswith("_n") or name.lower().endswith("n"))
             ):
                 default = n_guess
+            lower, upper = bound if bound else (None, None)
             label = QLabel()
             label.setTextFormat(Qt.RichText)
             label_html = self._format_param_label(name)
@@ -1242,13 +1264,29 @@ class SpringWidget(QGroupBox):
             text_value = f"{float(default):.4g}"
             edit.setText(text_value)
             edit.setPlaceholderText(text_value)
-            edit.setMinimumWidth(120)
+            edit.setMinimumWidth(82)
             edit.setMinimumHeight(28)
             edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             edit.textChanged.connect(self._on_param_changed)
-            self.params_layout.addWidget(label, row, col)
-            self.params_layout.addWidget(edit, row, col + 1)
-            self.param_edits.append((name, edit, default))
+            lower_edit = QLineEdit()
+            lower_edit.setText(self._format_bound(lower))
+            lower_edit.setPlaceholderText("-inf")
+            lower_edit.setMinimumWidth(78)
+            lower_edit.setMinimumHeight(28)
+            lower_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            lower_edit.textChanged.connect(self._on_param_changed)
+            upper_edit = QLineEdit()
+            upper_edit.setText(self._format_bound(upper))
+            upper_edit.setPlaceholderText("inf")
+            upper_edit.setMinimumWidth(78)
+            upper_edit.setMinimumHeight(28)
+            upper_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            upper_edit.textChanged.connect(self._on_param_changed)
+            self.params_layout.addWidget(label, row, 0)
+            self.params_layout.addWidget(edit, row, 1)
+            self.params_layout.addWidget(lower_edit, row, 2)
+            self.params_layout.addWidget(upper_edit, row, 3)
+            self.param_edits.append((name, edit, default, lower_edit, upper_edit, bound))
         self._custom_error = ""
         if self.on_change:
             self.on_change(changed=True)
@@ -1270,7 +1308,7 @@ class SpringWidget(QGroupBox):
             raise ValueError("Select a model.")
 
         user_params = []
-        for _, edit, default in self.param_edits:
+        for _, edit, default, _, _, _ in self.param_edits:
             text = edit.text().strip()
             if not text:
                 user_params.append(float(default))
@@ -1282,6 +1320,19 @@ class SpringWidget(QGroupBox):
 
         return func, user_params
 
+    def get_bounds(self):
+        bounds = []
+        for _, _, _, lower_edit, upper_edit, default_bound in self.param_edits:
+            default_lower, default_upper = default_bound if default_bound else (None, None)
+            lower_text = lower_edit.text().strip()
+            upper_text = upper_edit.text().strip()
+            lower = self._parse_optional_float(lower_text) if lower_text else default_lower
+            upper = self._parse_optional_float(upper_text) if upper_text else default_upper
+            if lower is not None and upper is not None and lower >= upper:
+                lower, upper = default_lower, default_upper
+            bounds.append((lower, upper))
+        return bounds
+
     def get_model_config(self):
         return self.build_config()
 
@@ -1290,7 +1341,9 @@ class SpringWidget(QGroupBox):
             "model": self.model_combo.currentText(),
             "strain": self.strain_combo.currentText(),
             "ogden_terms": self.ogden_terms.value(),
-            "params": [edit.text().strip() for _, edit, _ in self.param_edits],
+            "params": [edit.text().strip() for _, edit, _, _, _, _ in self.param_edits],
+            "lower_bounds": [lower.text().strip() for _, _, _, lower, _, _ in self.param_edits],
+            "upper_bounds": [upper.text().strip() for _, _, _, _, upper, _ in self.param_edits],
             "model_source": "builtin",
             "use_custom": False,
         }
@@ -1310,9 +1363,15 @@ class SpringWidget(QGroupBox):
         self._on_model_changed()
         # Apply params after widgets are built
         values = state.get("params", [])
-        for i, (_, edit, _) in enumerate(self.param_edits):
+        lower_values = state.get("lower_bounds", [])
+        upper_values = state.get("upper_bounds", [])
+        for i, (_, edit, _, lower_edit, upper_edit, _) in enumerate(self.param_edits):
             if i < len(values) and values[i]:
                 edit.setText(values[i])
+            if i < len(lower_values):
+                lower_edit.setText(lower_values[i])
+            if i < len(upper_values):
+                upper_edit.setText(upper_values[i])
 
 
 class MainWindow(QMainWindow):
@@ -2712,6 +2771,7 @@ class MainWindow(QMainWindow):
 
         execution_network = ParallelNetwork()
         initial_guess = []
+        optimizer_bounds = []
         for idx, spring in enumerate(self.spring_widgets):
             if not spring.is_valid():
                 if getattr(spring, "_custom_error", ""):
@@ -2722,10 +2782,11 @@ class MainWindow(QMainWindow):
             func, params = spring.build_config()
             execution_network.add_model(func, f"{func.__name__}_{idx+1}")
             initial_guess.extend(params)
+            optimizer_bounds.extend(spring.get_bounds())
 
         solver = Kinematics(execution_network, execution_network.param_names)
         optimizer = MaterialOptimizer(solver, exp_data)
-        bounds = execution_network.bounds
+        bounds = optimizer_bounds if len(optimizer_bounds) == len(initial_guess) else execution_network.bounds
 
         method = self.method_combo.currentData() or self.method_combo.currentText()
         self.opt_status.setText("Running optimization...")
