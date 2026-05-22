@@ -1,58 +1,32 @@
 # Hyperelastic Material Calibration
 
-## Two ways to use
+Core Python routines for fitting hyperelastic material models to experimental
+data and running prediction workflows.
 
-### 1) Install the macOS app (recommended)
+The previous Streamlit and PySide desktop interfaces have been removed while a
+new web UI is being prepared. The current repository is intentionally focused on
+the computational layer, packaged datasets, and design direction for the next
+interface.
 
-Install via Homebrew and launch it like a normal app from Launchpad:
+## Install
 
-```
-brew install --cask Chongran-Zhao/hyperelastic/hyperelastic-calibration
-```
-
-Update the app:
-
-```
-brew update && brew upgrade --cask hyperelastic-calibration
-```
-
-### 2) Run from source
-
-Clone this repo, install dependencies, and launch from Terminal:
-
-```
+```bash
 git clone https://github.com/Chongran-Zhao/Calibration-Hyperelasticity.git
 cd Calibration-Hyperelasticity
-```
-
-1) Install dependencies:
-```
 pip install -r requirements.txt
 ```
 
-2) Run the GUI:
-```
-python desktop_app.py
-```
+## Project Structure
 
-## User Guide
+- `src/`: material models, kinematics, optimization, plotting, and utilities.
+- `data/data.h5`: packaged experimental datasets.
+- `assets/examples/`: example screenshots and animations.
+- `DESIGN.md`: design direction for the upcoming web interface.
 
-1) Select experimental data (built-in or your own).
-2) Configure the material model.
-3) Run calibration.
-4) Run prediction on selected datasets.
+## Example: Zhan (Non-Gaussian)
 
-## Example: Zhan (non-Gaussian)
-
-This example reproduces Fig. 7 from Zhan (JMPS) by fitting the Zhan (non-Gaussian)
-model to James 1975 uniaxial tension data, then predicting biaxial tension.
-
-Step 1: Select the experimental data.
-
-Step 2: Configure the material model.
-
-Step 3: Run calibration.
-
-Step 4: Run prediction.
+This example reproduces Fig. 7 from Zhan (JMPS) by fitting the Zhan
+(non-Gaussian) model to James 1975 uniaxial tension data, then predicting
+biaxial tension.
 
 ![Example](assets/examples/example.gif)
