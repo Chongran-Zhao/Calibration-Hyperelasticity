@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+import sys
 
 import h5py
 import numpy as np
@@ -9,6 +10,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_FILE = ROOT / "data" / "data.h5"
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from generalized_strains import STRAIN_CONFIGS
+from material_models import MaterialModels
 
 MODE_LABELS = {
     "UT": "Uniaxial Tension",
@@ -93,6 +100,35 @@ def _read_mode_preview(h5, author: str, mode: str) -> dict:
     }
 
 
+def _json_bound(bound) -> list[float | None]:
+    if not bound:
+        return [None, None]
+    lower, upper = bound
+    return [None if lower is None else float(lower), None if upper is None else float(upper)]
+
+
+def _model_payload(model_func, name: str | None = None) -> dict:
+    params = getattr(model_func, "param_names", [])
+    guesses = getattr(model_func, "initial_guess", [])
+    bounds = getattr(model_func, "bounds", [])
+    return {
+        "key": name or model_func.__name__,
+        "name": name or model_func.__name__,
+        "type": getattr(model_func, "model_type", "unknown"),
+        "category": getattr(model_func, "category", "unknown"),
+        "formula": getattr(model_func, "formula", ""),
+        "strainFormula": getattr(model_func, "strain_formula", ""),
+        "parameters": [
+            {
+                "name": param,
+                "initial": None if index >= len(guesses) else float(guesses[index]),
+                "bounds": _json_bound(bounds[index] if index < len(bounds) else None),
+            }
+            for index, param in enumerate(params)
+        ],
+    }
+
+
 @app.get("/api/health")
 def health():
     return {"ok": True, "data_file": DATA_FILE.exists()}
@@ -121,6 +157,29 @@ def datasets():
                 )
             authors.append({"author": author, "modes": modes})
     return {"authors": authors}
+
+
+@app.get("/api/models")
+def models():
+    base_names = [
+        "NeoHookean",
+        "MooneyRivlin",
+        "Yeoh",
+        "ArrudaBoyce",
+        "ZhanGaussian",
+        "ZhanNonGaussian",
+        "Ogden",
+        "ModifiedOgden",
+    ]
+    model_items = [_model_payload(getattr(MaterialModels, name), name) for name in base_names]
+    model_items.extend(_model_payload(MaterialModels.create_ogden_model(n), f"Ogden_{n}term") for n in (1, 2, 3))
+    model_items.extend(
+        _model_payload(MaterialModels.create_hill_model(strain_name), f"Hill_{strain_name}")
+        for strain_name in STRAIN_CONFIGS
+    )
+    categories = sorted({item["category"] for item in model_items})
+    types = sorted({item["type"] for item in model_items})
+    return {"models": model_items, "categories": categories, "types": types}
 
 
 @app.get("/api/preview")

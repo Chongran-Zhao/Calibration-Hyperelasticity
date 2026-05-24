@@ -94,9 +94,12 @@ function Icon({ children, className = "" }) {
 }
 
 function App() {
+  const [activeStep, setActiveStep] = useState("experimental")
   const [datasets, setDatasets] = useState([])
   const [author, setAuthor] = useState("")
   const [modes, setModes] = useState([])
+  const [modelCatalog, setModelCatalog] = useState([])
+  const [selectedModelKey, setSelectedModelKey] = useState("")
   const [preview, setPreview] = useState({
     points: samplePoints,
     axes: { x: "Stretch lambda (-)", y: "Nominal stress P11 (MPa)" },
@@ -111,11 +114,15 @@ function App() {
   const [apiState, setApiState] = useState("Connecting")
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/datasets`)
-      .then((res) => res.json())
-      .then((data) => {
-        const authors = data.authors ?? []
+    Promise.all([fetch(`${API_BASE}/api/datasets`), fetch(`${API_BASE}/api/models`)])
+      .then(async ([datasetRes, modelRes]) => {
+        const datasetData = await datasetRes.json()
+        const modelData = await modelRes.json()
+        const authors = datasetData.authors ?? []
+        const models = modelData.models ?? []
         setDatasets(authors)
+        setModelCatalog(models)
+        setSelectedModelKey(models.find((item) => item.key === "ZhanNonGaussian")?.key ?? models[0]?.key ?? "")
         const preferred = authors.find((item) => item.author === "James_1975") ?? authors[0]
         if (preferred) {
           setAuthor(preferred.author)
@@ -149,6 +156,10 @@ function App() {
     const family = selectedModeRecords[0]?.family ?? "UT"
     return modeOptions.find((item) => item.family === family) ?? modeOptions[0]
   }, [selectedModeRecords])
+  const selectedModel = useMemo(
+    () => modelCatalog.find((item) => item.key === selectedModelKey) ?? modelCatalog[0],
+    [modelCatalog, selectedModelKey],
+  )
 
   useEffect(() => {
     if (!authorModes.length) return
@@ -183,79 +194,190 @@ function App() {
   return (
     <div className="h-screen overflow-hidden bg-background text-text-primary">
       <div className="grid h-full grid-cols-[260px_minmax(0,1fr)]">
-        <Sidebar />
+        <Sidebar activeStep={activeStep} onStepChange={setActiveStep} />
         <div className="flex min-w-0 flex-col">
-          <Topbar />
+          <Topbar activeStep={activeStep} />
           <main className="min-h-0 flex-1 overflow-y-auto p-4">
-            <div className="mx-auto grid min-h-[640px] max-w-[1240px] grid-cols-[minmax(360px,0.82fr)_minmax(520px,1.18fr)] gap-4">
-              <section className="flex min-w-0 flex-col gap-3">
-                <Card title="Data Source">
-                  <div className="rounded-lg border border-border bg-subtle px-3 py-2">
-                    <div className="flex items-center gap-2 text-sm font-semibold">
-                      <Icon className="text-lg text-primary">dns</Icon>
-                      Database
-                    </div>
-                    <p className="mt-1 text-xs leading-5 text-text-muted">Built-in experimental datasets are the calibration source.</p>
-                  </div>
-                  <label className="mt-3 block text-xs font-bold uppercase text-text-muted">
-                    Publication / source
-                    <select className="mt-1 w-full rounded-lg border border-border-strong bg-surface px-2 py-2 text-sm normal-case text-text-primary" value={author} onChange={(event) => handleAuthorChange(event.target.value)}>
-                      {datasets.map((item) => (
-                        <option key={item.author} value={item.author}>
-                          {item.author}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="mt-3">
-                    <Label>Stress Type</Label>
-                    <div className="rounded-lg border border-border bg-subtle px-3 py-2 text-sm font-semibold text-text-primary">
-                      {preview.metadata?.stressType ?? "From dataset"}
-                      <span className="ml-2 align-middle text-xs font-normal text-text-muted">read from experimental data</span>
-                    </div>
-                  </div>
-                </Card>
-
-                <Card title="Fitting Data Sets">
-                  <p className="mb-2 text-xs leading-5 text-text-muted">
-                    Select one or more experimental sets to include in the calibration objective. Each database entry is shown separately.
-                  </p>
-                  <div className="flex max-h-72 flex-col gap-2 overflow-y-auto pr-1">
-                    {authorModes.map((option) => (
-                      <ModeButton
-                        key={option.key}
-                        option={option}
-                        meta={modeOptions.find((item) => item.family === option.family) ?? modeOptions[0]}
-                        active={modes.includes(option.key)}
-                        onClick={() => handleModeClick(option)}
-                      />
-                    ))}
-                  </div>
-                </Card>
-
-                <Card title="Dataset Metadata" className="flex-1">
-                  <Metadata preview={preview} apiState={apiState} />
-                </Card>
-              </section>
-
-              <section className="min-w-0">
-                <PlotCard preview={preview} mode={primaryModeMeta} />
-              </section>
-            </div>
+            {activeStep === "experimental" ? (
+              <ExperimentalDataPage
+                datasets={datasets}
+                author={author}
+                authorModes={authorModes}
+                modes={modes}
+                preview={preview}
+                apiState={apiState}
+                primaryModeMeta={primaryModeMeta}
+                onAuthorChange={handleAuthorChange}
+                onModeClick={handleModeClick}
+              />
+            ) : (
+              <ModelArchitecturePage
+                models={modelCatalog}
+                selectedModel={selectedModel}
+                selectedModelKey={selectedModelKey}
+                onSelectModel={setSelectedModelKey}
+                selectedDataCount={modes.length}
+              />
+            )}
           </main>
-          <BottomBar rows={preview.metadata?.rows ?? 0} />
+          <BottomBar
+            activeStep={activeStep}
+            rows={preview.metadata?.rows ?? 0}
+            selectedModel={selectedModel}
+            onNext={() => setActiveStep(activeStep === "experimental" ? "models" : "experimental")}
+          />
         </div>
       </div>
     </div>
   )
 }
 
-function Sidebar() {
+function ExperimentalDataPage({
+  datasets,
+  author,
+  authorModes,
+  modes,
+  preview,
+  apiState,
+  primaryModeMeta,
+  onAuthorChange,
+  onModeClick,
+}) {
+  return (
+    <div className="mx-auto grid min-h-[640px] max-w-[1240px] grid-cols-[minmax(360px,0.82fr)_minmax(520px,1.18fr)] gap-4">
+      <section className="flex min-w-0 flex-col gap-3">
+        <Card title="Data Source">
+          <div className="rounded-lg border border-border bg-subtle px-3 py-2">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Icon className="text-lg text-primary">dns</Icon>
+              Database
+            </div>
+            <p className="mt-1 text-xs leading-5 text-text-muted">Built-in experimental datasets are the calibration source.</p>
+          </div>
+          <label className="mt-3 block text-xs font-bold uppercase text-text-muted">
+            Publication / source
+            <select className="mt-1 w-full rounded-lg border border-border-strong bg-surface px-2 py-2 text-sm normal-case text-text-primary" value={author} onChange={(event) => onAuthorChange(event.target.value)}>
+              {datasets.map((item) => (
+                <option key={item.author} value={item.author}>
+                  {item.author}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="mt-3">
+            <Label>Stress Type</Label>
+            <div className="rounded-lg border border-border bg-subtle px-3 py-2 text-sm font-semibold text-text-primary">
+              {preview.metadata?.stressType ?? "From dataset"}
+              <span className="ml-2 align-middle text-xs font-normal text-text-muted">read from experimental data</span>
+            </div>
+          </div>
+        </Card>
+
+        <Card title="Fitting Data Sets">
+          <p className="mb-2 text-xs leading-5 text-text-muted">
+            Select one or more experimental sets to include in the calibration objective. Each database entry is shown separately.
+          </p>
+          <div className="flex max-h-72 flex-col gap-2 overflow-y-auto pr-1">
+            {authorModes.map((option) => (
+              <ModeButton
+                key={option.key}
+                option={option}
+                meta={modeOptions.find((item) => item.family === option.family) ?? modeOptions[0]}
+                active={modes.includes(option.key)}
+                onClick={() => onModeClick(option)}
+              />
+            ))}
+          </div>
+        </Card>
+
+        <Card title="Dataset Metadata" className="flex-1">
+          <Metadata preview={preview} apiState={apiState} />
+        </Card>
+      </section>
+
+      <section className="min-w-0">
+        <PlotCard preview={preview} mode={primaryModeMeta} />
+      </section>
+    </div>
+  )
+}
+
+function ModelArchitecturePage({ models, selectedModel, selectedModelKey, onSelectModel, selectedDataCount }) {
+  const groupedModels = useMemo(
+    () => models.reduce((groups, model) => {
+      const label = typeLabel(model.type)
+      groups[label] = [...(groups[label] ?? []), model]
+      return groups
+    }, {}),
+    [models],
+  )
+  const compatibleNote = selectedModel?.type === "invariant_based"
+    ? "Uses invariant response functions derived from the selected deformation data."
+    : selectedModel?.type === "custom"
+      ? "Uses custom PK1 stress routines where available."
+      : "Uses principal stretches and can fit mixed loading sets."
+
+  return (
+    <div className="mx-auto grid min-h-[640px] max-w-[1240px] grid-cols-[minmax(420px,0.95fr)_minmax(460px,1.05fr)] gap-4">
+      <section className="flex min-w-0 flex-col gap-3">
+        <Card title="Model Library">
+          <p className="mb-3 text-xs leading-5 text-text-muted">Choose one constitutive model for the calibration objective. The list is populated from the Python model registry.</p>
+          <div className="flex max-h-[520px] flex-col gap-3 overflow-y-auto pr-1">
+            {Object.entries(groupedModels).map(([group, items]) => (
+              <div key={group}>
+                <Label>{group}</Label>
+                <div className="flex flex-col gap-2">
+                  {items.map((model) => (
+                    <ModelOption
+                      key={model.key}
+                      model={model}
+                      active={selectedModelKey === model.key}
+                      onClick={() => onSelectModel(model.key)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </section>
+
+      <section className="flex min-w-0 flex-col gap-3">
+        <Card title="Architecture Details">
+          {selectedModel ? (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-border bg-subtle p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-semibold">{selectedModel.name}</h3>
+                    <p className="mt-1 text-xs text-text-muted">{typeLabel(selectedModel.type)} · {selectedModel.category}</p>
+                  </div>
+                  <span className="rounded-full border border-border-strong bg-surface px-2 py-1 text-xs font-semibold text-primary">{selectedDataCount} data set{selectedDataCount === 1 ? "" : "s"}</span>
+                </div>
+                <p className="mt-3 text-sm leading-5 text-text-muted">{compatibleNote}</p>
+              </div>
+              <FormulaBlock label="Energy density" value={selectedModel.formula} />
+              {selectedModel.strainFormula && <FormulaBlock label="Generalized strain" value={selectedModel.strainFormula} />}
+            </div>
+          ) : (
+            <p className="text-sm text-text-muted">No model metadata loaded yet.</p>
+          )}
+        </Card>
+
+        <Card title="Parameter Bounds" className="flex-1">
+          <ParameterTable parameters={selectedModel?.parameters ?? []} />
+        </Card>
+      </section>
+    </div>
+  )
+}
+
+function Sidebar({ activeStep, onStepChange }) {
   const items = [
-    ["science", "Experimental Data", "active"],
-    ["schema", "Model Architecture", "ready"],
-    ["tune", "Optimization", "locked"],
-    ["analytics", "Prediction", "locked"],
+    ["experimental", "science", "Experimental Data", "ready"],
+    ["models", "schema", "Model Architecture", "ready"],
+    ["optimization", "tune", "Optimization", "locked"],
+    ["prediction", "analytics", "Prediction", "locked"],
   ]
   return (
     <aside className="flex h-full flex-col border-r border-border bg-surface px-3 py-4">
@@ -264,11 +386,14 @@ function Sidebar() {
         <p className="mt-0.5 text-xs text-text-muted">Precision Workflow</p>
       </div>
       <nav className="flex flex-1 flex-col gap-1">
-        {items.map(([icon, label, state]) => (
+        {items.map(([key, icon, label, state]) => {
+          const active = activeStep === key
+          return (
           <button
             key={label}
+            onClick={() => state !== "locked" && onStepChange(key)}
             className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition ${
-              state === "active"
+              active
                 ? "bg-selection-bg font-semibold text-primary"
                 : state === "locked"
                   ? "text-text-disabled"
@@ -277,9 +402,10 @@ function Sidebar() {
           >
             <Icon className="text-lg">{icon}</Icon>
             <span className="flex-1">{label}</span>
-            {state === "active" && <Icon className="text-base">chevron_right</Icon>}
+            {active && <Icon className="text-base">chevron_right</Icon>}
           </button>
-        ))}
+          )
+        })}
       </nav>
       <div className="border-t border-border pt-3">
         {[
@@ -296,12 +422,14 @@ function Sidebar() {
   )
 }
 
-function Topbar() {
+function Topbar({ activeStep }) {
+  const title = activeStep === "models" ? "Model Architecture" : "Experimental Data Workspace"
+  const subtitle = activeStep === "models" ? "Constitutive model selection and parameter setup" : "Project: Experimental Data Workspace"
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-surface px-4">
       <div>
         <h2 className="text-lg font-semibold">Calibration for Hyperelasticity</h2>
-        <p className="text-xs text-text-muted">Project: Experimental Data Workspace</p>
+        <p className="text-xs text-text-muted">{subtitle} · {title}</p>
       </div>
       <div className="flex items-center gap-3">
         <label className="relative">
@@ -354,6 +482,78 @@ function ModeButton({ option, meta, active, onClick }) {
       </span>
     </button>
   )
+}
+
+function ModelOption({ model, active, onClick }) {
+  return (
+    <button
+      className={`rounded-lg border px-3 py-2 text-left transition ${
+        active ? "border-primary bg-selection-bg" : "border-border-strong bg-surface hover:bg-subtle"
+      }`}
+      onClick={onClick}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold">{model.name}</div>
+          <div className="mt-0.5 text-xs text-text-muted">{model.category} · {model.parameters.length} parameter{model.parameters.length === 1 ? "" : "s"}</div>
+        </div>
+        <span className={`grid h-5 w-5 shrink-0 place-items-center rounded border ${active ? "border-primary bg-primary text-white" : "border-border-strong bg-surface"}`}>
+          {active && <Icon className="text-sm">check_circle</Icon>}
+        </span>
+      </div>
+    </button>
+  )
+}
+
+function FormulaBlock({ label, value }) {
+  return (
+    <div>
+      <Label>{label}</Label>
+      <div className="overflow-x-auto rounded-lg border border-border bg-subtle px-3 py-2 font-mono text-xs leading-5 text-text-primary">
+        {value || "-"}
+      </div>
+    </div>
+  )
+}
+
+function ParameterTable({ parameters }) {
+  if (!parameters.length) {
+    return <p className="text-sm text-text-muted">This model does not expose editable parameters.</p>
+  }
+  return (
+    <div className="overflow-hidden rounded-lg border border-border">
+      <div className="grid grid-cols-[1fr_1fr_1fr_1fr] border-b border-border bg-subtle px-3 py-2 text-xs font-bold uppercase text-text-muted">
+        <span>Name</span>
+        <span>Initial</span>
+        <span>Lower</span>
+        <span>Upper</span>
+      </div>
+      {parameters.map((param) => (
+        <div key={param.name} className="grid grid-cols-[1fr_1fr_1fr_1fr] border-b border-border px-3 py-2 text-sm last:border-b-0">
+          <span className="font-semibold">{param.name}</span>
+          <span>{formatNumber(param.initial)}</span>
+          <span>{formatBound(param.bounds?.[0])}</span>
+          <span>{formatBound(param.bounds?.[1])}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function typeLabel(type) {
+  return {
+    custom: "Custom Stress",
+    invariant_based: "Invariant Based",
+    stretch_based: "Stretch Based",
+  }[type] ?? type
+}
+
+function formatNumber(value) {
+  return value === null || value === undefined ? "-" : Number(value).toPrecision(4)
+}
+
+function formatBound(value) {
+  return value === null || value === undefined ? "free" : Number(value).toPrecision(4)
 }
 
 function Metadata({ preview, apiState }) {
@@ -496,7 +696,11 @@ function colorForSeries(family, index = 0) {
   return index === 0 ? base : palette[index % palette.length]
 }
 
-function BottomBar({ rows }) {
+function BottomBar({ activeStep, rows, selectedModel, onNext }) {
+  const status = activeStep === "models"
+    ? `Selected model: ${selectedModel?.name ?? "-"}`
+    : `Status: Ready · ${rows} rows parsed`
+  const nextLabel = activeStep === "models" ? "Back to Data" : "Next Step"
   return (
     <footer className="flex h-16 shrink-0 items-center justify-between border-t border-border bg-surface px-4">
       <button className="flex items-center gap-1 rounded-lg border border-border-strong px-4 py-2 text-sm font-semibold hover:bg-subtle">
@@ -504,9 +708,9 @@ function BottomBar({ rows }) {
         Back
       </button>
       <div className="flex items-center gap-4">
-        <span className="text-sm text-text-muted">Status: Ready · {rows} rows parsed</span>
-        <button className="flex items-center gap-1 rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-white shadow-panel hover:bg-primary-hover">
-          Next Step
+        <span className="text-sm text-text-muted">{status}</span>
+        <button className="flex items-center gap-1 rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-white shadow-panel hover:bg-primary-hover" onClick={onNext}>
+          {nextLabel}
           <Icon className="text-lg">arrow_forward</Icon>
         </button>
       </div>
