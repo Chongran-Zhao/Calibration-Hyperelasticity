@@ -20,6 +20,8 @@ import {
   SlidersHorizontal,
   ZoomIn,
 } from "lucide-react"
+import katex from "katex"
+import "katex/dist/katex.min.css"
 import "./styles.css"
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000"
@@ -100,6 +102,7 @@ function App() {
   const [modes, setModes] = useState([])
   const [modelCatalog, setModelCatalog] = useState([])
   const [selectedModelKey, setSelectedModelKey] = useState("")
+  const [parameterOverrides, setParameterOverrides] = useState({})
   const [preview, setPreview] = useState({
     points: samplePoints,
     axes: { x: "Stretch lambda (-)", y: "Nominal stress P11 (MPa)" },
@@ -160,6 +163,16 @@ function App() {
     () => modelCatalog.find((item) => item.key === selectedModelKey) ?? modelCatalog[0],
     [modelCatalog, selectedModelKey],
   )
+  const selectedParameterValues = useMemo(() => {
+    if (!selectedModel) return {}
+    const overrides = parameterOverrides[selectedModel.key] ?? {}
+    return Object.fromEntries(
+      selectedModel.parameters.map((param) => [
+        param.name,
+        overrides[param.name] ?? String(param.initial ?? ""),
+      ]),
+    )
+  }, [parameterOverrides, selectedModel])
 
   useEffect(() => {
     if (!authorModes.length) return
@@ -191,6 +204,26 @@ function App() {
     })
   }
 
+  function handleParameterChange(paramName, value) {
+    if (!selectedModel) return
+    setParameterOverrides((current) => ({
+      ...current,
+      [selectedModel.key]: {
+        ...(current[selectedModel.key] ?? {}),
+        [paramName]: value,
+      },
+    }))
+  }
+
+  function resetSelectedParameters() {
+    if (!selectedModel) return
+    setParameterOverrides((current) => {
+      const next = { ...current }
+      delete next[selectedModel.key]
+      return next
+    })
+  }
+
   return (
     <div className="h-screen overflow-hidden bg-background text-text-primary">
       <div className="grid h-full grid-cols-[260px_minmax(0,1fr)]">
@@ -215,7 +248,10 @@ function App() {
                 models={modelCatalog}
                 selectedModel={selectedModel}
                 selectedModelKey={selectedModelKey}
+                parameterValues={selectedParameterValues}
                 onSelectModel={setSelectedModelKey}
+                onParameterChange={handleParameterChange}
+                onResetParameters={resetSelectedParameters}
                 selectedDataCount={modes.length}
               />
             )}
@@ -302,7 +338,16 @@ function ExperimentalDataPage({
   )
 }
 
-function ModelArchitecturePage({ models, selectedModel, selectedModelKey, onSelectModel, selectedDataCount }) {
+function ModelArchitecturePage({
+  models,
+  selectedModel,
+  selectedModelKey,
+  parameterValues,
+  onSelectModel,
+  onParameterChange,
+  onResetParameters,
+  selectedDataCount,
+}) {
   const groupedModels = useMemo(
     () => models.reduce((groups, model) => {
       const label = typeLabel(model.type)
@@ -364,8 +409,13 @@ function ModelArchitecturePage({ models, selectedModel, selectedModelKey, onSele
           )}
         </Card>
 
-        <Card title="Parameter Bounds" className="flex-1">
-          <ParameterTable parameters={selectedModel?.parameters ?? []} />
+        <Card title="Parameter Setup" className="flex-1">
+          <ParameterTable
+            parameters={selectedModel?.parameters ?? []}
+            values={parameterValues}
+            onChange={onParameterChange}
+            onReset={onResetParameters}
+          />
         </Card>
       </section>
     </div>
@@ -506,38 +556,69 @@ function ModelOption({ model, active, onClick }) {
 }
 
 function FormulaBlock({ label, value }) {
+  const rendered = useMemo(() => renderFormula(value), [value])
   return (
     <div>
       <Label>{label}</Label>
-      <div className="overflow-x-auto rounded-lg border border-border bg-subtle px-3 py-2 font-mono text-xs leading-5 text-text-primary">
-        {value || "-"}
+      {rendered ? (
+        <div className="overflow-x-auto rounded-lg border border-border bg-subtle px-3 py-3 text-sm text-text-primary" dangerouslySetInnerHTML={{ __html: rendered }} />
+      ) : (
+        <div className="rounded-lg border border-border bg-subtle px-3 py-2 text-sm text-text-muted">-</div>
+      )}
+    </div>
+  )
+}
+
+function ParameterTable({ parameters, values, onChange, onReset }) {
+  if (!parameters.length) {
+    return <p className="text-sm text-text-muted">This model does not expose editable parameters.</p>
+  }
+  return (
+    <div className="space-y-3">
+      <div className="overflow-hidden rounded-lg border border-border">
+        <div className="grid grid-cols-[1fr_1.2fr_1fr_1fr] border-b border-border bg-subtle px-3 py-2 text-xs font-bold uppercase text-text-muted">
+          <span>Name</span>
+          <span>Initial</span>
+          <span>Lower</span>
+          <span>Upper</span>
+        </div>
+        {parameters.map((param) => (
+          <div key={param.name} className="grid grid-cols-[1fr_1.2fr_1fr_1fr] items-center gap-2 border-b border-border px-3 py-2 text-sm last:border-b-0">
+            <span className="font-semibold">{param.name}</span>
+            <input
+              className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary"
+              type="number"
+              step="any"
+              value={values[param.name] ?? ""}
+              onChange={(event) => onChange(param.name, event.target.value)}
+            />
+            <span>{formatBound(param.bounds?.[0])}</span>
+            <span>{formatBound(param.bounds?.[1])}</span>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-between">
+        <p className="text-xs leading-5 text-text-muted">Initial values are editable and kept for the selected model while you move through the workflow.</p>
+        <button className="rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-sm font-semibold hover:bg-subtle" onClick={onReset}>
+          Reset
+        </button>
       </div>
     </div>
   )
 }
 
-function ParameterTable({ parameters }) {
-  if (!parameters.length) {
-    return <p className="text-sm text-text-muted">This model does not expose editable parameters.</p>
+function renderFormula(value) {
+  if (!value) return ""
+  try {
+    return katex.renderToString(value, {
+      displayMode: true,
+      throwOnError: false,
+      strict: false,
+      trust: false,
+    })
+  } catch {
+    return ""
   }
-  return (
-    <div className="overflow-hidden rounded-lg border border-border">
-      <div className="grid grid-cols-[1fr_1fr_1fr_1fr] border-b border-border bg-subtle px-3 py-2 text-xs font-bold uppercase text-text-muted">
-        <span>Name</span>
-        <span>Initial</span>
-        <span>Lower</span>
-        <span>Upper</span>
-      </div>
-      {parameters.map((param) => (
-        <div key={param.name} className="grid grid-cols-[1fr_1fr_1fr_1fr] border-b border-border px-3 py-2 text-sm last:border-b-0">
-          <span className="font-semibold">{param.name}</span>
-          <span>{formatNumber(param.initial)}</span>
-          <span>{formatBound(param.bounds?.[0])}</span>
-          <span>{formatBound(param.bounds?.[1])}</span>
-        </div>
-      ))}
-    </div>
-  )
 }
 
 function typeLabel(type) {
@@ -546,10 +627,6 @@ function typeLabel(type) {
     invariant_based: "Invariant Based",
     stretch_based: "Stretch Based",
   }[type] ?? type
-}
-
-function formatNumber(value) {
-  return value === null || value === undefined ? "-" : Number(value).toPrecision(4)
 }
 
 function formatBound(value) {
