@@ -1,6 +1,8 @@
 # Personal files
 .DS_store
 output/*
+frontend/node_modules/
+frontend/.vite/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
