@@ -2,8 +2,10 @@ import React, { useEffect, useMemo, useState } from "react"
 import { createRoot } from "react-dom/client"
 import {
   Activity,
+  ArrowDown,
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
   BookOpen,
   CheckCircle2,
   ChevronRight,
@@ -13,11 +15,14 @@ import {
   Info,
   Layers,
   LineChart,
+  Plus,
+  Power,
   RotateCcw,
   Save,
   Search,
   Settings,
   SlidersHorizontal,
+  Trash2,
   ZoomIn,
 } from "lucide-react"
 import katex from "katex"
@@ -25,6 +30,11 @@ import "katex/dist/katex.min.css"
 import "./styles.css"
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000"
+const defaultBranches = [
+  { id: "spring-1", name: "Spring 1", modelKey: "ZhanNonGaussian", enabled: true },
+  { id: "spring-2", name: "Spring 2", modelKey: "NeoHookean", enabled: true },
+  { id: "spring-3", name: "Spring 3", modelKey: "Ogden_2term", enabled: false },
+]
 
 const samplePoints = [
   { x: 1.0, y: 0.0 },
@@ -72,7 +82,9 @@ const modeOptions = [
 const iconMap = {
   analytics: LineChart,
   arrow_back: ArrowLeft,
+  arrow_downward: ArrowDown,
   arrow_forward: ArrowRight,
+  arrow_upward: ArrowUp,
   check_circle: CheckCircle2,
   chevron_right: ChevronRight,
   dns: Database,
@@ -80,12 +92,15 @@ const iconMap = {
   info: Info,
   menu_book: BookOpen,
   monitoring: Activity,
+  add: Plus,
+  power_settings_new: Power,
   restart_alt: RotateCcw,
   save: Save,
   schema: Layers,
   science: FlaskConical,
   search: Search,
   settings: Settings,
+  delete: Trash2,
   tune: SlidersHorizontal,
   zoom_in: ZoomIn,
 }
@@ -101,7 +116,8 @@ function App() {
   const [author, setAuthor] = useState("")
   const [modes, setModes] = useState([])
   const [modelCatalog, setModelCatalog] = useState([])
-  const [selectedModelKey, setSelectedModelKey] = useState("")
+  const [branches, setBranches] = useState(defaultBranches)
+  const [selectedBranchId, setSelectedBranchId] = useState(defaultBranches[0].id)
   const [parameterOverrides, setParameterOverrides] = useState({})
   const [preview, setPreview] = useState({
     points: samplePoints,
@@ -125,7 +141,11 @@ function App() {
         const models = modelData.models ?? []
         setDatasets(authors)
         setModelCatalog(models)
-        setSelectedModelKey(models.find((item) => item.key === "ZhanNonGaussian")?.key ?? models[0]?.key ?? "")
+        const fallbackModel = models.find((item) => item.key === "ZhanNonGaussian")?.key ?? models[0]?.key ?? ""
+        setBranches((current) => current.map((branch) => ({
+          ...branch,
+          modelKey: models.some((model) => model.key === branch.modelKey) ? branch.modelKey : fallbackModel,
+        })))
         const preferred = authors.find((item) => item.author === "James_1975") ?? authors[0]
         if (preferred) {
           setAuthor(preferred.author)
@@ -159,20 +179,24 @@ function App() {
     const family = selectedModeRecords[0]?.family ?? "UT"
     return modeOptions.find((item) => item.family === family) ?? modeOptions[0]
   }, [selectedModeRecords])
+  const selectedBranch = useMemo(
+    () => branches.find((branch) => branch.id === selectedBranchId) ?? branches[0],
+    [branches, selectedBranchId],
+  )
   const selectedModel = useMemo(
-    () => modelCatalog.find((item) => item.key === selectedModelKey) ?? modelCatalog[0],
-    [modelCatalog, selectedModelKey],
+    () => modelCatalog.find((item) => item.key === selectedBranch?.modelKey) ?? modelCatalog[0],
+    [modelCatalog, selectedBranch],
   )
   const selectedParameterValues = useMemo(() => {
-    if (!selectedModel) return {}
-    const overrides = parameterOverrides[selectedModel.key] ?? {}
+    if (!selectedModel || !selectedBranch) return {}
+    const overrides = parameterOverrides[selectedBranch.id] ?? {}
     return Object.fromEntries(
       selectedModel.parameters.map((param) => [
         param.name,
         overrides[param.name] ?? String(param.initial ?? ""),
       ]),
     )
-  }, [parameterOverrides, selectedModel])
+  }, [parameterOverrides, selectedBranch, selectedModel])
 
   useEffect(() => {
     if (!authorModes.length) return
@@ -205,21 +229,66 @@ function App() {
   }
 
   function handleParameterChange(paramName, value) {
-    if (!selectedModel) return
+    if (!selectedBranch) return
     setParameterOverrides((current) => ({
       ...current,
-      [selectedModel.key]: {
-        ...(current[selectedModel.key] ?? {}),
+      [selectedBranch.id]: {
+        ...(current[selectedBranch.id] ?? {}),
         [paramName]: value,
       },
     }))
   }
 
   function resetSelectedParameters() {
-    if (!selectedModel) return
+    if (!selectedBranch) return
     setParameterOverrides((current) => {
       const next = { ...current }
-      delete next[selectedModel.key]
+      delete next[selectedBranch.id]
+      return next
+    })
+  }
+
+  function updateBranch(branchId, patch) {
+    setBranches((current) => current.map((branch) => branch.id === branchId ? { ...branch, ...patch } : branch))
+  }
+
+  function addBranch() {
+    const modelKey = modelCatalog.find((model) => model.key === "NeoHookean")?.key ?? modelCatalog[0]?.key ?? ""
+    const nextIndex = branches.length + 1
+    const branch = {
+      id: `spring-${Date.now()}`,
+      name: `Spring ${nextIndex}`,
+      modelKey,
+      enabled: true,
+    }
+    setBranches((current) => [...current, branch])
+    setSelectedBranchId(branch.id)
+  }
+
+  function removeBranch(branchId) {
+    setBranches((current) => {
+      if (current.length === 1) return current
+      const next = current.filter((branch) => branch.id !== branchId)
+      if (selectedBranchId === branchId) {
+        setSelectedBranchId(next[0].id)
+      }
+      return next
+    })
+    setParameterOverrides((current) => {
+      const next = { ...current }
+      delete next[branchId]
+      return next
+    })
+  }
+
+  function moveBranch(branchId, direction) {
+    setBranches((current) => {
+      const index = current.findIndex((branch) => branch.id === branchId)
+      const target = index + direction
+      if (index < 0 || target < 0 || target >= current.length) return current
+      const next = [...current]
+      const [item] = next.splice(index, 1)
+      next.splice(target, 0, item)
       return next
     })
   }
@@ -246,10 +315,15 @@ function App() {
             ) : (
               <ModelArchitecturePage
                 models={modelCatalog}
+                branches={branches}
+                selectedBranch={selectedBranch}
                 selectedModel={selectedModel}
-                selectedModelKey={selectedModelKey}
                 parameterValues={selectedParameterValues}
-                onSelectModel={setSelectedModelKey}
+                onAddBranch={addBranch}
+                onRemoveBranch={removeBranch}
+                onSelectBranch={setSelectedBranchId}
+                onMoveBranch={moveBranch}
+                onUpdateBranch={updateBranch}
                 onParameterChange={handleParameterChange}
                 onResetParameters={resetSelectedParameters}
                 selectedDataCount={modes.length}
@@ -259,6 +333,7 @@ function App() {
           <BottomBar
             activeStep={activeStep}
             rows={preview.metadata?.rows ?? 0}
+            selectedBranch={selectedBranch}
             selectedModel={selectedModel}
             onNext={() => setActiveStep(activeStep === "experimental" ? "models" : "experimental")}
           />
@@ -340,86 +415,234 @@ function ExperimentalDataPage({
 
 function ModelArchitecturePage({
   models,
+  branches,
+  selectedBranch,
   selectedModel,
-  selectedModelKey,
   parameterValues,
-  onSelectModel,
+  onAddBranch,
+  onRemoveBranch,
+  onSelectBranch,
+  onMoveBranch,
+  onUpdateBranch,
   onParameterChange,
   onResetParameters,
   selectedDataCount,
 }) {
-  const groupedModels = useMemo(
-    () => models.reduce((groups, model) => {
-      const label = typeLabel(model.type)
-      groups[label] = [...(groups[label] ?? []), model]
-      return groups
-    }, {}),
+  const modelByKey = useMemo(
+    () => Object.fromEntries(models.map((model) => [model.key, model])),
     [models],
   )
-  const compatibleNote = selectedModel?.type === "invariant_based"
-    ? "Uses invariant response functions derived from the selected deformation data."
-    : selectedModel?.type === "custom"
-      ? "Uses custom PK1 stress routines where available."
-      : "Uses principal stretches and can fit mixed loading sets."
+  const activeBranches = branches.filter((branch) => branch.enabled)
 
   return (
-    <div className="mx-auto grid min-h-[640px] max-w-[1240px] grid-cols-[minmax(420px,0.95fr)_minmax(460px,1.05fr)] gap-4">
-      <section className="flex min-w-0 flex-col gap-3">
-        <Card title="Model Library">
-          <p className="mb-3 text-xs leading-5 text-text-muted">Choose one constitutive model for the calibration objective. The list is populated from the Python model registry.</p>
-          <div className="flex max-h-[520px] flex-col gap-3 overflow-y-auto pr-1">
-            {Object.entries(groupedModels).map(([group, items]) => (
-              <div key={group}>
-                <Label>{group}</Label>
-                <div className="flex flex-col gap-2">
-                  {items.map((model) => (
-                    <ModelOption
-                      key={model.key}
-                      model={model}
-                      active={selectedModelKey === model.key}
-                      onClick={() => onSelectModel(model.key)}
-                    />
-                  ))}
-                </div>
-              </div>
+    <div className="mx-auto flex min-h-[640px] max-w-[1240px] flex-col gap-4">
+      <ArchitectureSummary branches={branches} activeBranches={activeBranches} selectedDataCount={selectedDataCount} selectedBranch={selectedBranch} />
+      <section className="grid min-h-[560px] gap-4 xl:grid-cols-[minmax(300px,0.78fr)_minmax(420px,1.2fr)_minmax(360px,0.95fr)]">
+        <Card title="Parallel Branches">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="text-xs font-semibold uppercase text-text-muted">{activeBranches.length} active · {branches.length} total</p>
+            <button className="flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-white shadow-panel hover:bg-primary-hover" onClick={onAddBranch}>
+              <Icon className="text-base">add</Icon>
+              Add
+            </button>
+          </div>
+          <div className="flex max-h-[500px] flex-col gap-2 overflow-y-auto pr-1">
+            {branches.map((branch, index) => (
+              <BranchCard
+                key={branch.id}
+                branch={branch}
+                index={index}
+                total={branches.length}
+                model={modelByKey[branch.modelKey]}
+                active={branch.id === selectedBranch?.id}
+                onSelect={() => onSelectBranch(branch.id)}
+                onToggle={() => onUpdateBranch(branch.id, { enabled: !branch.enabled })}
+                onMove={(direction) => onMoveBranch(branch.id, direction)}
+                onRemove={() => onRemoveBranch(branch.id)}
+              />
             ))}
           </div>
         </Card>
-      </section>
 
-      <section className="flex min-w-0 flex-col gap-3">
-        <Card title="Architecture Details">
-          {selectedModel ? (
-            <div className="space-y-3">
-              <div className="rounded-lg border border-border bg-subtle p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="text-base font-semibold">{selectedModel.name}</h3>
-                    <p className="mt-1 text-xs text-text-muted">{typeLabel(selectedModel.type)} · {selectedModel.category}</p>
-                  </div>
-                  <span className="rounded-full border border-border-strong bg-surface px-2 py-1 text-xs font-semibold text-primary">{selectedDataCount} data set{selectedDataCount === 1 ? "" : "s"}</span>
-                </div>
-                <p className="mt-3 text-sm leading-5 text-text-muted">{compatibleNote}</p>
-              </div>
-              <FormulaBlock label="Energy density" value={selectedModel.formula} />
-              {selectedModel.strainFormula && <FormulaBlock label="Generalized strain" value={selectedModel.strainFormula} />}
+        <Card title="Parallel Spring Architecture">
+          <div className="rounded-lg border border-border bg-subtle p-3">
+            <ArchitectureVisualizer branches={branches} selectedBranchId={selectedBranch?.id} modelByKey={modelByKey} onSelectBranch={onSelectBranch} />
+          </div>
+          <div className="mt-3 rounded-lg border border-border bg-subtle p-3">
+            <Label>Composition</Label>
+            <div className="text-sm leading-6 text-text-primary">
+              Total response: <span className="font-mono">P = Σ Pᵢ(F)</span>
+              <span className="ml-2 text-text-muted">with common deformation gradient F across active branches.</span>
             </div>
-          ) : (
-            <p className="text-sm text-text-muted">No model metadata loaded yet.</p>
-          )}
+          </div>
         </Card>
 
-        <Card title="Parameter Setup" className="flex-1">
-          <ParameterTable
-            parameters={selectedModel?.parameters ?? []}
-            values={parameterValues}
-            onChange={onParameterChange}
-            onReset={onResetParameters}
-          />
-        </Card>
+        <section className="flex min-w-0 flex-col gap-3">
+          <Card title="Selected Branch">
+            {selectedBranch ? (
+              <div className="space-y-3">
+                <label className="block">
+                  <Label>Branch Name</Label>
+                  <input className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary" value={selectedBranch.name} onChange={(event) => onUpdateBranch(selectedBranch.id, { name: event.target.value })} />
+                </label>
+                <label className="block">
+                  <Label>Constitutive Model</Label>
+                  <select className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary" value={selectedBranch.modelKey} onChange={(event) => onUpdateBranch(selectedBranch.id, { modelKey: event.target.value })}>
+                    {models.map((model) => (
+                      <option key={model.key} value={model.key}>{model.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <button className={`flex h-9 w-full items-center justify-center gap-1 rounded-lg border px-3 text-sm font-semibold ${selectedBranch.enabled ? "border-primary bg-selection-bg text-primary" : "border-border-strong bg-surface text-text-muted"}`} onClick={() => onUpdateBranch(selectedBranch.id, { enabled: !selectedBranch.enabled })}>
+                  <Icon className="text-base">power_settings_new</Icon>
+                  {selectedBranch.enabled ? "Enabled in Architecture" : "Disabled"}
+                </button>
+                {selectedModel && (
+                  <>
+                    <div className="rounded-lg border border-border bg-subtle p-3">
+                      <h3 className="text-sm font-semibold">{selectedModel.name}</h3>
+                      <p className="mt-1 text-xs text-text-muted">{typeLabel(selectedModel.type)} · {selectedModel.category}</p>
+                    </div>
+                    <FormulaBlock label="Branch Energy Density" value={selectedModel.formula} />
+                    {selectedModel.strainFormula && <FormulaBlock label="Generalized Strain" value={selectedModel.strainFormula} />}
+                  </>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-text-muted">No branch selected.</p>
+            )}
+          </Card>
+          <Card title="Branch Parameters" className="flex-1">
+            <ParameterTable parameters={selectedModel?.parameters ?? []} values={parameterValues} onChange={onParameterChange} onReset={onResetParameters} />
+          </Card>
+        </section>
       </section>
     </div>
   )
+}
+
+function ArchitectureSummary({ branches, activeBranches, selectedDataCount, selectedBranch }) {
+  const items = [
+    ["Total branches", branches.length],
+    ["Active branches", activeBranches.length],
+    ["Experimental sets", selectedDataCount],
+    ["Editing branch", selectedBranch?.name ?? "-"],
+  ]
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {items.map(([label, value]) => (
+        <div key={label} className="rounded-lg border border-border bg-surface p-3 shadow-panel">
+          <div className="text-[11px] font-bold uppercase text-text-muted">{label}</div>
+          <div className="mt-1 text-lg font-semibold">{value}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function BranchCard({ branch, index, total, model, active, onSelect, onToggle, onMove, onRemove }) {
+  return (
+    <div
+      className={`rounded-lg border p-3 text-left transition ${active ? "border-primary bg-selection-bg" : branch.enabled ? "border-border-strong bg-surface hover:bg-subtle" : "border-border bg-subtle opacity-70"}`}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          onSelect()
+        }
+      }}
+      role="button"
+      tabIndex={0}
+    >
+      <div className="flex items-start gap-2">
+        <span className={`mt-1 h-3 w-3 shrink-0 rounded-full ${branch.enabled ? "bg-primary" : "bg-text-disabled"}`} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate text-sm font-semibold">{branch.name}</span>
+            <span className={`rounded border px-1.5 py-0.5 text-[11px] font-semibold ${branch.enabled ? "border-primary bg-selection-bg text-primary" : "border-border-strong bg-surface text-text-muted"}`}>
+              {branch.enabled ? "active" : "off"}
+            </span>
+          </div>
+          <div className="mt-1 truncate text-xs text-text-muted">{model?.name ?? branch.modelKey}</div>
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-4 gap-1">
+        <IconButton label={branch.enabled ? "Disable" : "Enable"} onClick={onToggle}>power_settings_new</IconButton>
+        <IconButton label="Move up" disabled={index === 0} onClick={() => onMove(-1)}>arrow_upward</IconButton>
+        <IconButton label="Move down" disabled={index === total - 1} onClick={() => onMove(1)}>arrow_downward</IconButton>
+        <IconButton label="Remove" disabled={total === 1} onClick={onRemove}>delete</IconButton>
+      </div>
+    </div>
+  )
+}
+
+function IconButton({ children, label, disabled = false, onClick }) {
+  return (
+    <button
+      className="grid h-8 place-items-center rounded-md border border-border bg-surface text-text-muted hover:bg-subtle disabled:opacity-40"
+      disabled={disabled}
+      title={label}
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick?.()
+      }}
+    >
+      <Icon className="text-base">{children}</Icon>
+    </button>
+  )
+}
+
+function ArchitectureVisualizer({ branches, selectedBranchId, modelByKey, onSelectBranch }) {
+  const width = 720
+  const height = Math.max(300, 92 + branches.length * 78)
+  const railLeft = 86
+  const railRight = width - 86
+  const top = 64
+  const rowGap = 72
+  return (
+    <div className="h-[420px] overflow-auto">
+      <svg className="min-h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Parallel spring architecture">
+        <rect x="0" y="0" width={width} height={height} rx="10" fill="#FFFFFF" />
+        <line x1={railLeft} y1={top - 24} x2={railLeft} y2={top + (branches.length - 1) * rowGap + 24} stroke="#717786" strokeWidth="4" strokeLinecap="round" />
+        <line x1={railRight} y1={top - 24} x2={railRight} y2={top + (branches.length - 1) * rowGap + 24} stroke="#717786" strokeWidth="4" strokeLinecap="round" />
+        <text x={railLeft} y={top - 38} textAnchor="middle" fontSize="12" fontWeight="700" fill="#6E6E73">F input</text>
+        <text x={railRight} y={top - 38} textAnchor="middle" fontSize="12" fontWeight="700" fill="#6E6E73">P total</text>
+        {branches.map((branch, index) => {
+          const y = top + index * rowGap
+          const selected = branch.id === selectedBranchId
+          const color = selected ? "#007AFF" : branch.enabled ? "#414755" : "#C1C6D7"
+          const opacity = branch.enabled ? 1 : 0.45
+          const springStart = railLeft + 70
+          const springEnd = railRight - 70
+          const path = springPath(springStart, springEnd, y)
+          return (
+            <g key={branch.id} opacity={opacity} onClick={() => onSelectBranch(branch.id)} className="cursor-pointer">
+              <line x1={railLeft} y1={y} x2={springStart} y2={y} stroke={color} strokeWidth={selected ? "3" : "2"} />
+              <path d={path} fill="none" stroke={color} strokeWidth={selected ? "3" : "2"} strokeLinejoin="round" />
+              <line x1={springEnd} y1={y} x2={railRight} y2={y} stroke={color} strokeWidth={selected ? "3" : "2"} />
+              <circle cx={railLeft} cy={y} r="7" fill="#FFFFFF" stroke={color} strokeWidth="2" />
+              <circle cx={railRight} cy={y} r="7" fill="#FFFFFF" stroke={color} strokeWidth="2" />
+              <rect x={springStart + 112} y={y - 25} width="210" height="50" rx="8" fill={selected ? "#EAF3FF" : "#F9F9FB"} stroke={selected ? "#007AFF" : "#E5E5EA"} />
+              <text x={springStart + 126} y={y - 5} fontSize="12" fontWeight="700" fill="#1C1C1E">{branch.name}</text>
+              <text x={springStart + 126} y={y + 13} fontSize="11" fill="#6E6E73">{modelByKey[branch.modelKey]?.name ?? branch.modelKey}</text>
+            </g>
+          )
+        })}
+      </svg>
+    </div>
+  )
+}
+
+function springPath(startX, endX, y) {
+  const coils = 8
+  const amp = 14
+  const step = (endX - startX) / (coils * 2)
+  const points = [`M ${startX} ${y}`]
+  for (let index = 1; index < coils * 2; index += 1) {
+    points.push(`L ${startX + step * index} ${y + (index % 2 ? -amp : amp)}`)
+  }
+  points.push(`L ${endX} ${y}`)
+  return points.join(" ")
 }
 
 function Sidebar({ activeStep, onStepChange }) {
@@ -534,34 +757,13 @@ function ModeButton({ option, meta, active, onClick }) {
   )
 }
 
-function ModelOption({ model, active, onClick }) {
-  return (
-    <button
-      className={`rounded-lg border px-3 py-2 text-left transition ${
-        active ? "border-primary bg-selection-bg" : "border-border-strong bg-surface hover:bg-subtle"
-      }`}
-      onClick={onClick}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold">{model.name}</div>
-          <div className="mt-0.5 text-xs text-text-muted">{model.category} · {model.parameters.length} parameter{model.parameters.length === 1 ? "" : "s"}</div>
-        </div>
-        <span className={`grid h-5 w-5 shrink-0 place-items-center rounded border ${active ? "border-primary bg-primary text-white" : "border-border-strong bg-surface"}`}>
-          {active && <Icon className="text-sm">check_circle</Icon>}
-        </span>
-      </div>
-    </button>
-  )
-}
-
 function FormulaBlock({ label, value }) {
   const rendered = useMemo(() => renderFormula(value), [value])
   return (
     <div>
       <Label>{label}</Label>
       {rendered ? (
-        <div className="overflow-x-auto rounded-lg border border-border bg-subtle px-3 py-3 text-sm text-text-primary" dangerouslySetInnerHTML={{ __html: rendered }} />
+        <div className="formula-block min-h-20 overflow-x-auto rounded-lg border border-border bg-subtle px-4 py-4 text-text-primary" dangerouslySetInnerHTML={{ __html: rendered }} />
       ) : (
         <div className="rounded-lg border border-border bg-subtle px-3 py-2 text-sm text-text-muted">-</div>
       )}
@@ -584,7 +786,9 @@ function ParameterTable({ parameters, values, onChange, onReset }) {
         </div>
         {parameters.map((param) => (
           <div key={param.name} className="grid grid-cols-[1fr_1.2fr_1fr_1fr] items-center gap-2 border-b border-border px-3 py-2 text-sm last:border-b-0">
-            <span className="font-semibold">{param.name}</span>
+            <span className="font-semibold">
+              <LatexInline value={parameterSymbol(param.name)} fallback={param.name} />
+            </span>
             <input
               className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary"
               type="number"
@@ -607,11 +811,31 @@ function ParameterTable({ parameters, values, onChange, onReset }) {
   )
 }
 
-function renderFormula(value) {
+function LatexInline({ value, fallback }) {
+  const rendered = useMemo(() => renderFormula(value, false), [value])
+  return rendered ? <span dangerouslySetInnerHTML={{ __html: rendered }} /> : fallback
+}
+
+function parameterSymbol(name) {
+  const indexed = name.match(/^([A-Za-z]+)(\d+)$/)
+  if (indexed) {
+    const [, base, index] = indexed
+    return `${parameterSymbol(base)}_{${index}}`
+  }
+  return {
+    alpha: "\\alpha",
+    beta: "\\beta",
+    gamma: "\\gamma",
+    lambda: "\\lambda",
+    mu: "\\mu",
+  }[name] ?? name
+}
+
+function renderFormula(value, displayMode = true) {
   if (!value) return ""
   try {
     return katex.renderToString(value, {
-      displayMode: true,
+      displayMode,
       throwOnError: false,
       strict: false,
       trust: false,
@@ -773,9 +997,9 @@ function colorForSeries(family, index = 0) {
   return index === 0 ? base : palette[index % palette.length]
 }
 
-function BottomBar({ activeStep, rows, selectedModel, onNext }) {
+function BottomBar({ activeStep, rows, selectedBranch, selectedModel, onNext }) {
   const status = activeStep === "models"
-    ? `Selected model: ${selectedModel?.name ?? "-"}`
+    ? `Editing ${selectedBranch?.name ?? "branch"} · ${selectedModel?.name ?? "-"}`
     : `Status: Ready · ${rows} rows parsed`
   const nextLabel = activeStep === "models" ? "Back to Data" : "Next Step"
   return (

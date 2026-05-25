@@ -42,3 +42,13 @@ button:disabled {
 select {
   appearance: none;
 }
+
+.formula-block .katex-display {
+  margin: 0;
+  min-width: max-content;
+  text-align: left;
+}
+
+.formula-block .katex {
+  font-size: 1.02rem;
+}
