@@ -106,6 +106,9 @@ def _stress_series(mode: str, stress_tensor: np.ndarray) -> np.ndarray:
 def _axis_labels(mode: str, stress_type: str) -> tuple[str, str]:
     if mode in ("SS", "CSS"):
         return "Shear strain gamma (-)", "Shear stress P12"
+    if mode == "BT":
+        stress_label = "Cauchy stress sigma11" if stress_type == "cauchy" else "Nominal stress P11"
+        return "Variable stretch lambda_1 (-)", stress_label
     stress_label = "Cauchy stress sigma11" if stress_type == "cauchy" else "Nominal stress P11"
     return "Stretch lambda (-)", stress_label
 
@@ -121,16 +124,36 @@ def _read_mode_preview(h5, author: str, mode: str) -> dict:
         stress_type = stress_type.decode("utf-8")
 
     stretch = group["stretch"][()] if "stretch" in group else group["F"][:, 0, 0]
-    stress = _stress_series(family, group["stress"][()])
+    stretch_secondary = group["stretch_secondary"][()] if "stretch_secondary" in group else None
+    stress_tensor = group["stress"][()]
+    stress = _stress_series(family, stress_tensor)
+    stress_secondary = stress_tensor[:, 1, 1] if family in ("BT", "PS") else None
+
+    stretch_secondary_values = None
+    fixed_secondary = None
+    if stretch_secondary is not None:
+        stretch_secondary_values = np.asarray(stretch_secondary).ravel()
+        if stretch_secondary_values.size and np.allclose(stretch_secondary_values, stretch_secondary_values[0]):
+            fixed_secondary = float(stretch_secondary_values[0])
+
     points = [
-        {"x": float(x), "y": float(y)}
-        for x, y in zip(np.asarray(stretch).ravel(), np.asarray(stress).ravel())
+        {
+            "x": float(x),
+            "y": float(y),
+            **({"x2": float(stretch_secondary_values[index])} if stretch_secondary_values is not None else {}),
+            **({"y2": float(np.asarray(stress_secondary).ravel()[index])} if stress_secondary is not None else {}),
+        }
+        for index, (x, y) in enumerate(zip(np.asarray(stretch).ravel(), np.asarray(stress).ravel()))
     ]
     return {
         "mode": mode,
         "modeFamily": family,
         "modeLabel": _mode_label(mode),
         "stressType": stress_type,
+        "component": "P11",
+        "variableStretch": "lambda_1" if family == "BT" else ("gamma" if family in ("SS", "CSS") else "lambda"),
+        "fixedStretch": fixed_secondary,
+        "fixedStretchLabel": "lambda_2" if family == "BT" and fixed_secondary is not None else None,
         "points": points,
     }
 

@@ -1095,7 +1095,7 @@ function PredictionPage({
     () => buildPredictionSeries(preview, parameterRows, settings, overrides, optimization, authorModes),
     [preview, parameterRows, settings, overrides, optimization, authorModes],
   )
-  const allPredictionPoints = [...prediction.experimental, ...prediction.curve]
+  const allPredictionPoints = [...prediction.experimental, ...prediction.curves.flatMap((curve) => curve.points)]
   const xs = allPredictionPoints.map((point) => point.x)
   const peakStress = allPredictionPoints.reduce((max, point) => Math.max(max, point.y), 0)
   const stretchRange = xs.length ? `${Math.min(...xs).toFixed(2)}-${Math.max(...xs).toFixed(2)}` : "-"
@@ -1266,7 +1266,8 @@ function PredictionPage({
 }
 
 function PredictionChart({ prediction, preview }) {
-  const points = [...prediction.experimental, ...prediction.curve]
+  const curvePoints = prediction.curves.flatMap((curve) => curve.points)
+  const points = [...prediction.experimental, ...curvePoints]
   const width = 760
   const height = 500
   const pad = { top: 34, right: 28, bottom: 60, left: 78 }
@@ -1278,7 +1279,7 @@ function PredictionChart({ prediction, preview }) {
   const maxY = Math.max(...ys, 1)
   const xScale = (x) => pad.left + ((x - minX) / Math.max(maxX - minX, 1e-6)) * (width - pad.left - pad.right)
   const yScale = (y) => height - pad.bottom - ((y - minY) / Math.max(maxY - minY, 1e-6)) * (height - pad.top - pad.bottom)
-  const curvePath = prediction.curve.map((point, index) => `${index === 0 ? "M" : "L"} ${xScale(point.x)} ${yScale(point.y)}`).join(" ")
+  const xAxisLabel = preview.axes?.x ?? "Stretch lambda (-)"
   const yAxisLabel = preview.axes?.y ?? `${preview.metadata?.stressType ?? "Stress"} (MPa)`
 
   return (
@@ -1297,12 +1298,17 @@ function PredictionChart({ prediction, preview }) {
         })}
         <line x1={pad.left} x2={width - pad.right} y1={height - pad.bottom} y2={height - pad.bottom} stroke="#D1D1D6" />
         <line x1={pad.left} x2={pad.left} y1={pad.top} y2={height - pad.bottom} stroke="#D1D1D6" />
-        {curvePath && <path d={curvePath} fill="none" stroke="#007AFF" strokeWidth="3" />}
+        {prediction.curves.map((curve, index) => {
+          const curvePath = curve.points.map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${xScale(point.x)} ${yScale(point.y)}`).join(" ")
+          return curvePath ? (
+            <path key={curve.key} d={curvePath} fill="none" stroke={colorForSeries(curve.family, index)} strokeWidth="3" />
+          ) : null
+        })}
         {prediction.experimental.map((point, index) => (
-          <circle key={`${point.x}-${point.y}-${index}`} cx={xScale(point.x)} cy={yScale(point.y)} r="4" fill="#FFFFFF" stroke={colorForSeries(point.family, 0)} strokeWidth="2" />
+          <circle key={`${point.seriesKey}-${point.x}-${point.y}-${index}`} cx={xScale(point.x)} cy={yScale(point.y)} r="4" fill="#FFFFFF" stroke={colorForSeries(point.family, point.seriesIndex ?? 0)} strokeWidth="2" />
         ))}
         <text x={width / 2} y={height - 18} textAnchor="middle" fontSize="12" fill="#6E6E73">
-          Stretch lambda (-)
+          {xAxisLabel}
         </text>
         <text x="18" y={height / 2} textAnchor="middle" fontSize="12" fill="#6E6E73" transform={`rotate(-90 18 ${height / 2})`}>
           {yAxisLabel}
@@ -1311,10 +1317,25 @@ function PredictionChart({ prediction, preview }) {
       <div className="absolute left-3 top-3 rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
         <div className="font-semibold">Prediction review</div>
         <div className="mt-1 text-text-muted">{preview.metadata?.selectedMode ?? "Selected datasets"}</div>
+        {prediction.curves.some((curve) => curve.fixedStretch !== null && curve.fixedStretch !== undefined) && (
+          <div className="mt-1 text-text-muted">
+            {prediction.curves
+              .filter((curve) => curve.fixedStretch !== null && curve.fixedStretch !== undefined)
+              .slice(0, 2)
+              .map((curve) => `${curve.fixedStretchLabel ?? "fixed"}=${Number(curve.fixedStretch).toFixed(2)}`)
+              .join(" · ")}
+          </div>
+        )}
       </div>
       <div className="absolute bottom-3 right-3 rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
-        <div className="flex items-center gap-2"><span className="h-2 w-5 rounded-full bg-primary" /> Prediction curve</div>
-        <div className="mt-1 flex items-center gap-2"><span className="h-3 w-3 rounded-full border-2 border-primary bg-white" /> Calibration data</div>
+        <div className="flex items-center gap-2">
+          <span className="h-2 w-5 rounded-full" style={{ backgroundColor: colorForSeries(prediction.curves[0]?.family, 0) }} />
+          Prediction curve
+        </div>
+        <div className="mt-1 flex items-center gap-2">
+          <span className="h-3 w-3 rounded-full border-2 bg-white" style={{ borderColor: colorForSeries(prediction.curves[0]?.family, 0) }} />
+          Experimental data
+        </div>
       </div>
     </div>
   )
@@ -1324,7 +1345,15 @@ function buildPredictionSeries(preview, parameterRows, settings, overrides, opti
   const series = preview.series?.length
     ? preview.series
     : [{ modeFamily: "UT", modeLabel: "Experimental", points: preview.points ?? [] }]
-  const experimental = series.flatMap((item) => (item.points ?? []).map((point) => ({ ...point, family: item.modeFamily, label: item.modeLabel })))
+  const experimental = series.flatMap((item, seriesIndex) => (item.points ?? []).map((point) => ({
+    ...point,
+    family: item.modeFamily,
+    label: item.modeLabel,
+    fixedStretch: item.fixedStretch,
+    fixedStretchLabel: item.fixedStretchLabel,
+    seriesIndex,
+    seriesKey: item.mode,
+  })))
   const values = parameterRows.map((row, index) => {
     const override = overrides[row.key]
     const value = settings.manualEdits && override !== "" && override !== undefined ? override : row.value
@@ -1343,11 +1372,6 @@ function buildPredictionSeries(preview, parameterRows, settings, overrides, opti
     SS: 0.76,
     BT: 1.24,
   }
-  const xs = experimental.map((point) => point.x)
-  const minX = xs.length ? Math.min(...xs) : 1
-  const maxX = xs.length ? Math.max(...xs) : 3
-  const domain = Math.max(maxX - minX, 1e-6)
-  const maxExperimentalY = Math.max(...experimental.map((point) => Math.abs(point.y)), 1)
   const familyNormalizer = (settings.modeKeys ?? [])
     .map((key) => authorModes.find((item) => item.key === key)?.family)
     .filter(Boolean)
@@ -1355,19 +1379,104 @@ function buildPredictionSeries(preview, parameterRows, settings, overrides, opti
   const averageFamilyFactor = familyNormalizer.length
     ? familyNormalizer.reduce((sum, value) => sum + value, 0) / familyNormalizer.length
     : 1
-  const curve = experimental
-    .map((point) => {
-      const t = Math.max(0, Math.min(1, (point.x - minX) / domain))
-      const shape = t * (0.58 + 0.42 * t * t)
-      const familyFactor = (modeFactors[point.family] ?? 1) / averageFamilyFactor
-      return {
-        x: point.x,
-        y: maxExperimentalY * shape * parameterEffect * familyFactor,
-        family: point.family,
-      }
-    })
-    .sort((a, b) => a.x - b.x)
-  return { experimental, curve }
+  const curves = series.map((item, seriesIndex) => {
+    const sourcePoints = (item.points ?? [])
+      .map((point) => ({ x: Number(point.x), y: Number(point.y) }))
+      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+      .sort((a, b) => a.x - b.x)
+    const familyFactor = (modeFactors[item.modeFamily] ?? 1) / averageFamilyFactor
+    return {
+      key: item.mode ?? `${item.modeFamily}-${seriesIndex}`,
+      family: item.modeFamily,
+      label: item.modeLabel,
+      fixedStretch: item.fixedStretch,
+      fixedStretchLabel: item.fixedStretchLabel,
+      points: buildSmoothPredictionCurve(sourcePoints, parameterEffect * familyFactor),
+    }
+  })
+  return { experimental, curves }
+}
+
+function buildSmoothPredictionCurve(points, scale = 1) {
+  if (!points.length) {
+    return []
+  }
+  if (points.length === 1) {
+    return [{ ...points[0], y: points[0].y * scale }]
+  }
+  const minX = points[0].x
+  const maxX = points[points.length - 1].x
+  const sampleCount = Math.max(32, Math.min(120, points.length * 10))
+  const quadratic = fitQuadratic(points)
+  const meanY = points.reduce((sum, point) => sum + point.y, 0) / points.length
+  return Array.from({ length: sampleCount }, (_, index) => {
+    const t = sampleCount === 1 ? 0 : index / (sampleCount - 1)
+    const x = minX + t * (maxX - minX)
+    const rawY = quadratic
+      ? quadratic[0] + quadratic[1] * x + quadratic[2] * x * x
+      : interpolateY(points, x)
+    return { x, y: meanY + (rawY - meanY) * scale }
+  })
+}
+
+function interpolateY(points, x) {
+  if (x <= points[0].x) return points[0].y
+  for (let index = 1; index < points.length; index += 1) {
+    const left = points[index - 1]
+    const right = points[index]
+    if (x <= right.x) {
+      const t = (x - left.x) / Math.max(right.x - left.x, 1e-9)
+      return left.y + t * (right.y - left.y)
+    }
+  }
+  return points[points.length - 1].y
+}
+
+function fitQuadratic(points) {
+  if (points.length < 3) return null
+  const sums = points.reduce((acc, point) => {
+    const x2 = point.x * point.x
+    acc.x += point.x
+    acc.x2 += x2
+    acc.x3 += x2 * point.x
+    acc.x4 += x2 * x2
+    acc.y += point.y
+    acc.xy += point.x * point.y
+    acc.x2y += x2 * point.y
+    return acc
+  }, { x: 0, x2: 0, x3: 0, x4: 0, y: 0, xy: 0, x2y: 0 })
+  return solveLinearSystem3(
+    [
+      [points.length, sums.x, sums.x2],
+      [sums.x, sums.x2, sums.x3],
+      [sums.x2, sums.x3, sums.x4],
+    ],
+    [sums.y, sums.xy, sums.x2y],
+  )
+}
+
+function solveLinearSystem3(matrix, vector) {
+  const a = matrix.map((row, index) => [...row, vector[index]])
+  for (let pivot = 0; pivot < 3; pivot += 1) {
+    let best = pivot
+    for (let row = pivot + 1; row < 3; row += 1) {
+      if (Math.abs(a[row][pivot]) > Math.abs(a[best][pivot])) best = row
+    }
+    if (Math.abs(a[best][pivot]) < 1e-9) return null
+    if (best !== pivot) {
+      const current = a[pivot]
+      a[pivot] = a[best]
+      a[best] = current
+    }
+    const divisor = a[pivot][pivot]
+    for (let col = pivot; col < 4; col += 1) a[pivot][col] /= divisor
+    for (let row = 0; row < 3; row += 1) {
+      if (row === pivot) continue
+      const factor = a[row][pivot]
+      for (let col = pivot; col < 4; col += 1) a[row][col] -= factor * a[pivot][col]
+    }
+  }
+  return [a[0][3], a[1][3], a[2][3]]
 }
 
 function sourceLabel(source) {
