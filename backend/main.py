@@ -14,7 +14,7 @@ SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from generalized_strains import STRAIN_CONFIGS
+from generalized_strains import STRAIN_CONFIGS, STRAIN_FORMULAS
 from material_models import MaterialModels
 
 MODE_LABELS = {
@@ -25,6 +25,41 @@ MODE_LABELS = {
     "SS": "Simple Shear",
     "CSS": "Compound Simple Shear",
     "BT": "Biaxial Tension",
+}
+
+MODEL_META = {
+    "NeoHookean": {
+        "name": "Neo-Hookean",
+        "reference": "Rivlin (1948); Mooney (1940)",
+    },
+    "MooneyRivlin": {
+        "name": "Mooney-Rivlin",
+        "reference": "Mooney (1940); Rivlin (1948)",
+    },
+    "Yeoh": {
+        "name": "Yeoh",
+        "reference": "Yeoh (1993)",
+    },
+    "ArrudaBoyce": {
+        "name": "Arruda-Boyce",
+        "reference": "Arruda and Boyce (1993)",
+    },
+    "ZhanGaussian": {
+        "name": "Zhan-Gaussian",
+        "reference": "Zhan et al. (2023)",
+    },
+    "ZhanNonGaussian": {
+        "name": "Zhan-Non-Gaussian",
+        "reference": "Zhan et al. (2023)",
+    },
+    "Ogden": {
+        "name": "Ogden",
+        "reference": "Ogden (1972)",
+    },
+    "ModifiedOgden": {
+        "name": "Modified-Ogden",
+        "reference": "Budday et al. (2017); Ogden (1972)",
+    },
 }
 
 
@@ -107,15 +142,18 @@ def _json_bound(bound) -> list[float | None]:
     return [None if lower is None else float(lower), None if upper is None else float(upper)]
 
 
-def _model_payload(model_func, name: str | None = None) -> dict:
+def _model_payload(model_func, name: str | None = None, extra: dict | None = None) -> dict:
     params = getattr(model_func, "param_names", [])
     guesses = getattr(model_func, "initial_guess", [])
     bounds = getattr(model_func, "bounds", [])
-    return {
-        "key": name or model_func.__name__,
-        "name": name or model_func.__name__,
+    key = name or model_func.__name__
+    meta = MODEL_META.get(key, {})
+    payload = {
+        "key": key,
+        "name": meta.get("name", key),
         "type": getattr(model_func, "model_type", "unknown"),
         "category": getattr(model_func, "category", "unknown"),
+        "reference": meta.get("reference", ""),
         "formula": getattr(model_func, "formula", ""),
         "strainFormula": getattr(model_func, "strain_formula", ""),
         "parameters": [
@@ -126,6 +164,51 @@ def _model_payload(model_func, name: str | None = None) -> dict:
             }
             for index, param in enumerate(params)
         ],
+    }
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+def _strain_options() -> list[dict]:
+    options = []
+    for strain_name, config in STRAIN_CONFIGS.items():
+        bounds = config.get("bounds", [])
+        options.append(
+            {
+                "key": strain_name,
+                "name": strain_name,
+                "formula": STRAIN_FORMULAS.get(strain_name, ""),
+                "parameters": [
+                    {
+                        "name": param,
+                        "initial": None if index >= len(config.get("defaults", [])) else float(config["defaults"][index]),
+                        "bounds": _json_bound(bounds[index] if index < len(bounds) else None),
+                    }
+                    for index, param in enumerate(config.get("params", []))
+                ],
+            }
+        )
+    return options
+
+
+def _hill_payload() -> dict:
+    strains = _strain_options()
+    return {
+        "key": "Hill",
+        "name": "Hill",
+        "type": "stretch_based",
+        "category": "phenomenological",
+        "reference": "Hill (1978); Seth (1964)",
+        "formula": r"\Psi = \sum_{k=1}^{n_t} \mu_k \sum_{i=1}^{3} E_k(\lambda_i)^2",
+        "strainFormula": strains[0]["formula"] if strains else "",
+        "parameters": [],
+        "configurable": {
+            "kind": "hill",
+            "minTerms": 1,
+            "maxTerms": 5,
+            "strains": strains,
+        },
     }
 
 
@@ -171,15 +254,29 @@ def models():
         "Ogden",
         "ModifiedOgden",
     ]
-    model_items = [_model_payload(getattr(MaterialModels, name), name) for name in base_names]
-    model_items.extend(_model_payload(MaterialModels.create_ogden_model(n), f"Ogden_{n}term") for n in (1, 2, 3))
-    model_items.extend(
-        _model_payload(MaterialModels.create_hill_model(strain_name), f"Hill_{strain_name}")
-        for strain_name in STRAIN_CONFIGS
-    )
+    model_items = [
+        _model_payload(
+            getattr(MaterialModels, name),
+            name,
+            {
+                "configurable": {
+                    "kind": "ogden",
+                    "minTerms": 1,
+                    "maxTerms": 5,
+                },
+            } if name == "Ogden" else None,
+        )
+        for name in base_names
+    ]
+    model_items.append(_hill_payload())
     categories = sorted({item["category"] for item in model_items})
     types = sorted({item["type"] for item in model_items})
-    return {"models": model_items, "categories": categories, "types": types}
+    return {
+        "models": model_items,
+        "categories": categories,
+        "types": types,
+        "strains": _strain_options(),
+    }
 
 
 @app.get("/api/preview")

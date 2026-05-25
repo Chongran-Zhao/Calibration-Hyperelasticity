@@ -2,10 +2,8 @@ import React, { useEffect, useMemo, useState } from "react"
 import { createRoot } from "react-dom/client"
 import {
   Activity,
-  ArrowDown,
   ArrowLeft,
   ArrowRight,
-  ArrowUp,
   BookOpen,
   CheckCircle2,
   ChevronRight,
@@ -33,7 +31,7 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000"
 const defaultBranches = [
   { id: "spring-1", name: "Spring 1", modelKey: "ZhanNonGaussian", enabled: true },
   { id: "spring-2", name: "Spring 2", modelKey: "NeoHookean", enabled: true },
-  { id: "spring-3", name: "Spring 3", modelKey: "Ogden_2term", enabled: false },
+  { id: "spring-3", name: "Spring 3", modelKey: "Ogden", modelConfig: { termCount: 2 }, enabled: false },
 ]
 
 const samplePoints = [
@@ -82,9 +80,7 @@ const modeOptions = [
 const iconMap = {
   analytics: LineChart,
   arrow_back: ArrowLeft,
-  arrow_downward: ArrowDown,
   arrow_forward: ArrowRight,
-  arrow_upward: ArrowUp,
   check_circle: CheckCircle2,
   chevron_right: ChevronRight,
   dns: Database,
@@ -108,6 +104,132 @@ const iconMap = {
 function Icon({ children, className = "" }) {
   const Component = iconMap[children] ?? Info
   return <Component aria-hidden="true" className={`inline-block h-[1em] w-[1em] shrink-0 ${className}`} />
+}
+
+function defaultConfigForModel(model) {
+  const kind = model?.configurable?.kind
+  if (kind === "ogden") {
+    return { termCount: 1 }
+  }
+  if (kind === "hill") {
+    const firstStrain = model.configurable?.strains?.[0]?.key ?? ""
+    return { terms: [{ strain: firstStrain }] }
+  }
+  return {}
+}
+
+function normalizeConfigForModel(model, config = {}) {
+  const kind = model?.configurable?.kind
+  if (kind === "ogden") {
+    const min = model.configurable?.minTerms ?? 1
+    const max = model.configurable?.maxTerms ?? 5
+    const termCount = Math.min(max, Math.max(min, Number(config.termCount ?? 1) || 1))
+    return { termCount }
+  }
+  if (kind === "hill") {
+    const min = model.configurable?.minTerms ?? 1
+    const max = model.configurable?.maxTerms ?? 5
+    const strains = model.configurable?.strains ?? []
+    const fallback = strains[0]?.key ?? ""
+    const allowed = new Set(strains.map((strain) => strain.key))
+    const currentTerms = Array.isArray(config.terms) ? config.terms : []
+    const terms = currentTerms.length ? currentTerms : [{ strain: fallback }]
+    return {
+      terms: terms
+        .slice(0, max)
+        .map((term) => ({ strain: allowed.has(term.strain) ? term.strain : fallback }))
+        .concat(Array.from({ length: Math.max(0, min - terms.length) }, () => ({ strain: fallback }))),
+    }
+  }
+  return {}
+}
+
+function buildConfiguredModel(model, config = {}) {
+  if (!model) return null
+  const kind = model.configurable?.kind
+  if (kind === "ogden") {
+    const normalized = normalizeConfigForModel(model, config)
+    const termCount = normalized.termCount
+    return {
+      ...model,
+      config: normalized,
+      detail: `${termCount} term${termCount === 1 ? "" : "s"}`,
+      formula: ogdenFormula(termCount),
+      parameters: ogdenParameters(termCount),
+      strainFormula: "",
+    }
+  }
+  if (kind === "hill") {
+    const normalized = normalizeConfigForModel(model, config)
+    return {
+      ...model,
+      config: normalized,
+      detail: `${normalized.terms.length} term${normalized.terms.length === 1 ? "" : "s"}`,
+      formula: hillFormula(normalized.terms.length),
+      strainFormula: hillStrainFormula(model, normalized.terms),
+      parameters: hillParameters(model, normalized.terms),
+    }
+  }
+  return model
+}
+
+function ogdenFormula(termCount) {
+  return String.raw`\Psi = \sum_{k=1}^{${termCount}} \frac{\mu_k}{\alpha_k}\left(\lambda_1^{\alpha_k} + \lambda_2^{\alpha_k} + \lambda_3^{\alpha_k} - 3\right)`
+}
+
+function ogdenParameters(termCount) {
+  return Array.from({ length: termCount }, (_, index) => {
+    const term = index + 1
+    const negativeFirstTerm = term === 1
+    return [
+      {
+        name: `mu${term}`,
+        initial: negativeFirstTerm ? -0.5 : 0.5 / term,
+        bounds: negativeFirstTerm ? [null, -1e-6] : [1e-6, null],
+      },
+      {
+        name: `alpha${term}`,
+        initial: negativeFirstTerm ? -2 : 2 * term,
+        bounds: negativeFirstTerm ? [null, -1e-6] : [1e-6, null],
+      },
+    ]
+  }).flat()
+}
+
+function hillFormula(termCount) {
+  return String.raw`\Psi = \sum_{k=1}^{${termCount}} \mu_k \sum_{i=1}^{3} E_k(\lambda_i)^2`
+}
+
+function hillStrainFormula(model, terms) {
+  const strainByKey = Object.fromEntries((model.configurable?.strains ?? []).map((strain) => [strain.key, strain]))
+  const formulas = terms.map((term, index) => {
+    const strain = strainByKey[term.strain]
+    const formula = strain?.formula ?? ""
+    const label = `E_{${index + 1}}(\\lambda)`
+    return subscriptStrainFormula(formula.replace(/^E\(\\lambda\)/, label), index + 1) || `${label} = E(\\lambda)`
+  })
+  return String.raw`\begin{aligned}${formulas.join(String.raw`\\`)}\end{aligned}`
+}
+
+function subscriptStrainFormula(formula, termIndex) {
+  return formula
+    .replace(/(^|[^A-Za-z\\])m(?![A-Za-z])/g, `$1m_{${termIndex}}`)
+    .replace(/(^|[^A-Za-z\\])n(?![A-Za-z])/g, `$1n_{${termIndex}}`)
+}
+
+function hillParameters(model, terms) {
+  const strainByKey = Object.fromEntries((model.configurable?.strains ?? []).map((strain) => [strain.key, strain]))
+  return terms.flatMap((term, index) => {
+    const termIndex = index + 1
+    const strain = strainByKey[term.strain]
+    return [
+      { name: `mu${termIndex}`, initial: 10, bounds: [1e-6, null] },
+      ...(strain?.parameters ?? []).map((param) => ({
+        ...param,
+        name: `${param.name}${termIndex}`,
+      })),
+    ]
+  })
 }
 
 function App() {
@@ -141,10 +263,15 @@ function App() {
         const models = modelData.models ?? []
         setDatasets(authors)
         setModelCatalog(models)
-        const fallbackModel = models.find((item) => item.key === "ZhanNonGaussian")?.key ?? models[0]?.key ?? ""
+        const modelByKey = Object.fromEntries(models.map((model) => [model.key, model]))
+        const fallbackModel = models.find((item) => item.key === "ZhanNonGaussian") ?? models[0]
         setBranches((current) => current.map((branch) => ({
           ...branch,
-          modelKey: models.some((model) => model.key === branch.modelKey) ? branch.modelKey : fallbackModel,
+          modelKey: modelByKey[branch.modelKey]?.key ?? (branch.modelKey?.startsWith("Ogden_") ? "Ogden" : null) ?? (branch.modelKey?.startsWith("Hill_") ? "Hill" : null) ?? fallbackModel?.key ?? "",
+          modelConfig: normalizeConfigForModel(
+            modelByKey[branch.modelKey] ?? modelByKey[branch.modelKey?.startsWith("Ogden_") ? "Ogden" : branch.modelKey?.startsWith("Hill_") ? "Hill" : ""] ?? fallbackModel,
+            branch.modelConfig,
+          ),
         })))
         const preferred = authors.find((item) => item.author === "James_1975") ?? authors[0]
         if (preferred) {
@@ -184,7 +311,7 @@ function App() {
     [branches, selectedBranchId],
   )
   const selectedModel = useMemo(
-    () => modelCatalog.find((item) => item.key === selectedBranch?.modelKey) ?? modelCatalog[0],
+    () => buildConfiguredModel(modelCatalog.find((item) => item.key === selectedBranch?.modelKey) ?? modelCatalog[0], selectedBranch?.modelConfig),
     [modelCatalog, selectedBranch],
   )
   const selectedParameterValues = useMemo(() => {
@@ -259,6 +386,7 @@ function App() {
       id: `spring-${Date.now()}`,
       name: `Spring ${nextIndex}`,
       modelKey,
+      modelConfig: defaultConfigForModel(modelCatalog.find((model) => model.key === modelKey)),
       enabled: true,
     }
     setBranches((current) => [...current, branch])
@@ -277,18 +405,6 @@ function App() {
     setParameterOverrides((current) => {
       const next = { ...current }
       delete next[branchId]
-      return next
-    })
-  }
-
-  function moveBranch(branchId, direction) {
-    setBranches((current) => {
-      const index = current.findIndex((branch) => branch.id === branchId)
-      const target = index + direction
-      if (index < 0 || target < 0 || target >= current.length) return current
-      const next = [...current]
-      const [item] = next.splice(index, 1)
-      next.splice(target, 0, item)
       return next
     })
   }
@@ -322,7 +438,6 @@ function App() {
                 onAddBranch={addBranch}
                 onRemoveBranch={removeBranch}
                 onSelectBranch={setSelectedBranchId}
-                onMoveBranch={moveBranch}
                 onUpdateBranch={updateBranch}
                 onParameterChange={handleParameterChange}
                 onResetParameters={resetSelectedParameters}
@@ -422,7 +537,6 @@ function ModelArchitecturePage({
   onAddBranch,
   onRemoveBranch,
   onSelectBranch,
-  onMoveBranch,
   onUpdateBranch,
   onParameterChange,
   onResetParameters,
@@ -432,6 +546,7 @@ function ModelArchitecturePage({
     () => Object.fromEntries(models.map((model) => [model.key, model])),
     [models],
   )
+  const selectedBaseModel = selectedBranch ? modelByKey[selectedBranch.modelKey] : null
   const activeBranches = branches.filter((branch) => branch.enabled)
 
   return (
@@ -453,11 +568,10 @@ function ModelArchitecturePage({
                 branch={branch}
                 index={index}
                 total={branches.length}
-                model={modelByKey[branch.modelKey]}
+                model={buildConfiguredModel(modelByKey[branch.modelKey], branch.modelConfig)}
                 active={branch.id === selectedBranch?.id}
                 onSelect={() => onSelectBranch(branch.id)}
                 onToggle={() => onUpdateBranch(branch.id, { enabled: !branch.enabled })}
-                onMove={(direction) => onMoveBranch(branch.id, direction)}
                 onRemove={() => onRemoveBranch(branch.id)}
               />
             ))}
@@ -487,12 +601,27 @@ function ModelArchitecturePage({
                 </label>
                 <label className="block">
                   <Label>Constitutive Model</Label>
-                  <select className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary" value={selectedBranch.modelKey} onChange={(event) => onUpdateBranch(selectedBranch.id, { modelKey: event.target.value })}>
+                  <select
+                    className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary"
+                    value={selectedBranch.modelKey}
+                    onChange={(event) => {
+                      const nextModel = modelByKey[event.target.value]
+                      onUpdateBranch(selectedBranch.id, {
+                        modelKey: event.target.value,
+                        modelConfig: defaultConfigForModel(nextModel),
+                      })
+                    }}
+                  >
                     {models.map((model) => (
                       <option key={model.key} value={model.key}>{model.name}</option>
                     ))}
                   </select>
                 </label>
+                <ModelConfigurationPanel
+                  model={selectedBaseModel}
+                  config={selectedBranch.modelConfig}
+                  onChange={(modelConfig) => onUpdateBranch(selectedBranch.id, { modelConfig })}
+                />
                 <button className={`flex h-9 w-full items-center justify-center gap-1 rounded-lg border px-3 text-sm font-semibold ${selectedBranch.enabled ? "border-primary bg-selection-bg text-primary" : "border-border-strong bg-surface text-text-muted"}`} onClick={() => onUpdateBranch(selectedBranch.id, { enabled: !selectedBranch.enabled })}>
                   <Icon className="text-base">power_settings_new</Icon>
                   {selectedBranch.enabled ? "Enabled in Architecture" : "Disabled"}
@@ -501,7 +630,8 @@ function ModelArchitecturePage({
                   <>
                     <div className="rounded-lg border border-border bg-subtle p-3">
                       <h3 className="text-sm font-semibold">{selectedModel.name}</h3>
-                      <p className="mt-1 text-xs text-text-muted">{typeLabel(selectedModel.type)} · {selectedModel.category}</p>
+                      <p className="mt-1 text-xs text-text-muted">{typeLabel(selectedModel.type)} · {selectedModel.category}{selectedModel.detail ? ` · ${selectedModel.detail}` : ""}</p>
+                      {selectedModel.reference && <p className="mt-2 text-xs text-text-muted">Reference: {selectedModel.reference}</p>}
                     </div>
                     <FormulaBlock label="Branch Energy Density" value={selectedModel.formula} />
                     {selectedModel.strainFormula && <FormulaBlock label="Generalized Strain" value={selectedModel.strainFormula} />}
@@ -540,7 +670,7 @@ function ArchitectureSummary({ branches, activeBranches, selectedDataCount, sele
   )
 }
 
-function BranchCard({ branch, index, total, model, active, onSelect, onToggle, onMove, onRemove }) {
+function BranchCard({ branch, total, model, active, onSelect, onToggle, onRemove }) {
   return (
     <div
       className={`rounded-lg border p-3 text-left transition ${active ? "border-primary bg-selection-bg" : branch.enabled ? "border-border-strong bg-surface hover:bg-subtle" : "border-border bg-subtle opacity-70"}`}
@@ -563,14 +693,80 @@ function BranchCard({ branch, index, total, model, active, onSelect, onToggle, o
               {branch.enabled ? "active" : "off"}
             </span>
           </div>
-          <div className="mt-1 truncate text-xs text-text-muted">{model?.name ?? branch.modelKey}</div>
+          <div className="mt-1 truncate text-xs text-text-muted">{model?.name ?? branch.modelKey}{model?.detail ? ` · ${model.detail}` : ""}</div>
         </div>
       </div>
-      <div className="mt-3 grid grid-cols-4 gap-1">
+      <div className="mt-3 grid grid-cols-2 gap-1">
         <IconButton label={branch.enabled ? "Disable" : "Enable"} onClick={onToggle}>power_settings_new</IconButton>
-        <IconButton label="Move up" disabled={index === 0} onClick={() => onMove(-1)}>arrow_upward</IconButton>
-        <IconButton label="Move down" disabled={index === total - 1} onClick={() => onMove(1)}>arrow_downward</IconButton>
         <IconButton label="Remove" disabled={total === 1} onClick={onRemove}>delete</IconButton>
+      </div>
+    </div>
+  )
+}
+
+function ModelConfigurationPanel({ model, config, onChange }) {
+  const kind = model?.configurable?.kind
+  if (!kind) return null
+
+  const normalized = normalizeConfigForModel(model, config)
+  if (kind === "ogden") {
+    const min = model.configurable?.minTerms ?? 1
+    const max = model.configurable?.maxTerms ?? 5
+    return (
+      <label className="block">
+        <Label>Terms</Label>
+        <select
+          className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary"
+          value={normalized.termCount}
+          onChange={(event) => onChange({ termCount: Number(event.target.value) })}
+        >
+          {Array.from({ length: max - min + 1 }, (_, index) => min + index).map((count) => (
+            <option key={count} value={count}>{count} term{count === 1 ? "" : "s"}</option>
+          ))}
+        </select>
+      </label>
+    )
+  }
+
+  const strains = model.configurable?.strains ?? []
+  const min = model.configurable?.minTerms ?? 1
+  const max = model.configurable?.maxTerms ?? 5
+  const terms = normalized.terms
+  const updateTerm = (termIndex, strain) => {
+    onChange({ terms: terms.map((term, index) => index === termIndex ? { strain } : term) })
+  }
+  const addTerm = () => {
+    if (terms.length >= max) return
+    onChange({ terms: [...terms, { strain: strains[0]?.key ?? "" }] })
+  }
+  const removeTerm = (termIndex) => {
+    if (terms.length <= min) return
+    onChange({ terms: terms.filter((_, index) => index !== termIndex) })
+  }
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between">
+        <Label>Hill Terms</Label>
+        <button className="flex items-center gap-1 rounded-md border border-border-strong bg-surface px-2 py-1 text-xs font-semibold hover:bg-subtle disabled:opacity-40" disabled={terms.length >= max} onClick={addTerm}>
+          <Icon className="text-sm">add</Icon>
+          Term
+        </button>
+      </div>
+      <div className="space-y-2">
+        {terms.map((term, index) => (
+          <div key={`${term.strain}-${index}`} className="grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-lg border border-border bg-subtle p-2">
+            <span className="text-xs font-bold text-text-muted">{index + 1}</span>
+            <select className="h-8 min-w-0 rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary" value={term.strain} onChange={(event) => updateTerm(index, event.target.value)}>
+              {strains.map((strain) => (
+                <option key={strain.key} value={strain.key}>{strain.name}</option>
+              ))}
+            </select>
+            <button className="grid h-8 w-8 place-items-center rounded-md border border-border-strong bg-surface text-text-muted hover:bg-subtle disabled:opacity-40" disabled={terms.length <= min} title="Remove term" onClick={() => removeTerm(index)}>
+              <Icon className="text-sm">delete</Icon>
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -608,6 +804,7 @@ function ArchitectureVisualizer({ branches, selectedBranchId, modelByKey, onSele
         <text x={railLeft} y={top - 38} textAnchor="middle" fontSize="12" fontWeight="700" fill="#6E6E73">F input</text>
         <text x={railRight} y={top - 38} textAnchor="middle" fontSize="12" fontWeight="700" fill="#6E6E73">P total</text>
         {branches.map((branch, index) => {
+          const model = buildConfiguredModel(modelByKey[branch.modelKey], branch.modelConfig)
           const y = top + index * rowGap
           const selected = branch.id === selectedBranchId
           const color = selected ? "#007AFF" : branch.enabled ? "#414755" : "#C1C6D7"
@@ -624,7 +821,7 @@ function ArchitectureVisualizer({ branches, selectedBranchId, modelByKey, onSele
               <circle cx={railRight} cy={y} r="7" fill="#FFFFFF" stroke={color} strokeWidth="2" />
               <rect x={springStart + 112} y={y - 25} width="210" height="50" rx="8" fill={selected ? "#EAF3FF" : "#F9F9FB"} stroke={selected ? "#007AFF" : "#E5E5EA"} />
               <text x={springStart + 126} y={y - 5} fontSize="12" fontWeight="700" fill="#1C1C1E">{branch.name}</text>
-              <text x={springStart + 126} y={y + 13} fontSize="11" fill="#6E6E73">{modelByKey[branch.modelKey]?.name ?? branch.modelKey}</text>
+              <text x={springStart + 126} y={y + 13} fontSize="11" fill="#6E6E73">{model?.name ?? branch.modelKey}{model?.detail ? ` · ${model.detail}` : ""}</text>
             </g>
           )
         })}
