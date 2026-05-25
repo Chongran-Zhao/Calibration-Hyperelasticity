@@ -578,24 +578,19 @@ function ModelArchitecturePage({
           </div>
         </Card>
 
-        <section className="grid min-w-0 gap-4">
-          <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-            <Card title="Architecture Workspace">
-              <div className="rounded-lg border border-border bg-subtle p-3">
+        <Card title="Architecture Workspace" className="min-w-0">
+          <div className="grid min-w-0 gap-x-5 gap-y-5 lg:grid-cols-[minmax(0,1.08fr)_minmax(340px,0.92fr)]">
+            <section className="min-w-0">
+              <h4 className="text-xs font-bold uppercase text-text-muted">Parallel Structure</h4>
+              <div className="mt-2 rounded-lg border border-border bg-subtle p-3">
                 <ArchitectureVisualizer branches={branches} selectedBranchId={selectedBranch?.id} modelByKey={modelByKey} onSelectBranch={onSelectBranch} />
               </div>
-              <div className="mt-3 rounded-lg border border-border bg-subtle p-3">
-                <Label>Composition</Label>
-                <div className="text-sm leading-6 text-text-primary">
-                  Total response: <span className="font-mono">P = Σ Pᵢ(F)</span>
-                  <span className="ml-2 text-text-muted">with common deformation gradient F across active branches.</span>
-                </div>
-              </div>
-            </Card>
+            </section>
 
-            <Card title="Selected Branch">
+            <section className="min-w-0">
+              <h4 className="text-xs font-bold uppercase text-text-muted">Selected Branch</h4>
               {selectedBranch ? (
-                <div className="space-y-3">
+                <div className="mt-2 space-y-3">
                   <label className="block">
                     <Label>Branch Name</Label>
                     <input className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary" value={selectedBranch.name} onChange={(event) => onUpdateBranch(selectedBranch.id, { name: event.target.value })} />
@@ -628,7 +623,7 @@ function ModelArchitecturePage({
                     {selectedBranch.enabled ? "Enabled in Architecture" : "Disabled"}
                   </button>
                   {selectedModel && (
-                    <div className="rounded-lg border border-border bg-subtle p-3">
+                    <div className="rounded-lg bg-subtle p-3">
                       <h3 className="text-sm font-semibold">{selectedModel.name}</h3>
                       <p className="mt-1 text-xs text-text-muted">{typeLabel(selectedModel.type)} · {selectedModel.category}{selectedModel.detail ? ` · ${selectedModel.detail}` : ""}</p>
                       {selectedModel.reference && <p className="mt-2 text-xs text-text-muted">Reference: {selectedModel.reference}</p>}
@@ -636,13 +631,12 @@ function ModelArchitecturePage({
                   )}
                 </div>
               ) : (
-                <p className="text-sm text-text-muted">No branch selected.</p>
+                <p className="mt-2 text-sm text-text-muted">No branch selected.</p>
               )}
-            </Card>
-          </div>
+            </section>
 
-          <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-            <Card title="Model Equations">
+            <section className="min-w-0 border-t border-border pt-4">
+              <h4 className="mb-2 text-xs font-bold uppercase text-text-muted">Model Equations</h4>
               {selectedModel ? (
                 <div className="space-y-3">
                   <FormulaBlock label="Branch Energy Density" value={selectedModel.formula} />
@@ -651,12 +645,14 @@ function ModelArchitecturePage({
               ) : (
                 <p className="text-sm text-text-muted">No model selected.</p>
               )}
-            </Card>
-            <Card title="Branch Parameters">
+            </section>
+
+            <section className="min-w-0 border-t border-border pt-4">
+              <h4 className="mb-2 text-xs font-bold uppercase text-text-muted">Branch Parameters</h4>
               <ParameterTable parameters={selectedModel?.parameters ?? []} values={parameterValues} onChange={onParameterChange} onReset={onResetParameters} />
-            </Card>
+            </section>
           </div>
-        </section>
+        </Card>
       </section>
     </div>
   )
@@ -1067,10 +1063,16 @@ function formatBound(value) {
 
 function Metadata({ preview, apiState }) {
   const metadata = preview.metadata ?? {}
+  const dataStatus = {
+    Ready: "Loaded",
+    Connecting: "Connecting",
+    Offline: "Offline",
+    "Preview error": "Preview error",
+  }[apiState] ?? apiState
   return (
     <dl className="grid grid-cols-2 gap-2 text-sm">
       <MetaItem label="Rows parsed" value={metadata.rows ?? 0} />
-      <MetaItem label="API" value={apiState} />
+      <MetaItem label="Data status" value={dataStatus} />
       <MetaItem label="Selected sets" value={metadata.setCount ?? 0} />
       <MetaItem label="Stress type" value={metadata.stressType ?? "-"} />
       <MetaItem label="Source" value="Database" />
