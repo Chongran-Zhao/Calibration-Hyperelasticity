@@ -552,7 +552,7 @@ function ModelArchitecturePage({
   return (
     <div className="mx-auto flex min-h-[640px] max-w-[1240px] flex-col gap-4">
       <ArchitectureSummary branches={branches} activeBranches={activeBranches} selectedDataCount={selectedDataCount} selectedBranch={selectedBranch} />
-      <section className="grid min-h-[560px] gap-4 xl:grid-cols-[minmax(300px,0.78fr)_minmax(420px,1.2fr)_minmax(360px,0.95fr)]">
+      <section className="grid min-h-[560px] gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <Card title="Parallel Branches">
           <div className="mb-3 flex items-center justify-between gap-3">
             <p className="text-xs font-semibold uppercase text-text-muted">{activeBranches.length} active · {branches.length} total</p>
@@ -578,73 +578,84 @@ function ModelArchitecturePage({
           </div>
         </Card>
 
-        <Card title="Parallel Spring Architecture">
-          <div className="rounded-lg border border-border bg-subtle p-3">
-            <ArchitectureVisualizer branches={branches} selectedBranchId={selectedBranch?.id} modelByKey={modelByKey} onSelectBranch={onSelectBranch} />
-          </div>
-          <div className="mt-3 rounded-lg border border-border bg-subtle p-3">
-            <Label>Composition</Label>
-            <div className="text-sm leading-6 text-text-primary">
-              Total response: <span className="font-mono">P = Σ Pᵢ(F)</span>
-              <span className="ml-2 text-text-muted">with common deformation gradient F across active branches.</span>
-            </div>
-          </div>
-        </Card>
+        <section className="grid min-w-0 gap-4">
+          <div className="grid gap-4 2xl:grid-cols-[minmax(440px,1.1fr)_minmax(360px,0.9fr)]">
+            <Card title="Architecture Workspace">
+              <div className="rounded-lg border border-border bg-subtle p-3">
+                <ArchitectureVisualizer branches={branches} selectedBranchId={selectedBranch?.id} modelByKey={modelByKey} onSelectBranch={onSelectBranch} />
+              </div>
+              <div className="mt-3 rounded-lg border border-border bg-subtle p-3">
+                <Label>Composition</Label>
+                <div className="text-sm leading-6 text-text-primary">
+                  Total response: <span className="font-mono">P = Σ Pᵢ(F)</span>
+                  <span className="ml-2 text-text-muted">with common deformation gradient F across active branches.</span>
+                </div>
+              </div>
+            </Card>
 
-        <section className="flex min-w-0 flex-col gap-3">
-          <Card title="Selected Branch">
-            {selectedBranch ? (
-              <div className="space-y-3">
-                <label className="block">
-                  <Label>Branch Name</Label>
-                  <input className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary" value={selectedBranch.name} onChange={(event) => onUpdateBranch(selectedBranch.id, { name: event.target.value })} />
-                </label>
-                <label className="block">
-                  <Label>Constitutive Model</Label>
-                  <select
-                    className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary"
-                    value={selectedBranch.modelKey}
-                    onChange={(event) => {
-                      const nextModel = modelByKey[event.target.value]
-                      onUpdateBranch(selectedBranch.id, {
-                        modelKey: event.target.value,
-                        modelConfig: defaultConfigForModel(nextModel),
-                      })
-                    }}
-                  >
-                    {models.map((model) => (
-                      <option key={model.key} value={model.key}>{model.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <ModelConfigurationPanel
-                  model={selectedBaseModel}
-                  config={selectedBranch.modelConfig}
-                  onChange={(modelConfig) => onUpdateBranch(selectedBranch.id, { modelConfig })}
-                />
-                <button className={`flex h-9 w-full items-center justify-center gap-1 rounded-lg border px-3 text-sm font-semibold ${selectedBranch.enabled ? "border-primary bg-selection-bg text-primary" : "border-border-strong bg-surface text-text-muted"}`} onClick={() => onUpdateBranch(selectedBranch.id, { enabled: !selectedBranch.enabled })}>
-                  <Icon className="text-base">power_settings_new</Icon>
-                  {selectedBranch.enabled ? "Enabled in Architecture" : "Disabled"}
-                </button>
-                {selectedModel && (
-                  <>
+            <Card title="Selected Branch">
+              {selectedBranch ? (
+                <div className="space-y-3">
+                  <label className="block">
+                    <Label>Branch Name</Label>
+                    <input className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary" value={selectedBranch.name} onChange={(event) => onUpdateBranch(selectedBranch.id, { name: event.target.value })} />
+                  </label>
+                  <label className="block">
+                    <Label>Constitutive Model</Label>
+                    <select
+                      className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary"
+                      value={selectedBranch.modelKey}
+                      onChange={(event) => {
+                        const nextModel = modelByKey[event.target.value]
+                        onUpdateBranch(selectedBranch.id, {
+                          modelKey: event.target.value,
+                          modelConfig: defaultConfigForModel(nextModel),
+                        })
+                      }}
+                    >
+                      {models.map((model) => (
+                        <option key={model.key} value={model.key}>{model.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <ModelConfigurationPanel
+                    model={selectedBaseModel}
+                    config={selectedBranch.modelConfig}
+                    onChange={(modelConfig) => onUpdateBranch(selectedBranch.id, { modelConfig })}
+                  />
+                  <button className={`flex h-9 w-full items-center justify-center gap-1 rounded-lg border px-3 text-sm font-semibold ${selectedBranch.enabled ? "border-primary bg-selection-bg text-primary" : "border-border-strong bg-surface text-text-muted"}`} onClick={() => onUpdateBranch(selectedBranch.id, { enabled: !selectedBranch.enabled })}>
+                    <Icon className="text-base">power_settings_new</Icon>
+                    {selectedBranch.enabled ? "Enabled in Architecture" : "Disabled"}
+                  </button>
+                  {selectedModel && (
                     <div className="rounded-lg border border-border bg-subtle p-3">
                       <h3 className="text-sm font-semibold">{selectedModel.name}</h3>
                       <p className="mt-1 text-xs text-text-muted">{typeLabel(selectedModel.type)} · {selectedModel.category}{selectedModel.detail ? ` · ${selectedModel.detail}` : ""}</p>
                       {selectedModel.reference && <p className="mt-2 text-xs text-text-muted">Reference: {selectedModel.reference}</p>}
                     </div>
-                    <FormulaBlock label="Branch Energy Density" value={selectedModel.formula} />
-                    {selectedModel.strainFormula && <FormulaBlock label="Generalized Strain" value={selectedModel.strainFormula} />}
-                  </>
-                )}
-              </div>
-            ) : (
-              <p className="text-sm text-text-muted">No branch selected.</p>
-            )}
-          </Card>
-          <Card title="Branch Parameters" className="flex-1">
-            <ParameterTable parameters={selectedModel?.parameters ?? []} values={parameterValues} onChange={onParameterChange} onReset={onResetParameters} />
-          </Card>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-text-muted">No branch selected.</p>
+              )}
+            </Card>
+          </div>
+
+          <div className="grid gap-4 2xl:grid-cols-[minmax(440px,1.1fr)_minmax(360px,0.9fr)]">
+            <Card title="Model Equations">
+              {selectedModel ? (
+                <div className="space-y-3">
+                  <FormulaBlock label="Branch Energy Density" value={selectedModel.formula} />
+                  {selectedModel.strainFormula && <FormulaBlock label="Generalized Strain" value={selectedModel.strainFormula} />}
+                </div>
+              ) : (
+                <p className="text-sm text-text-muted">No model selected.</p>
+              )}
+            </Card>
+            <Card title="Branch Parameters">
+              <ParameterTable parameters={selectedModel?.parameters ?? []} values={parameterValues} onChange={onParameterChange} onReset={onResetParameters} />
+            </Card>
+          </div>
         </section>
       </section>
     </div>
