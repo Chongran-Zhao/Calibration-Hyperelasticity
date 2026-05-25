@@ -273,6 +273,7 @@ function App() {
   const [branches, setBranches] = useState(defaultBranches)
   const [selectedBranchId, setSelectedBranchId] = useState(defaultBranches[0].id)
   const [parameterOverrides, setParameterOverrides] = useState({})
+  const [fittedParameterValues, setFittedParameterValues] = useState({})
   const [solverSettings, setSolverSettings] = useState(defaultSolverSettings)
   const [optimization, setOptimization] = useState(initialOptimizationState)
   const [predictionSettings, setPredictionSettings] = useState(defaultPredictionSettings)
@@ -367,16 +368,22 @@ function App() {
       .flatMap((branch) => {
         const model = buildConfiguredModel(modelCatalog.find((item) => item.key === branch.modelKey), branch.modelConfig)
         const overrides = parameterOverrides[branch.id] ?? {}
-        return (model?.parameters ?? []).map((param) => ({
-          key: `${branch.id}-${param.name}`,
-          branch: branch.name,
-          symbol: param.name,
-          value: overrides[param.name] ?? String(param.initial ?? ""),
-          lower: param.bounds?.[0],
-          upper: param.bounds?.[1],
-        }))
+        return (model?.parameters ?? []).map((param) => {
+          const key = `${branch.id}-${param.name}`
+          const initial = overrides[param.name] ?? String(param.initial ?? "")
+          return {
+            key,
+            branch: branch.name,
+            symbol: param.name,
+            initial,
+            value: fittedParameterValues[key] ?? initial,
+            fitted: fittedParameterValues[key],
+            lower: param.bounds?.[0],
+            upper: param.bounds?.[1],
+          }
+        })
       })
-  }, [branches, modelCatalog, parameterOverrides])
+  }, [branches, fittedParameterValues, modelCatalog, parameterOverrides])
 
   useEffect(() => {
     if (!authorModes.length) return
@@ -492,21 +499,84 @@ function App() {
     setSolverSettings((current) => ({ ...current, [name]: value }))
   }
 
-  function startOptimization() {
+  function buildCalibrationPayload() {
+    const activeBranches = branches.filter((branch) => branch.enabled).map((branch) => {
+      const model = buildConfiguredModel(modelCatalog.find((item) => item.key === branch.modelKey), branch.modelConfig)
+      const overrides = parameterOverrides[branch.id] ?? {}
+      const parameters = Object.fromEntries((model?.parameters ?? []).map((param) => [
+        param.name,
+        Number(overrides[param.name] ?? fittedParameterValues[`${branch.id}-${param.name}`] ?? param.initial ?? 0),
+      ]))
+      return {
+        id: branch.id,
+        name: branch.name,
+        modelKey: branch.modelKey,
+        modelConfig: model?.config ?? branch.modelConfig ?? {},
+        enabled: branch.enabled,
+        parameters,
+      }
+    })
+    return {
+      author,
+      modes,
+      branches: activeBranches,
+      solver: solverSettings,
+    }
+  }
+
+  async function startOptimization() {
     if (optimization.running) return
+    setFittedParameterValues({})
     setOptimization({
       status: "Running",
       running: true,
-      progress: 4,
-      initialLoss: 0.2468,
-      currentLoss: 0.2468,
+      progress: 18,
+      initialLoss: 0,
+      currentLoss: 0,
       r2: 0.0,
       iterations: 0,
       log: [
-        `Started ${solverSettings.method} calibration.`,
+        `Started ${solverSettings.method} calibration on backend solver.`,
         `${modes.length} dataset set${modes.length === 1 ? "" : "s"} and ${branches.filter((branch) => branch.enabled).length} active branch${branches.filter((branch) => branch.enabled).length === 1 ? "" : "es"} queued.`,
       ],
     })
+    try {
+      const response = await fetch(`${API_BASE}/api/calibrate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildCalibrationPayload()),
+      })
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}))
+        throw new Error(detail.detail ?? `Calibration failed with ${response.status}`)
+      }
+      const result = await response.json()
+      const fitted = Object.fromEntries((result.parameters ?? []).map((param) => [param.key, String(Number(param.value).toPrecision(8))]))
+      setFittedParameterValues(fitted)
+      setPredictionSettings((current) => ({ ...current, modeKeys: result.modes ?? modes }))
+      setOptimization({
+        status: result.success ? "Converged" : "Finished",
+        running: false,
+        progress: 100,
+        initialLoss: Number(result.initialLoss ?? 0),
+        currentLoss: Number(result.loss ?? 0),
+        r2: Number(result.r2 ?? 0),
+        iterations: Number(result.iterations ?? 0),
+        prediction: result.prediction,
+        log: [
+          `${result.success ? "Converged" : "Finished"} after ${result.iterations ?? 0} iterations: loss ${Number(result.loss ?? 0).toExponential(2)}, R2 ${Number(result.r2 ?? 0).toFixed(4)}.`,
+          `Fitted ${result.parameters?.length ?? 0} parameter${result.parameters?.length === 1 ? "" : "s"} with ${solverSettings.method}.`,
+        ],
+      })
+    } catch (error) {
+      setOptimization((current) => ({
+        ...current,
+        status: "Error",
+        running: false,
+        progress: 0,
+        log: [`Calibration failed: ${error.message}`, ...current.log].slice(0, 6),
+      }))
+    }
   }
 
   function stopOptimization() {
@@ -519,6 +589,7 @@ function App() {
   }
 
   function resetOptimization() {
+    setFittedParameterValues({})
     setOptimization(initialOptimizationState)
   }
 
@@ -561,8 +632,17 @@ function App() {
     const timer = window.setInterval(() => {
       setOptimization((current) => {
         if (!current.running) return current
-        const iterations = current.iterations + 24
-        const progress = Math.min(100, current.progress + 9)
+        const iterations = current.iterations + 1
+        const progress = Math.min(95, current.progress + 12)
+        if (current.initialLoss <= 0) {
+          return {
+            ...current,
+            progress,
+            iterations,
+            log: [`Backend solve in progress (${iterations}).`, ...current.log].slice(0, 6),
+          }
+        }
+        const simulatedIterations = current.iterations + 24
         const currentLoss = Number(Math.max(0.0028, current.initialLoss * Math.exp(-progress / 27)).toFixed(6))
         const r2 = Number(Math.min(0.9987, 1 - currentLoss / current.initialLoss).toFixed(4))
         const finished = progress >= 100
@@ -571,13 +651,13 @@ function App() {
           status: finished ? "Converged" : "Running",
           running: !finished,
           progress,
-          iterations,
+          iterations: simulatedIterations,
           currentLoss,
           r2,
           log: [
             finished
-              ? `Converged after ${iterations} iterations.`
-              : `Iteration ${iterations}: loss ${currentLoss.toExponential(2)}, R2 ${r2.toFixed(4)}.`,
+              ? `Converged after ${simulatedIterations} iterations.`
+              : `Iteration ${simulatedIterations}: loss ${currentLoss.toExponential(2)}, R2 ${r2.toFixed(4)}.`,
             ...current.log,
           ].slice(0, 6),
         }
@@ -943,7 +1023,7 @@ function OptimizationPage({
                 {parameterRows.slice(0, 10).map((row) => (
                   <div key={row.key} className="grid grid-cols-[1fr_0.7fr_0.8fr] border-t border-border px-2 py-2 text-sm">
                     <span className="font-semibold"><LatexInline value={parameterSymbol(row.symbol)} fallback={row.symbol} /></span>
-                    <span>{row.value || "-"}</span>
+                    <span>{row.initial || "-"}</span>
                     <span className="truncate text-text-muted">{row.branch}</span>
                   </div>
                 ))}
@@ -978,13 +1058,13 @@ function OptimizationPage({
                 <div className="bg-subtle px-2 py-2">Fitted</div>
                 <div className="bg-subtle px-2 py-2">Bounds</div>
               </div>
-              {parameterRows.slice(0, 6).map((row, index) => {
-                const fitted = Number(row.value || 0) * (1 + 0.04 * Math.sin(index + optimization.progress / 40))
+              {parameterRows.slice(0, 6).map((row) => {
+                const fitted = row.fitted ?? (optimization.running ? "Solving..." : "")
                 return (
                   <div key={`${row.key}-fit`} className="contents">
                     <div className="border-t border-border px-2 py-2 font-semibold"><LatexInline value={parameterSymbol(row.symbol)} fallback={row.symbol} /></div>
-                    <div className="border-t border-border px-2 py-2">{row.value || "-"}</div>
-                    <div className="border-t border-border px-2 py-2">{Number.isFinite(fitted) ? fitted.toPrecision(4) : "-"}</div>
+                    <div className="border-t border-border px-2 py-2">{row.initial || "-"}</div>
+                    <div className="border-t border-border px-2 py-2">{fitted || "-"}</div>
                     <div className="border-t border-border px-2 py-2 text-text-muted">{formatBound(row.lower)} / {formatBound(row.upper)}</div>
                   </div>
                 )
@@ -1354,6 +1434,23 @@ function buildPredictionSeries(preview, parameterRows, settings, overrides, opti
     seriesIndex,
     seriesKey: item.mode,
   })))
+  const backendCurveByKey = new Map((optimization.prediction?.curves ?? []).map((curve) => [curve.key, curve]))
+  if (optimization.prediction?.author === preview.author && series.length && series.every((item) => backendCurveByKey.has(item.mode))) {
+    return {
+      experimental,
+      curves: series.map((item, seriesIndex) => {
+        const curve = backendCurveByKey.get(item.mode)
+        return {
+          key: curve.key ?? item.mode ?? `${item.modeFamily}-${seriesIndex}`,
+          family: curve.family ?? item.modeFamily,
+          label: curve.label ?? item.modeLabel,
+          fixedStretch: curve.fixedStretch ?? item.fixedStretch,
+          fixedStretchLabel: curve.fixedStretchLabel ?? item.fixedStretchLabel,
+          points: curve.points ?? [],
+        }
+      }),
+    }
+  }
   const values = parameterRows.map((row, index) => {
     const override = overrides[row.key]
     const value = settings.manualEdits && override !== "" && override !== undefined ? override : row.value

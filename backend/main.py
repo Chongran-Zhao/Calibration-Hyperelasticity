@@ -15,7 +15,11 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from generalized_strains import STRAIN_CONFIGS, STRAIN_FORMULAS
+from kinematics import Kinematics
 from material_models import MaterialModels
+from optimization import MaterialOptimizer
+from parallel_springs import ParallelNetwork
+from utils import get_deformation_gradient, get_stress_components, load_experimental_data_h5
 
 MODE_LABELS = {
     "UT": "Uniaxial Tension",
@@ -163,6 +167,124 @@ def _json_bound(bound) -> list[float | None]:
         return [None, None]
     lower, upper = bound
     return [None if lower is None else float(lower), None if upper is None else float(upper)]
+
+
+def _safe_prefix(value: str) -> str:
+    prefix = re.sub(r"[^0-9A-Za-z_]+", "_", value).strip("_")
+    return prefix or "branch"
+
+
+def _model_function(model_key: str, model_config: dict | None = None):
+    config = model_config or {}
+    if model_key == "Ogden":
+        return MaterialModels.create_ogden_model(int(config.get("termCount", 1)))
+    if model_key == "Hill":
+        terms = config.get("terms") or [{"strain": "Seth-Hill"}]
+        if len(terms) != 1:
+            raise HTTPException(status_code=400, detail="Backend calibration currently supports one Hill term per branch.")
+        return MaterialModels.create_hill_model(terms[0].get("strain", "Seth-Hill"))
+    if not hasattr(MaterialModels, model_key):
+        raise HTTPException(status_code=400, detail=f"Unsupported model: {model_key}")
+    return getattr(MaterialModels, model_key)
+
+
+def _build_solver_from_payload(branches: list[dict]) -> tuple[Kinematics, list[float], list[tuple], list[dict]]:
+    active = [branch for branch in branches if branch.get("enabled", True)]
+    if not active:
+        raise HTTPException(status_code=400, detail="At least one active branch is required.")
+
+    network = ParallelNetwork()
+    mappings = []
+    for branch in active:
+        model_key = branch.get("modelKey")
+        model_func = _model_function(model_key, branch.get("modelConfig"))
+        prefix = _safe_prefix(branch.get("id") or branch.get("name") or model_key)
+        network.add_model(model_func, prefix)
+        for local_name in getattr(model_func, "param_names", []):
+            mappings.append(
+                {
+                    "branchId": branch.get("id"),
+                    "name": local_name,
+                    "key": f"{branch.get('id')}-{local_name}",
+                    "solverKey": f"{prefix}_{local_name}",
+                    "initial": branch.get("parameters", {}).get(local_name),
+                }
+            )
+
+    initial_by_solver_key = {
+        item["solverKey"]: item["initial"]
+        for item in mappings
+        if item["initial"] is not None
+    }
+    initial_guess = []
+    for solver_key, fallback in zip(network.param_names, network.initial_guess):
+        value = initial_by_solver_key.get(solver_key, fallback)
+        try:
+            initial_guess.append(float(value))
+        except (TypeError, ValueError):
+            initial_guess.append(float(fallback))
+
+    solver = Kinematics(network, network.param_names)
+    return solver, initial_guess, network.bounds, mappings
+
+
+def _params_payload(mappings: list[dict], params: np.ndarray) -> list[dict]:
+    by_solver_key = {mapping["solverKey"]: mapping for mapping in mappings}
+    payload = []
+    for solver_key, value in zip(by_solver_key.keys(), params):
+        mapping = by_solver_key[solver_key]
+        payload.append(
+            {
+                "branchId": mapping["branchId"],
+                "name": mapping["name"],
+                "key": mapping["key"],
+                "solverKey": solver_key,
+                "value": float(value),
+            }
+        )
+    return payload
+
+
+def _prediction_curves(h5, author: str, modes: list[str], solver: Kinematics, params: dict) -> list[dict]:
+    curves = []
+    for mode in modes:
+        item = _read_mode_preview(h5, author, mode)
+        points = sorted(item["points"], key=lambda point: point["x"])
+        if not points:
+            curves.append({**item, "key": mode, "family": item["modeFamily"], "points": []})
+            continue
+
+        x_values = np.linspace(points[0]["x"], points[-1]["x"], max(32, min(160, len(points) * 12)))
+        family = item["modeFamily"]
+        fixed_stretch = item.get("fixedStretch")
+        model_points = []
+        for x in x_values:
+            if family == "BT":
+                lam2 = fixed_stretch if fixed_stretch is not None else points[0].get("x2", 1.0)
+                F = get_deformation_gradient((float(x), float(lam2)), "BT")
+            elif family in ("SS", "CSS"):
+                F = get_deformation_gradient(float(x), family)
+            else:
+                F = get_deformation_gradient(float(x), family)
+            stress_tensor = (
+                solver.get_Cauchy_stress(F, params)
+                if item["stressType"] == "cauchy"
+                else solver.get_1st_PK_stress(F, params)
+            )
+            components = get_stress_components(stress_tensor, family)
+            model_points.append({"x": float(x), "y": float(components[0])})
+
+        curves.append(
+            {
+                "key": mode,
+                "family": family,
+                "label": item["modeLabel"],
+                "fixedStretch": item.get("fixedStretch"),
+                "fixedStretchLabel": item.get("fixedStretchLabel"),
+                "points": model_points,
+            }
+        )
+    return curves
 
 
 def _model_payload(model_func, name: str | None = None, extra: dict | None = None) -> dict:
@@ -335,4 +457,59 @@ def preview(
             "setCount": len(series),
         },
         "axes": {"x": x_label, "y": y_label},
+    }
+
+
+@app.post("/api/calibrate")
+def calibrate(payload: dict):
+    if not DATA_FILE.exists():
+        raise HTTPException(status_code=500, detail="data/data.h5 not found")
+
+    author = payload.get("author")
+    modes = payload.get("modes") or []
+    branches = payload.get("branches") or []
+    solver_settings = payload.get("solver") or {}
+    if not author or not modes:
+        raise HTTPException(status_code=400, detail="Author and at least one mode are required.")
+
+    solver, initial_guess, bounds, mappings = _build_solver_from_payload(branches)
+    datasets = load_experimental_data_h5(
+        [{"author": author, "mode": mode} for mode in modes],
+        str(DATA_FILE),
+        announce=False,
+    )
+    optimizer = MaterialOptimizer(solver, datasets)
+
+    result = optimizer.fit(
+        initial_guess,
+        bounds,
+        method=solver_settings.get("method", "L-BFGS-B"),
+        max_iter=int(float(solver_settings.get("maxIter", 500))),
+        r2_target=float(solver_settings.get("r2Target", 0.995)),
+        abs_tol=float(solver_settings.get("absTol", 1e-6)),
+        rel_tol=float(solver_settings.get("relTol", 1e-4)),
+        max_loss=float(solver_settings.get("maxLoss", 0.05)),
+    )
+    params_array = np.asarray(result.x, dtype=float)
+    params_dict = dict(zip(solver.param_names_ordered, params_array))
+
+    with h5py.File(DATA_FILE, "r") as h5:
+        curves = _prediction_curves(h5, author, modes, solver, params_dict)
+
+    return {
+        "success": bool(result.success),
+        "message": str(result.message),
+        "author": author,
+        "modes": modes,
+        "initialLoss": float(result.initial_loss),
+        "loss": float(result.fun),
+        "r2": float(result.r2_total),
+        "r2Average": float(result.r2_avg),
+        "iterations": int(result.nit),
+        "parameters": _params_payload(mappings, params_array),
+        "prediction": {
+            "author": author,
+            "modes": modes,
+            "curves": curves,
+        },
     }
