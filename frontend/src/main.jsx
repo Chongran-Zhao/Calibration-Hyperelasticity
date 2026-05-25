@@ -127,6 +127,16 @@ const initialOptimizationState = {
   log: ["Ready to calibrate selected model and datasets."],
 }
 
+const defaultPredictionSettings = {
+  source: "lastOptimization",
+  mode: "UT",
+  stretchMin: 1,
+  stretchMax: 3.5,
+  samples: 72,
+  stressOutput: "First PK",
+  manualEdits: false,
+}
+
 function Icon({ children, className = "" }) {
   const Component = iconMap[children] ?? Info
   return <Component aria-hidden="true" className={`inline-block h-[1em] w-[1em] shrink-0 ${className}`} />
@@ -269,6 +279,8 @@ function App() {
   const [parameterOverrides, setParameterOverrides] = useState({})
   const [solverSettings, setSolverSettings] = useState(defaultSolverSettings)
   const [optimization, setOptimization] = useState(initialOptimizationState)
+  const [predictionSettings, setPredictionSettings] = useState(defaultPredictionSettings)
+  const [predictionOverrides, setPredictionOverrides] = useState({})
   const [preview, setPreview] = useState({
     points: samplePoints,
     axes: { x: "Stretch lambda (-)", y: "Nominal stress P11 (MPa)" },
@@ -487,6 +499,27 @@ function App() {
     setOptimization(initialOptimizationState)
   }
 
+  function updatePredictionSetting(name, value) {
+    setPredictionSettings((current) => ({
+      ...current,
+      [name]: value,
+      manualEdits: name === "source" && value === "manualOverride" ? true : current.manualEdits,
+    }))
+  }
+
+  function updatePredictionOverride(key, value) {
+    setPredictionOverrides((current) => {
+      const next = { ...current }
+      if (value === "") delete next[key]
+      else next[key] = value
+      return next
+    })
+  }
+
+  function resetPredictionOverrides() {
+    setPredictionOverrides({})
+  }
+
   useEffect(() => {
     if (!optimization.running) return undefined
     const timer = window.setInterval(() => {
@@ -551,7 +584,7 @@ function App() {
                 onResetParameters={resetSelectedParameters}
                 selectedDataCount={modes.length}
               />
-            ) : (
+            ) : activeStep === "optimization" ? (
               <OptimizationPage
                 preview={preview}
                 branches={branches}
@@ -563,6 +596,17 @@ function App() {
                 onStop={stopOptimization}
                 onReset={resetOptimization}
               />
+            ) : (
+              <PredictionPage
+                preview={preview}
+                parameterRows={optimizationParameters}
+                optimization={optimization}
+                settings={predictionSettings}
+                overrides={predictionOverrides}
+                onSettingChange={updatePredictionSetting}
+                onOverrideChange={updatePredictionOverride}
+                onResetOverrides={resetPredictionOverrides}
+              />
             )}
           </main>
           <BottomBar
@@ -573,7 +617,8 @@ function App() {
             onNext={() => {
               if (activeStep === "experimental") setActiveStep("models")
               else if (activeStep === "models") setActiveStep("optimization")
-              else setActiveStep("models")
+              else if (activeStep === "optimization") setActiveStep("prediction")
+              else setActiveStep("optimization")
             }}
           />
         </div>
@@ -994,6 +1039,274 @@ function CalibrationFitChart({ preview, progress }) {
   )
 }
 
+function PredictionPage({
+  preview,
+  parameterRows,
+  optimization,
+  settings,
+  overrides,
+  onSettingChange,
+  onOverrideChange,
+  onResetOverrides,
+}) {
+  const changedCount = Object.keys(overrides).length
+  const prediction = useMemo(
+    () => buildPredictionSeries(preview, parameterRows, settings, overrides, optimization),
+    [preview, parameterRows, settings, overrides, optimization],
+  )
+  const peakStress = prediction.curve.reduce((max, point) => Math.max(max, point.y), 0)
+  const maxExperimentalX = prediction.experimental.reduce((max, point) => Math.max(max, point.x), 0)
+  const extrapolation = Math.max(0, Number(settings.stretchMax) - maxExperimentalX)
+  const metrics = [
+    ["Peak stress", `${peakStress.toFixed(3)} MPa`],
+    ["Stretch range", `${Number(settings.stretchMin).toFixed(2)}-${Number(settings.stretchMax).toFixed(2)}`],
+    ["Samples", settings.samples],
+    ["Extrapolation", `${extrapolation.toFixed(2)} λ`],
+    ["Status", settings.manualEdits ? "Manual edits" : "Ready"],
+  ]
+
+  return (
+    <div className="mx-auto flex min-h-[640px] w-full max-w-[1280px] flex-col gap-4 overflow-x-hidden">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        {metrics.map(([label, value]) => (
+          <MetricCard key={label} label={label} value={value} active={label === "Status" && settings.manualEdits} />
+        ))}
+      </div>
+
+      <section className="grid min-w-0 gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+        <div className="flex min-w-0 flex-col gap-4">
+          <Card title="Parameter Source">
+            <div className="space-y-2">
+              {[
+                ["lastOptimization", "Last Optimization", `R2 ${optimization.r2.toFixed(4)} · ${optimization.status}`],
+                ["currentArchitecture", "Current Architecture", `${parameterRows.length} initial parameters`],
+                ["manualOverride", "Manual Override", `${changedCount} changed value${changedCount === 1 ? "" : "s"}`],
+              ].map(([value, label, detail]) => (
+                <button
+                  key={value}
+                  className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left ${settings.source === value ? "border-primary bg-selection-bg" : "border-border-strong hover:bg-subtle"}`}
+                  onClick={() => onSettingChange("source", value)}
+                >
+                  <span className={`h-3 w-3 rounded-full ${settings.source === value ? "bg-primary" : "bg-border-strong"}`} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold">{label}</span>
+                    <span className="block truncate text-xs text-text-muted">{detail}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </Card>
+
+          <Card title="Prediction Setup">
+            <label className="block">
+              <Label>Loading Mode</Label>
+              <select className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary" value={settings.mode} onChange={(event) => onSettingChange("mode", event.target.value)}>
+                {modeOptions.map((mode) => <option key={mode.family} value={mode.family}>{mode.label}</option>)}
+              </select>
+            </label>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <SolverNumber label="Stretch Min" value={settings.stretchMin} step="0.05" onChange={(value) => onSettingChange("stretchMin", value)} />
+              <SolverNumber label="Stretch Max" value={settings.stretchMax} step="0.05" onChange={(value) => onSettingChange("stretchMax", value)} />
+              <SolverNumber label="Samples" value={settings.samples} step="1" onChange={(value) => onSettingChange("samples", value)} />
+              <label className="block">
+                <Label>Stress Output</Label>
+                <select className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary" value={settings.stressOutput} onChange={(event) => onSettingChange("stressOutput", event.target.value)}>
+                  <option>First PK</option>
+                  <option>Cauchy</option>
+                  <option>Engineering</option>
+                </select>
+              </label>
+            </div>
+          </Card>
+
+          <Card title="Manual Overrides">
+            <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-subtle px-3 py-2">
+              <span>
+                <span className="block text-sm font-semibold">Enable manual edits</span>
+                <span className="block text-xs text-text-muted">Overrides are isolated from fitted values.</span>
+              </span>
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-border-strong text-primary focus:ring-primary"
+                checked={settings.manualEdits}
+                onChange={(event) => onSettingChange("manualEdits", event.target.checked)}
+              />
+            </label>
+            <div className="mt-3 overflow-hidden rounded-lg border border-border">
+              <div className="grid grid-cols-[1fr_0.8fr_0.9fr] bg-subtle px-2 py-2 text-[11px] font-bold uppercase text-text-muted">
+                <span>Parameter</span>
+                <span>Fitted</span>
+                <span>Override</span>
+              </div>
+              <div className="max-h-64 overflow-y-auto">
+                {parameterRows.slice(0, 12).map((row) => {
+                  const overrideValue = overrides[row.key] ?? ""
+                  return (
+                    <div key={row.key} className="grid grid-cols-[1fr_0.8fr_0.9fr] items-center gap-2 border-t border-border px-2 py-2 text-sm">
+                      <span className="min-w-0 truncate font-semibold">
+                        <LatexInline value={parameterSymbol(row.symbol)} fallback={row.symbol} />
+                      </span>
+                      <span className="truncate text-text-muted">{row.value || "-"}</span>
+                      <input
+                        className="h-8 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary disabled:bg-subtle disabled:text-text-disabled"
+                        type="number"
+                        step="any"
+                        disabled={!settings.manualEdits}
+                        placeholder={String(row.value ?? "")}
+                        value={overrideValue}
+                        onChange={(event) => onOverrideChange(row.key, event.target.value)}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <div className="flex flex-wrap gap-1">
+                {changedCount ? (
+                  Object.keys(overrides).slice(0, 4).map((key) => {
+                    const row = parameterRows.find((item) => item.key === key)
+                    return <span key={key} className="rounded border border-primary bg-selection-bg px-1.5 py-0.5 text-[11px] font-semibold text-primary">{row?.symbol ?? "param"}</span>
+                  })
+                ) : (
+                  <span className="text-xs text-text-muted">No overrides applied.</span>
+                )}
+              </div>
+              <button className="rounded-lg border border-border-strong px-3 py-1.5 text-sm font-semibold hover:bg-subtle" onClick={onResetOverrides}>
+                Reset
+              </button>
+            </div>
+          </Card>
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-4">
+          <Card title="Prediction Plot">
+            <div className="min-h-[540px]">
+              <PredictionChart prediction={prediction} settings={settings} preview={preview} />
+            </div>
+          </Card>
+
+          <Card title="Parameter Provenance">
+            <div className="grid gap-2 sm:grid-cols-3">
+              {[
+                ["Source", sourceLabel(settings.source)],
+                ["Manual changed", changedCount],
+                ["Optimization status", `${optimization.status} · ${optimization.iterations} iter.`],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-lg border border-border bg-subtle p-2">
+                  <div className="text-[11px] font-bold uppercase text-text-muted">{label}</div>
+                  <div className="mt-1 truncate text-sm font-semibold">{value}</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function PredictionChart({ prediction, settings, preview }) {
+  const points = [...prediction.experimental, ...prediction.curve]
+  const width = 760
+  const height = 500
+  const pad = { top: 34, right: 28, bottom: 60, left: 78 }
+  const xs = points.map((point) => point.x)
+  const ys = points.map((point) => point.y)
+  const minX = Math.min(...xs, 1)
+  const maxX = Math.max(...xs, 3)
+  const minY = Math.min(...ys, 0)
+  const maxY = Math.max(...ys, 1)
+  const xScale = (x) => pad.left + ((x - minX) / Math.max(maxX - minX, 1e-6)) * (width - pad.left - pad.right)
+  const yScale = (y) => height - pad.bottom - ((y - minY) / Math.max(maxY - minY, 1e-6)) * (height - pad.top - pad.bottom)
+  const curvePath = prediction.curve.map((point, index) => `${index === 0 ? "M" : "L"} ${xScale(point.x)} ${yScale(point.y)}`).join(" ")
+  const experimentalMaxX = prediction.experimental.reduce((max, point) => Math.max(max, point.x), minX)
+  const extrapolationX = xScale(experimentalMaxX)
+
+  return (
+    <div className="relative h-full min-h-[540px] rounded-lg border border-border bg-white">
+      <svg className="absolute inset-0 h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Prediction chart">
+        <rect width={width} height={height} fill="#FFFFFF" />
+        <rect x={extrapolationX} y={pad.top} width={width - pad.right - extrapolationX} height={height - pad.top - pad.bottom} fill="#EAF3FF" opacity="0.7" />
+        {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
+          const x = pad.left + tick * (width - pad.left - pad.right)
+          const y = pad.top + tick * (height - pad.top - pad.bottom)
+          return (
+            <g key={tick}>
+              <line x1={x} x2={x} y1={pad.top} y2={height - pad.bottom} stroke="#E5E5EA" strokeDasharray="4 4" />
+              <line x1={pad.left} x2={width - pad.right} y1={y} y2={y} stroke="#E5E5EA" strokeDasharray="4 4" />
+            </g>
+          )
+        })}
+        <line x1={pad.left} x2={width - pad.right} y1={height - pad.bottom} y2={height - pad.bottom} stroke="#D1D1D6" />
+        <line x1={pad.left} x2={pad.left} y1={pad.top} y2={height - pad.bottom} stroke="#D1D1D6" />
+        <path d={curvePath} fill="none" stroke="#007AFF" strokeWidth="3" />
+        {prediction.experimental.map((point, index) => (
+          <circle key={`${point.x}-${point.y}-${index}`} cx={xScale(point.x)} cy={yScale(point.y)} r="4" fill="#FFFFFF" stroke={colorForSeries(point.family, 0)} strokeWidth="2" />
+        ))}
+        <text x={width / 2} y={height - 18} textAnchor="middle" fontSize="12" fill="#6E6E73">
+          Stretch lambda (-)
+        </text>
+        <text x="18" y={height / 2} textAnchor="middle" fontSize="12" fill="#6E6E73" transform={`rotate(-90 18 ${height / 2})`}>
+          {settings.stressOutput} Stress (MPa)
+        </text>
+      </svg>
+      <div className="absolute left-3 top-3 rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
+        <div className="font-semibold">Prediction review</div>
+        <div className="mt-1 text-text-muted">{preview.metadata?.selectedMode ?? "Selected datasets"}</div>
+      </div>
+      <div className="absolute bottom-3 right-3 rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
+        <div className="flex items-center gap-2"><span className="h-2 w-5 rounded-full bg-primary" /> Prediction curve</div>
+        <div className="mt-1 flex items-center gap-2"><span className="h-3 w-3 rounded-full border-2 border-primary bg-white" /> Calibration data</div>
+        <div className="mt-1 flex items-center gap-2"><span className="h-3 w-5 rounded-sm bg-selection-bg" /> Extrapolation</div>
+      </div>
+    </div>
+  )
+}
+
+function buildPredictionSeries(preview, parameterRows, settings, overrides, optimization) {
+  const series = preview.series?.length
+    ? preview.series
+    : [{ modeFamily: "UT", modeLabel: "Experimental", points: preview.points ?? [] }]
+  const experimental = series.flatMap((item) => (item.points ?? []).map((point) => ({ ...point, family: item.modeFamily })))
+  const values = parameterRows.map((row, index) => {
+    const override = overrides[row.key]
+    const value = settings.manualEdits && override !== "" && override !== undefined ? override : row.value
+    const numeric = Number(value)
+    return Number.isFinite(numeric) ? Math.abs(numeric) / (index + 3) : 0
+  })
+  const parameterScale = values.reduce((sum, value) => sum + value, 0)
+  const sourceBoost = settings.source === "lastOptimization" ? 1 + optimization.progress / 700 : settings.source === "manualOverride" ? 1.08 : 0.96
+  const stiffness = Math.max(0.28, Math.min(3.6, (0.72 + parameterScale * 0.035) * sourceBoost))
+  const min = Number(settings.stretchMin) || 1
+  const max = Math.max(min + 0.05, Number(settings.stretchMax) || 3.5)
+  const sampleCount = Math.max(12, Math.min(240, Number(settings.samples) || 72))
+  const modeFactor = {
+    CSS: 0.88,
+    UT: 1,
+    PS: 1.16,
+    ET: 1.34,
+    SS: 0.76,
+    BT: 1.24,
+  }[settings.mode] ?? 1
+  const curve = Array.from({ length: sampleCount }, (_, index) => {
+    const t = sampleCount === 1 ? 0 : index / (sampleCount - 1)
+    const lambda = min + t * (max - min)
+    const strain = Math.max(0, lambda - 1)
+    const y = stiffness * modeFactor * strain * (1 + 0.52 * strain * strain)
+    return { x: lambda, y }
+  })
+  return { experimental, curve }
+}
+
+function sourceLabel(source) {
+  return {
+    lastOptimization: "Last Optimization",
+    currentArchitecture: "Current Architecture",
+    manualOverride: "Manual Override",
+  }[source] ?? source
+}
+
 function ArchitectureSummary({ branches, activeBranches, selectedDataCount, selectedBranch }) {
   const items = [
     ["Total branches", branches.length],
@@ -1190,7 +1503,7 @@ function Sidebar({ activeStep, onStepChange }) {
     ["experimental", "science", "Experimental Data", "ready"],
     ["models", "schema", "Model Architecture", "ready"],
     ["optimization", "tune", "Optimization", "ready"],
-    ["prediction", "analytics", "Prediction", "locked"],
+    ["prediction", "analytics", "Prediction", "ready"],
   ]
   return (
     <aside className="sticky top-0 flex h-screen flex-col border-r border-border bg-surface px-3 py-4">
@@ -1240,11 +1553,13 @@ function Topbar({ activeStep }) {
     experimental: "Experimental Data Workspace",
     models: "Model Architecture",
     optimization: "Optimization",
+    prediction: "Prediction",
   }[activeStep] ?? "Experimental Data Workspace"
   const subtitle = {
     experimental: "Project: Experimental Data Workspace",
     models: "Constitutive model selection and parameter setup",
     optimization: "Calibration run and convergence review",
+    prediction: "Fitted parameter reuse and prediction review",
   }[activeStep] ?? "Project: Experimental Data Workspace"
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-surface px-4">
@@ -1556,11 +1871,14 @@ function BottomBar({ activeStep, rows, selectedBranch, selectedModel, onNext }) 
     ? `Editing ${selectedBranch?.name ?? "branch"} · ${selectedModel?.name ?? "-"}`
     : activeStep === "optimization"
       ? "Optimization workspace ready"
-      : `Status: Ready · ${rows} rows parsed`
+      : activeStep === "prediction"
+        ? "Prediction workspace ready"
+        : `Status: Ready · ${rows} rows parsed`
   const nextLabel = {
     experimental: "Next Step",
     models: "Optimize",
-    optimization: "Back to Model",
+    optimization: "Prediction",
+    prediction: "Back to Optimization",
   }[activeStep] ?? "Next Step"
   return (
     <footer className="sticky bottom-0 z-20 flex h-16 shrink-0 items-center justify-between border-t border-border bg-surface/95 px-4 backdrop-blur">
