@@ -410,12 +410,12 @@ function App() {
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-background text-text-primary">
-      <div className="grid h-full grid-cols-[260px_minmax(0,1fr)]">
+    <div className="min-h-screen bg-background text-text-primary">
+      <div className="grid min-h-screen grid-cols-[260px_minmax(0,1fr)]">
         <Sidebar activeStep={activeStep} onStepChange={setActiveStep} />
         <div className="flex min-w-0 flex-col">
           <Topbar activeStep={activeStep} />
-          <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4">
+          <main className="min-w-0 flex-1 overflow-x-hidden p-4 pb-24">
             {activeStep === "experimental" ? (
               <ExperimentalDataPage
                 datasets={datasets}
@@ -861,7 +861,7 @@ function Sidebar({ activeStep, onStepChange }) {
     ["prediction", "analytics", "Prediction", "locked"],
   ]
   return (
-    <aside className="flex h-full flex-col border-r border-border bg-surface px-3 py-4">
+    <aside className="sticky top-0 flex h-screen flex-col border-r border-border bg-surface px-3 py-4">
       <div className="px-2 pb-6">
         <h1 className="text-[15px] font-semibold">Calibration Shell</h1>
         <p className="mt-0.5 text-xs text-text-muted">Precision Workflow</p>
@@ -1211,7 +1211,7 @@ function BottomBar({ activeStep, rows, selectedBranch, selectedModel, onNext }) 
     : `Status: Ready · ${rows} rows parsed`
   const nextLabel = activeStep === "models" ? "Back to Data" : "Next Step"
   return (
-    <footer className="flex h-16 shrink-0 items-center justify-between border-t border-border bg-surface px-4">
+    <footer className="sticky bottom-0 z-20 flex h-16 shrink-0 items-center justify-between border-t border-border bg-surface/95 px-4 backdrop-blur">
       <button className="flex items-center gap-1 rounded-lg border border-border-strong px-4 py-2 text-sm font-semibold hover:bg-subtle">
         <Icon className="text-lg">arrow_back</Icon>
         Back
