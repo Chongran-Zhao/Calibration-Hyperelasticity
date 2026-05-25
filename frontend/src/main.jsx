@@ -129,7 +129,7 @@ const initialOptimizationState = {
 
 const defaultPredictionSettings = {
   source: "lastOptimization",
-  mode: "UT",
+  modeKeys: [],
   stretchMin: 1,
   stretchMax: 3.5,
   samples: 72,
@@ -292,6 +292,7 @@ function App() {
       setCount: 1,
     },
   })
+  const [predictionPreview, setPredictionPreview] = useState(preview)
   const [apiState, setApiState] = useState("Connecting")
 
   useEffect(() => {
@@ -394,6 +395,32 @@ function App() {
       setModes(validSelection)
     }
   }, [author, authorModes, modes])
+
+  useEffect(() => {
+    if (!authorModes.length) return
+    const validKeys = new Set(authorModes.map((item) => item.key))
+    const currentKeys = (predictionSettings.modeKeys ?? []).filter((key) => validKeys.has(key))
+    const fallbackKeys = modes.filter((key) => validKeys.has(key))
+    const nextKeys = currentKeys.length
+      ? currentKeys
+      : fallbackKeys.length
+        ? fallbackKeys
+        : [authorModes.find((item) => item.family === "UT")?.key ?? authorModes[0].key]
+    if (nextKeys.join("|") !== (predictionSettings.modeKeys ?? []).join("|")) {
+      setPredictionSettings((current) => ({ ...current, modeKeys: nextKeys }))
+    }
+  }, [authorModes, modes, predictionSettings.modeKeys])
+
+  useEffect(() => {
+    const modeKeys = predictionSettings.modeKeys ?? []
+    if (!author || !modeKeys.length) return
+    const params = new URLSearchParams({ author })
+    modeKeys.forEach((item) => params.append("mode", item))
+    fetch(`${API_BASE}/api/preview?${params.toString()}`)
+      .then((res) => res.json())
+      .then((data) => setPredictionPreview(data))
+      .catch(() => setPredictionPreview(preview))
+  }, [author, predictionSettings.modeKeys, preview])
 
   function handleAuthorChange(value) {
     setAuthor(value)
@@ -520,6 +547,19 @@ function App() {
     setPredictionOverrides({})
   }
 
+  function togglePredictionMode(modeRecord) {
+    setPredictionSettings((current) => {
+      const currentKeys = current.modeKeys ?? []
+      const active = currentKeys.includes(modeRecord.key)
+      const modeKeys = active
+        ? currentKeys.length === 1
+          ? currentKeys
+          : currentKeys.filter((key) => key !== modeRecord.key)
+        : [...currentKeys, modeRecord.key]
+      return { ...current, modeKeys }
+    })
+  }
+
   useEffect(() => {
     if (!optimization.running) return undefined
     const timer = window.setInterval(() => {
@@ -598,12 +638,14 @@ function App() {
               />
             ) : (
               <PredictionPage
-                preview={preview}
+                preview={predictionPreview}
+                authorModes={authorModes}
                 parameterRows={optimizationParameters}
                 optimization={optimization}
                 settings={predictionSettings}
                 overrides={predictionOverrides}
                 onSettingChange={updatePredictionSetting}
+                onModeToggle={togglePredictionMode}
                 onOverrideChange={updatePredictionOverride}
                 onResetOverrides={resetPredictionOverrides}
               />
@@ -1041,18 +1083,21 @@ function CalibrationFitChart({ preview, progress }) {
 
 function PredictionPage({
   preview,
+  authorModes,
   parameterRows,
   optimization,
   settings,
   overrides,
   onSettingChange,
+  onModeToggle,
   onOverrideChange,
   onResetOverrides,
 }) {
   const changedCount = Object.keys(overrides).length
+  const selectedModeKeys = settings.modeKeys ?? []
   const prediction = useMemo(
-    () => buildPredictionSeries(preview, parameterRows, settings, overrides, optimization),
-    [preview, parameterRows, settings, overrides, optimization],
+    () => buildPredictionSeries(preview, parameterRows, settings, overrides, optimization, authorModes),
+    [preview, parameterRows, settings, overrides, optimization, authorModes],
   )
   const peakStress = prediction.curve.reduce((max, point) => Math.max(max, point.y), 0)
   const maxExperimentalX = prediction.experimental.reduce((max, point) => Math.max(max, point.x), 0)
@@ -1078,9 +1123,8 @@ function PredictionPage({
           <Card title="Parameter Source">
             <div className="space-y-2">
               {[
-                ["lastOptimization", "Last Optimization", `R2 ${optimization.r2.toFixed(4)} · ${optimization.status}`],
-                ["currentArchitecture", "Current Architecture", `${parameterRows.length} initial parameters`],
-                ["manualOverride", "Manual Override", `${changedCount} changed value${changedCount === 1 ? "" : "s"}`],
+                ["lastOptimization", "Last Optimization", optimization.iterations ? `R2 ${optimization.r2.toFixed(4)} · ${optimization.status}` : "Use the latest fitted parameter set"],
+                ["manualOverride", "Manual Parameters", `${changedCount} changed value${changedCount === 1 ? "" : "s"}`],
               ].map(([value, label, detail]) => (
                 <button
                   key={value}
@@ -1098,12 +1142,31 @@ function PredictionPage({
           </Card>
 
           <Card title="Prediction Setup">
-            <label className="block">
-              <Label>Loading Mode</Label>
-              <select className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary" value={settings.mode} onChange={(event) => onSettingChange("mode", event.target.value)}>
-                {modeOptions.map((mode) => <option key={mode.family} value={mode.family}>{mode.label}</option>)}
-              </select>
-            </label>
+            <div>
+              <Label>Loading Modes</Label>
+              <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
+                {authorModes.map((option) => {
+                  const active = selectedModeKeys.includes(option.key)
+                  const meta = modeOptions.find((item) => item.family === option.family) ?? modeOptions[0]
+                  return (
+                    <button
+                      key={option.key}
+                      className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left ${active ? "border-primary bg-selection-bg" : "border-border-strong hover:bg-subtle"}`}
+                      onClick={() => onModeToggle(option)}
+                    >
+                      <span className={`h-3 w-3 rounded-full ${meta.dot}`} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold">{option.label}</span>
+                        <span className="block truncate text-xs text-text-muted">{option.key} · {option.points} pts · {option.stressType}</span>
+                      </span>
+                      <span className={`grid h-5 w-5 place-items-center rounded border ${active ? "border-primary bg-primary text-white" : "border-border-strong bg-surface"}`}>
+                        {active && <Icon className="text-sm">check_circle</Icon>}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <SolverNumber label="Stretch Min" value={settings.stretchMin} step="0.05" onChange={(value) => onSettingChange("stretchMin", value)} />
               <SolverNumber label="Stretch Max" value={settings.stretchMax} step="0.05" onChange={(value) => onSettingChange("stretchMax", value)} />
@@ -1135,8 +1198,8 @@ function PredictionPage({
             <div className="mt-3 overflow-hidden rounded-lg border border-border">
               <div className="grid grid-cols-[1fr_0.8fr_0.9fr] bg-subtle px-2 py-2 text-[11px] font-bold uppercase text-text-muted">
                 <span>Parameter</span>
-                <span>Fitted</span>
-                <span>Override</span>
+                <span>Source</span>
+                <span>Manual</span>
               </div>
               <div className="max-h-64 overflow-y-auto">
                 {parameterRows.slice(0, 12).map((row) => {
@@ -1191,7 +1254,7 @@ function PredictionPage({
               {[
                 ["Source", sourceLabel(settings.source)],
                 ["Manual changed", changedCount],
-                ["Optimization status", `${optimization.status} · ${optimization.iterations} iter.`],
+                ["Prediction sets", selectedModeKeys.length],
               ].map(([label, value]) => (
                 <div key={label} className="rounded-lg border border-border bg-subtle p-2">
                   <div className="text-[11px] font-bold uppercase text-text-muted">{label}</div>
@@ -1264,7 +1327,7 @@ function PredictionChart({ prediction, settings, preview }) {
   )
 }
 
-function buildPredictionSeries(preview, parameterRows, settings, overrides, optimization) {
+function buildPredictionSeries(preview, parameterRows, settings, overrides, optimization, authorModes) {
   const series = preview.series?.length
     ? preview.series
     : [{ modeFamily: "UT", modeLabel: "Experimental", points: preview.points ?? [] }]
@@ -1276,19 +1339,26 @@ function buildPredictionSeries(preview, parameterRows, settings, overrides, opti
     return Number.isFinite(numeric) ? Math.abs(numeric) / (index + 3) : 0
   })
   const parameterScale = values.reduce((sum, value) => sum + value, 0)
-  const sourceBoost = settings.source === "lastOptimization" ? 1 + optimization.progress / 700 : settings.source === "manualOverride" ? 1.08 : 0.96
+  const sourceBoost = settings.source === "manualOverride" ? 1.08 : 1 + optimization.progress / 700
   const stiffness = Math.max(0.28, Math.min(3.6, (0.72 + parameterScale * 0.035) * sourceBoost))
   const min = Number(settings.stretchMin) || 1
   const max = Math.max(min + 0.05, Number(settings.stretchMax) || 3.5)
   const sampleCount = Math.max(12, Math.min(240, Number(settings.samples) || 72))
-  const modeFactor = {
+  const modeFactors = {
     CSS: 0.88,
     UT: 1,
+    UC: 0.92,
     PS: 1.16,
     ET: 1.34,
     SS: 0.76,
     BT: 1.24,
-  }[settings.mode] ?? 1
+  }
+  const selectedFamilies = (settings.modeKeys ?? [])
+    .map((key) => authorModes.find((item) => item.key === key)?.family)
+    .filter(Boolean)
+  const modeFactor = selectedFamilies.length
+    ? selectedFamilies.reduce((sum, family) => sum + (modeFactors[family] ?? 1), 0) / selectedFamilies.length
+    : 1
   const curve = Array.from({ length: sampleCount }, (_, index) => {
     const t = sampleCount === 1 ? 0 : index / (sampleCount - 1)
     const lambda = min + t * (max - min)
@@ -1302,8 +1372,7 @@ function buildPredictionSeries(preview, parameterRows, settings, overrides, opti
 function sourceLabel(source) {
   return {
     lastOptimization: "Last Optimization",
-    currentArchitecture: "Current Architecture",
-    manualOverride: "Manual Override",
+    manualOverride: "Manual Parameters",
   }[source] ?? source
 }
 
