@@ -130,10 +130,6 @@ const initialOptimizationState = {
 const defaultPredictionSettings = {
   source: "lastOptimization",
   modeKeys: [],
-  stretchMin: 1,
-  stretchMax: 3.5,
-  samples: 72,
-  stressOutput: "First PK",
   manualEdits: false,
 }
 
@@ -1099,14 +1095,17 @@ function PredictionPage({
     () => buildPredictionSeries(preview, parameterRows, settings, overrides, optimization, authorModes),
     [preview, parameterRows, settings, overrides, optimization, authorModes],
   )
-  const peakStress = prediction.curve.reduce((max, point) => Math.max(max, point.y), 0)
-  const maxExperimentalX = prediction.experimental.reduce((max, point) => Math.max(max, point.x), 0)
-  const extrapolation = Math.max(0, Number(settings.stretchMax) - maxExperimentalX)
+  const allPredictionPoints = [...prediction.experimental, ...prediction.curve]
+  const xs = allPredictionPoints.map((point) => point.x)
+  const peakStress = allPredictionPoints.reduce((max, point) => Math.max(max, point.y), 0)
+  const stretchRange = xs.length ? `${Math.min(...xs).toFixed(2)}-${Math.max(...xs).toFixed(2)}` : "-"
+  const dataPointCount = prediction.experimental.length
+  const stressOutput = preview.metadata?.stressType ?? "From dataset"
   const metrics = [
     ["Peak stress", `${peakStress.toFixed(3)} MPa`],
-    ["Stretch range", `${Number(settings.stretchMin).toFixed(2)}-${Number(settings.stretchMax).toFixed(2)}`],
-    ["Samples", settings.samples],
-    ["Extrapolation", `${extrapolation.toFixed(2)} λ`],
+    ["Data range", stretchRange],
+    ["Data points", dataPointCount],
+    ["Stress output", stressOutput],
     ["Status", settings.manualEdits ? "Manual edits" : "Ready"],
   ]
 
@@ -1168,17 +1167,14 @@ function PredictionPage({
               </div>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <SolverNumber label="Stretch Min" value={settings.stretchMin} step="0.05" onChange={(value) => onSettingChange("stretchMin", value)} />
-              <SolverNumber label="Stretch Max" value={settings.stretchMax} step="0.05" onChange={(value) => onSettingChange("stretchMax", value)} />
-              <SolverNumber label="Samples" value={settings.samples} step="1" onChange={(value) => onSettingChange("samples", value)} />
-              <label className="block">
+              <div className="rounded-lg border border-border bg-subtle p-2">
+                <Label>Data Points</Label>
+                <div className="text-sm font-semibold">{dataPointCount}</div>
+              </div>
+              <div className="rounded-lg border border-border bg-subtle p-2">
                 <Label>Stress Output</Label>
-                <select className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary" value={settings.stressOutput} onChange={(event) => onSettingChange("stressOutput", event.target.value)}>
-                  <option>First PK</option>
-                  <option>Cauchy</option>
-                  <option>Engineering</option>
-                </select>
-              </label>
+                <div className="text-sm font-semibold">{stressOutput}</div>
+              </div>
             </div>
           </Card>
 
@@ -1245,7 +1241,7 @@ function PredictionPage({
         <div className="flex min-w-0 flex-col gap-4">
           <Card title="Prediction Plot">
             <div className="min-h-[540px]">
-              <PredictionChart prediction={prediction} settings={settings} preview={preview} />
+              <PredictionChart prediction={prediction} preview={preview} />
             </div>
           </Card>
 
@@ -1269,7 +1265,7 @@ function PredictionPage({
   )
 }
 
-function PredictionChart({ prediction, settings, preview }) {
+function PredictionChart({ prediction, preview }) {
   const points = [...prediction.experimental, ...prediction.curve]
   const width = 760
   const height = 500
@@ -1283,14 +1279,12 @@ function PredictionChart({ prediction, settings, preview }) {
   const xScale = (x) => pad.left + ((x - minX) / Math.max(maxX - minX, 1e-6)) * (width - pad.left - pad.right)
   const yScale = (y) => height - pad.bottom - ((y - minY) / Math.max(maxY - minY, 1e-6)) * (height - pad.top - pad.bottom)
   const curvePath = prediction.curve.map((point, index) => `${index === 0 ? "M" : "L"} ${xScale(point.x)} ${yScale(point.y)}`).join(" ")
-  const experimentalMaxX = prediction.experimental.reduce((max, point) => Math.max(max, point.x), minX)
-  const extrapolationX = xScale(experimentalMaxX)
+  const yAxisLabel = preview.axes?.y ?? `${preview.metadata?.stressType ?? "Stress"} (MPa)`
 
   return (
     <div className="relative h-full min-h-[540px] rounded-lg border border-border bg-white">
       <svg className="absolute inset-0 h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Prediction chart">
         <rect width={width} height={height} fill="#FFFFFF" />
-        <rect x={extrapolationX} y={pad.top} width={width - pad.right - extrapolationX} height={height - pad.top - pad.bottom} fill="#EAF3FF" opacity="0.7" />
         {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
           const x = pad.left + tick * (width - pad.left - pad.right)
           const y = pad.top + tick * (height - pad.top - pad.bottom)
@@ -1303,7 +1297,7 @@ function PredictionChart({ prediction, settings, preview }) {
         })}
         <line x1={pad.left} x2={width - pad.right} y1={height - pad.bottom} y2={height - pad.bottom} stroke="#D1D1D6" />
         <line x1={pad.left} x2={pad.left} y1={pad.top} y2={height - pad.bottom} stroke="#D1D1D6" />
-        <path d={curvePath} fill="none" stroke="#007AFF" strokeWidth="3" />
+        {curvePath && <path d={curvePath} fill="none" stroke="#007AFF" strokeWidth="3" />}
         {prediction.experimental.map((point, index) => (
           <circle key={`${point.x}-${point.y}-${index}`} cx={xScale(point.x)} cy={yScale(point.y)} r="4" fill="#FFFFFF" stroke={colorForSeries(point.family, 0)} strokeWidth="2" />
         ))}
@@ -1311,7 +1305,7 @@ function PredictionChart({ prediction, settings, preview }) {
           Stretch lambda (-)
         </text>
         <text x="18" y={height / 2} textAnchor="middle" fontSize="12" fill="#6E6E73" transform={`rotate(-90 18 ${height / 2})`}>
-          {settings.stressOutput} Stress (MPa)
+          {yAxisLabel}
         </text>
       </svg>
       <div className="absolute left-3 top-3 rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
@@ -1321,7 +1315,6 @@ function PredictionChart({ prediction, settings, preview }) {
       <div className="absolute bottom-3 right-3 rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
         <div className="flex items-center gap-2"><span className="h-2 w-5 rounded-full bg-primary" /> Prediction curve</div>
         <div className="mt-1 flex items-center gap-2"><span className="h-3 w-3 rounded-full border-2 border-primary bg-white" /> Calibration data</div>
-        <div className="mt-1 flex items-center gap-2"><span className="h-3 w-5 rounded-sm bg-selection-bg" /> Extrapolation</div>
       </div>
     </div>
   )
@@ -1331,7 +1324,7 @@ function buildPredictionSeries(preview, parameterRows, settings, overrides, opti
   const series = preview.series?.length
     ? preview.series
     : [{ modeFamily: "UT", modeLabel: "Experimental", points: preview.points ?? [] }]
-  const experimental = series.flatMap((item) => (item.points ?? []).map((point) => ({ ...point, family: item.modeFamily })))
+  const experimental = series.flatMap((item) => (item.points ?? []).map((point) => ({ ...point, family: item.modeFamily, label: item.modeLabel })))
   const values = parameterRows.map((row, index) => {
     const override = overrides[row.key]
     const value = settings.manualEdits && override !== "" && override !== undefined ? override : row.value
@@ -1340,10 +1333,7 @@ function buildPredictionSeries(preview, parameterRows, settings, overrides, opti
   })
   const parameterScale = values.reduce((sum, value) => sum + value, 0)
   const sourceBoost = settings.source === "manualOverride" ? 1.08 : 1 + optimization.progress / 700
-  const stiffness = Math.max(0.28, Math.min(3.6, (0.72 + parameterScale * 0.035) * sourceBoost))
-  const min = Number(settings.stretchMin) || 1
-  const max = Math.max(min + 0.05, Number(settings.stretchMax) || 3.5)
-  const sampleCount = Math.max(12, Math.min(240, Number(settings.samples) || 72))
+  const parameterEffect = Math.max(0.75, Math.min(1.35, (0.92 + parameterScale * 0.01) * sourceBoost))
   const modeFactors = {
     CSS: 0.88,
     UT: 1,
@@ -1353,19 +1343,30 @@ function buildPredictionSeries(preview, parameterRows, settings, overrides, opti
     SS: 0.76,
     BT: 1.24,
   }
-  const selectedFamilies = (settings.modeKeys ?? [])
+  const xs = experimental.map((point) => point.x)
+  const minX = xs.length ? Math.min(...xs) : 1
+  const maxX = xs.length ? Math.max(...xs) : 3
+  const domain = Math.max(maxX - minX, 1e-6)
+  const maxExperimentalY = Math.max(...experimental.map((point) => Math.abs(point.y)), 1)
+  const familyNormalizer = (settings.modeKeys ?? [])
     .map((key) => authorModes.find((item) => item.key === key)?.family)
     .filter(Boolean)
-  const modeFactor = selectedFamilies.length
-    ? selectedFamilies.reduce((sum, family) => sum + (modeFactors[family] ?? 1), 0) / selectedFamilies.length
+    .map((family) => modeFactors[family] ?? 1)
+  const averageFamilyFactor = familyNormalizer.length
+    ? familyNormalizer.reduce((sum, value) => sum + value, 0) / familyNormalizer.length
     : 1
-  const curve = Array.from({ length: sampleCount }, (_, index) => {
-    const t = sampleCount === 1 ? 0 : index / (sampleCount - 1)
-    const lambda = min + t * (max - min)
-    const strain = Math.max(0, lambda - 1)
-    const y = stiffness * modeFactor * strain * (1 + 0.52 * strain * strain)
-    return { x: lambda, y }
-  })
+  const curve = experimental
+    .map((point) => {
+      const t = Math.max(0, Math.min(1, (point.x - minX) / domain))
+      const shape = t * (0.58 + 0.42 * t * t)
+      const familyFactor = (modeFactors[point.family] ?? 1) / averageFamilyFactor
+      return {
+        x: point.x,
+        y: maxExperimentalY * shape * parameterEffect * familyFactor,
+        family: point.family,
+      }
+    })
+    .sort((a, b) => a.x - b.x)
   return { experimental, curve }
 }
 
