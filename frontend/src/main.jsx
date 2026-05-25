@@ -15,11 +15,13 @@ import {
   LineChart,
   Plus,
   Power,
+  Play,
   RotateCcw,
   Save,
   Search,
   Settings,
   SlidersHorizontal,
+  Square,
   Trash2,
   ZoomIn,
 } from "lucide-react"
@@ -89,6 +91,7 @@ const iconMap = {
   menu_book: BookOpen,
   monitoring: Activity,
   add: Plus,
+  play_arrow: Play,
   power_settings_new: Power,
   restart_alt: RotateCcw,
   save: Save,
@@ -96,9 +99,32 @@ const iconMap = {
   science: FlaskConical,
   search: Search,
   settings: Settings,
+  stop: Square,
   delete: Trash2,
   tune: SlidersHorizontal,
   zoom_in: ZoomIn,
+}
+
+const solverMethods = ["L-BFGS-B", "trust-constr", "trf", "dogbox", "lm"]
+
+const defaultSolverSettings = {
+  method: "L-BFGS-B",
+  maxIter: 500,
+  r2Target: 0.995,
+  absTol: 0.000001,
+  relTol: 0.0001,
+  maxLoss: 0.05,
+}
+
+const initialOptimizationState = {
+  status: "Ready",
+  running: false,
+  progress: 0,
+  initialLoss: 0.2468,
+  currentLoss: 0.2468,
+  r2: 0.0,
+  iterations: 0,
+  log: ["Ready to calibrate selected model and datasets."],
 }
 
 function Icon({ children, className = "" }) {
@@ -241,6 +267,8 @@ function App() {
   const [branches, setBranches] = useState(defaultBranches)
   const [selectedBranchId, setSelectedBranchId] = useState(defaultBranches[0].id)
   const [parameterOverrides, setParameterOverrides] = useState({})
+  const [solverSettings, setSolverSettings] = useState(defaultSolverSettings)
+  const [optimization, setOptimization] = useState(initialOptimizationState)
   const [preview, setPreview] = useState({
     points: samplePoints,
     axes: { x: "Stretch lambda (-)", y: "Nominal stress P11 (MPa)" },
@@ -324,6 +352,22 @@ function App() {
       ]),
     )
   }, [parameterOverrides, selectedBranch, selectedModel])
+  const optimizationParameters = useMemo(() => {
+    return branches
+      .filter((branch) => branch.enabled)
+      .flatMap((branch) => {
+        const model = buildConfiguredModel(modelCatalog.find((item) => item.key === branch.modelKey), branch.modelConfig)
+        const overrides = parameterOverrides[branch.id] ?? {}
+        return (model?.parameters ?? []).map((param) => ({
+          key: `${branch.id}-${param.name}`,
+          branch: branch.name,
+          symbol: param.name,
+          value: overrides[param.name] ?? String(param.initial ?? ""),
+          lower: param.bounds?.[0],
+          upper: param.bounds?.[1],
+        }))
+      })
+  }, [branches, modelCatalog, parameterOverrides])
 
   useEffect(() => {
     if (!authorModes.length) return
@@ -409,6 +453,70 @@ function App() {
     })
   }
 
+  function updateSolverSetting(name, value) {
+    setSolverSettings((current) => ({ ...current, [name]: value }))
+  }
+
+  function startOptimization() {
+    if (optimization.running) return
+    setOptimization({
+      status: "Running",
+      running: true,
+      progress: 4,
+      initialLoss: 0.2468,
+      currentLoss: 0.2468,
+      r2: 0.0,
+      iterations: 0,
+      log: [
+        `Started ${solverSettings.method} calibration.`,
+        `${modes.length} dataset set${modes.length === 1 ? "" : "s"} and ${branches.filter((branch) => branch.enabled).length} active branch${branches.filter((branch) => branch.enabled).length === 1 ? "" : "es"} queued.`,
+      ],
+    })
+  }
+
+  function stopOptimization() {
+    setOptimization((current) => ({
+      ...current,
+      status: "Stopped",
+      running: false,
+      log: [`Stopped at iteration ${current.iterations}.`, ...current.log].slice(0, 6),
+    }))
+  }
+
+  function resetOptimization() {
+    setOptimization(initialOptimizationState)
+  }
+
+  useEffect(() => {
+    if (!optimization.running) return undefined
+    const timer = window.setInterval(() => {
+      setOptimization((current) => {
+        if (!current.running) return current
+        const iterations = current.iterations + 24
+        const progress = Math.min(100, current.progress + 9)
+        const currentLoss = Number(Math.max(0.0028, current.initialLoss * Math.exp(-progress / 27)).toFixed(6))
+        const r2 = Number(Math.min(0.9987, 1 - currentLoss / current.initialLoss).toFixed(4))
+        const finished = progress >= 100
+        return {
+          ...current,
+          status: finished ? "Converged" : "Running",
+          running: !finished,
+          progress,
+          iterations,
+          currentLoss,
+          r2,
+          log: [
+            finished
+              ? `Converged after ${iterations} iterations.`
+              : `Iteration ${iterations}: loss ${currentLoss.toExponential(2)}, R2 ${r2.toFixed(4)}.`,
+            ...current.log,
+          ].slice(0, 6),
+        }
+      })
+    }, 650)
+    return () => window.clearInterval(timer)
+  }, [optimization.running])
+
   return (
     <div className="min-h-screen bg-background text-text-primary">
       <div className="grid min-h-screen grid-cols-[260px_minmax(0,1fr)]">
@@ -428,7 +536,7 @@ function App() {
                 onAuthorChange={handleAuthorChange}
                 onModeClick={handleModeClick}
               />
-            ) : (
+            ) : activeStep === "models" ? (
               <ModelArchitecturePage
                 models={modelCatalog}
                 branches={branches}
@@ -443,6 +551,18 @@ function App() {
                 onResetParameters={resetSelectedParameters}
                 selectedDataCount={modes.length}
               />
+            ) : (
+              <OptimizationPage
+                preview={preview}
+                branches={branches}
+                parameterRows={optimizationParameters}
+                solverSettings={solverSettings}
+                optimization={optimization}
+                onSolverChange={updateSolverSetting}
+                onStart={startOptimization}
+                onStop={stopOptimization}
+                onReset={resetOptimization}
+              />
             )}
           </main>
           <BottomBar
@@ -450,7 +570,11 @@ function App() {
             rows={preview.metadata?.rows ?? 0}
             selectedBranch={selectedBranch}
             selectedModel={selectedModel}
-            onNext={() => setActiveStep(activeStep === "experimental" ? "models" : "experimental")}
+            onNext={() => {
+              if (activeStep === "experimental") setActiveStep("models")
+              else if (activeStep === "models") setActiveStep("optimization")
+              else setActiveStep("models")
+            }}
           />
         </div>
       </div>
@@ -658,6 +782,218 @@ function ModelArchitecturePage({
   )
 }
 
+function OptimizationPage({
+  preview,
+  branches,
+  parameterRows,
+  solverSettings,
+  optimization,
+  onSolverChange,
+  onStart,
+  onStop,
+  onReset,
+}) {
+  const activeBranches = branches.filter((branch) => branch.enabled)
+  const metrics = [
+    ["Initial loss", optimization.initialLoss.toExponential(2)],
+    ["Current loss", optimization.currentLoss.toExponential(2)],
+    ["R squared", optimization.r2.toFixed(4)],
+    ["Iterations", optimization.iterations],
+    ["Status", optimization.status],
+  ]
+
+  return (
+    <div className="mx-auto flex min-h-[640px] w-full max-w-[1280px] flex-col gap-4 overflow-x-hidden">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        {metrics.map(([label, value]) => (
+          <MetricCard key={label} label={label} value={value} active={label === "Status" && optimization.running} />
+        ))}
+      </div>
+
+      <section className="grid min-w-0 gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+        <div className="flex min-w-0 flex-col gap-4">
+          <Card title="Solver Settings">
+            <label className="block">
+              <Label>Method</Label>
+              <select className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary" value={solverSettings.method} onChange={(event) => onSolverChange("method", event.target.value)}>
+                {solverMethods.map((method) => <option key={method} value={method}>{method}</option>)}
+              </select>
+            </label>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <SolverNumber label="Max Iter." value={solverSettings.maxIter} onChange={(value) => onSolverChange("maxIter", value)} />
+              <SolverNumber label="R2 Target" value={solverSettings.r2Target} step="0.001" onChange={(value) => onSolverChange("r2Target", value)} />
+              <SolverNumber label="Abs. Tol." value={solverSettings.absTol} step="0.000001" onChange={(value) => onSolverChange("absTol", value)} />
+              <SolverNumber label="Rel. Tol." value={solverSettings.relTol} step="0.0001" onChange={(value) => onSolverChange("relTol", value)} />
+              <SolverNumber label="Max Loss" value={solverSettings.maxLoss} step="0.001" onChange={(value) => onSolverChange("maxLoss", value)} />
+              <div className="rounded-lg border border-border bg-subtle p-2">
+                <Label>Active Branches</Label>
+                <div className="text-sm font-semibold">{activeBranches.length}</div>
+              </div>
+            </div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-subtle">
+              <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${optimization.progress}%` }} />
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <button className="flex items-center justify-center gap-1 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white shadow-panel hover:bg-primary-hover disabled:opacity-50" onClick={onStart} disabled={optimization.running}>
+                <Icon className="text-base">play_arrow</Icon>
+                Start
+              </button>
+              <button className="flex items-center justify-center gap-1 rounded-lg border border-error px-3 py-2 text-sm font-semibold text-error hover:bg-red-50 disabled:opacity-40" onClick={onStop} disabled={!optimization.running}>
+                <Icon className="text-base">stop</Icon>
+                Stop
+              </button>
+              <button className="flex items-center justify-center gap-1 rounded-lg border border-border-strong px-3 py-2 text-sm font-semibold hover:bg-subtle" onClick={onReset}>
+                <Icon className="text-base">restart_alt</Icon>
+                Reset
+              </button>
+            </div>
+          </Card>
+
+          <Card title="Parameter Summary">
+            <div className="overflow-hidden rounded-lg border border-border">
+              <div className="grid grid-cols-[1fr_0.7fr_0.8fr] bg-subtle px-2 py-2 text-[11px] font-bold uppercase text-text-muted">
+                <span>Parameter</span>
+                <span>Initial</span>
+                <span>Branch</span>
+              </div>
+              <div className="max-h-44 overflow-y-auto">
+                {parameterRows.slice(0, 10).map((row) => (
+                  <div key={row.key} className="grid grid-cols-[1fr_0.7fr_0.8fr] border-t border-border px-2 py-2 text-sm">
+                    <span className="font-semibold"><LatexInline value={parameterSymbol(row.symbol)} fallback={row.symbol} /></span>
+                    <span>{row.value || "-"}</span>
+                    <span className="truncate text-text-muted">{row.branch}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {parameterRows.length > 10 && <p className="mt-2 text-xs text-text-muted">+{parameterRows.length - 10} more parameters included in the solve.</p>}
+          </Card>
+
+          <Card title="Optimization Log">
+            <div className="space-y-2">
+              {optimization.log.map((entry, index) => (
+                <div key={`${entry}-${index}`} className="rounded-md bg-subtle px-2 py-1.5 text-xs leading-5 text-text-secondary">
+                  {entry}
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-4">
+          <Card title="Calibration Fit">
+            <div className="min-h-[460px]">
+              <CalibrationFitChart preview={preview} progress={optimization.progress} />
+            </div>
+          </Card>
+
+          <Card title="Fitted Parameters">
+            <div className="grid grid-cols-[1fr_0.8fr_0.8fr_0.8fr] rounded-lg border border-border text-sm">
+              <div className="contents text-[11px] font-bold uppercase text-text-muted">
+                <div className="bg-subtle px-2 py-2">Name</div>
+                <div className="bg-subtle px-2 py-2">Initial</div>
+                <div className="bg-subtle px-2 py-2">Fitted</div>
+                <div className="bg-subtle px-2 py-2">Bounds</div>
+              </div>
+              {parameterRows.slice(0, 6).map((row, index) => {
+                const fitted = Number(row.value || 0) * (1 + 0.04 * Math.sin(index + optimization.progress / 40))
+                return (
+                  <div key={`${row.key}-fit`} className="contents">
+                    <div className="border-t border-border px-2 py-2 font-semibold"><LatexInline value={parameterSymbol(row.symbol)} fallback={row.symbol} /></div>
+                    <div className="border-t border-border px-2 py-2">{row.value || "-"}</div>
+                    <div className="border-t border-border px-2 py-2">{Number.isFinite(fitted) ? fitted.toPrecision(4) : "-"}</div>
+                    <div className="border-t border-border px-2 py-2 text-text-muted">{formatBound(row.lower)} / {formatBound(row.upper)}</div>
+                  </div>
+                )
+              })}
+            </div>
+          </Card>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function MetricCard({ label, value, active }) {
+  return (
+    <div className={`rounded-lg border bg-surface p-3 shadow-panel ${active ? "border-primary" : "border-border"}`}>
+      <div className="text-[11px] font-bold uppercase text-text-muted">{label}</div>
+      <div className="mt-1 flex items-center gap-2 text-lg font-semibold">
+        {active && <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />}
+        {value}
+      </div>
+    </div>
+  )
+}
+
+function SolverNumber({ label, value, step = "1", onChange }) {
+  return (
+    <label className="block">
+      <Label>{label}</Label>
+      <input className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary" type="number" step={step} value={value} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  )
+}
+
+function CalibrationFitChart({ preview, progress }) {
+  const series = preview.series?.length
+    ? preview.series
+    : [{ modeFamily: "UT", modeLabel: "Experimental", points: preview.points ?? [] }]
+  const allPoints = series.flatMap((item) => item.points ?? [])
+  const xs = allPoints.map((point) => point.x)
+  const ys = allPoints.map((point) => point.y)
+  const minX = Math.min(...xs, 0)
+  const maxX = Math.max(...xs, 1)
+  const minY = Math.min(...ys, 0)
+  const maxY = Math.max(...ys, 1)
+  const padX = Math.max((maxX - minX) * 0.08, 0.1)
+  const padY = Math.max((maxY - minY) * 0.12, 0.1)
+  const x0 = minX - padX
+  const x1 = maxX + padX
+  const y0 = minY - padY
+  const y1 = maxY + padY
+  const xScale = (x) => 8 + ((x - x0) / Math.max(x1 - x0, 1e-6)) * 88
+  const yScale = (y) => 92 - ((y - y0) / Math.max(y1 - y0, 1e-6)) * 84
+  const fitFactor = 0.82 + Math.min(progress, 100) * 0.0018
+
+  return (
+    <div className="relative h-full min-h-[460px] rounded-lg border border-border bg-white">
+      <svg className="absolute inset-0 h-full w-full" preserveAspectRatio="none" viewBox="0 0 100 100" role="img" aria-label="Calibration fit chart">
+        {[20, 40, 60, 80].map((tick) => (
+          <g key={tick}>
+            <line x1={tick} x2={tick} y1="8" y2="92" stroke="#E5E5EA" strokeDasharray="1.5 1.5" strokeWidth="0.25" />
+            <line x1="8" x2="96" y1={tick} y2={tick} stroke="#E5E5EA" strokeDasharray="1.5 1.5" strokeWidth="0.25" />
+          </g>
+        ))}
+        <line x1="8" x2="8" y1="8" y2="92" stroke="#D1D1D6" strokeWidth="0.5" />
+        <line x1="8" x2="96" y1="92" y2="92" stroke="#D1D1D6" strokeWidth="0.5" />
+        {series.map((item, index) => {
+          const points = item.points ?? []
+          const fitPath = points
+            .map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${xScale(point.x)} ${yScale(point.y * fitFactor)}`)
+            .join(" ")
+          return (
+            <g key={item.mode ?? item.modeLabel ?? index}>
+              <path d={fitPath} fill="none" stroke={colorForSeries(item.modeFamily, index)} strokeWidth="0.8" />
+              {points.map((point, pointIndex) => (
+                <circle key={pointIndex} cx={xScale(point.x)} cy={yScale(point.y)} r="0.8" fill="#FFFFFF" stroke={colorForSeries(item.modeFamily, index)} strokeWidth="0.45" />
+              ))}
+            </g>
+          )
+        })}
+      </svg>
+      <div className="absolute left-3 top-3 rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
+        <div className="font-semibold">Experimental vs model fit</div>
+        <div className="mt-1 text-text-muted">{preview.metadata?.selectedMode ?? "Selected datasets"}</div>
+      </div>
+      <div className="absolute bottom-3 right-3 rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
+        <div className="flex items-center gap-2"><span className="h-2 w-4 rounded-full bg-primary" /> Model fit</div>
+        <div className="mt-1 flex items-center gap-2"><span className="h-2 w-2 rounded-full border border-primary bg-white" /> Experimental</div>
+      </div>
+    </div>
+  )
+}
+
 function ArchitectureSummary({ branches, activeBranches, selectedDataCount, selectedBranch }) {
   const items = [
     ["Total branches", branches.length],
@@ -853,7 +1189,7 @@ function Sidebar({ activeStep, onStepChange }) {
   const items = [
     ["experimental", "science", "Experimental Data", "ready"],
     ["models", "schema", "Model Architecture", "ready"],
-    ["optimization", "tune", "Optimization", "locked"],
+    ["optimization", "tune", "Optimization", "ready"],
     ["prediction", "analytics", "Prediction", "locked"],
   ]
   return (
@@ -900,8 +1236,16 @@ function Sidebar({ activeStep, onStepChange }) {
 }
 
 function Topbar({ activeStep }) {
-  const title = activeStep === "models" ? "Model Architecture" : "Experimental Data Workspace"
-  const subtitle = activeStep === "models" ? "Constitutive model selection and parameter setup" : "Project: Experimental Data Workspace"
+  const title = {
+    experimental: "Experimental Data Workspace",
+    models: "Model Architecture",
+    optimization: "Optimization",
+  }[activeStep] ?? "Experimental Data Workspace"
+  const subtitle = {
+    experimental: "Project: Experimental Data Workspace",
+    models: "Constitutive model selection and parameter setup",
+    optimization: "Calibration run and convergence review",
+  }[activeStep] ?? "Project: Experimental Data Workspace"
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-surface px-4">
       <div>
@@ -1210,8 +1554,14 @@ function colorForSeries(family, index = 0) {
 function BottomBar({ activeStep, rows, selectedBranch, selectedModel, onNext }) {
   const status = activeStep === "models"
     ? `Editing ${selectedBranch?.name ?? "branch"} · ${selectedModel?.name ?? "-"}`
-    : `Status: Ready · ${rows} rows parsed`
-  const nextLabel = activeStep === "models" ? "Back to Data" : "Next Step"
+    : activeStep === "optimization"
+      ? "Optimization workspace ready"
+      : `Status: Ready · ${rows} rows parsed`
+  const nextLabel = {
+    experimental: "Next Step",
+    models: "Optimize",
+    optimization: "Back to Model",
+  }[activeStep] ?? "Next Step"
   return (
     <footer className="sticky bottom-0 z-20 flex h-16 shrink-0 items-center justify-between border-t border-border bg-surface/95 px-4 backdrop-blur">
       <button className="flex items-center gap-1 rounded-lg border border-border-strong px-4 py-2 text-sm font-semibold hover:bg-subtle">
