@@ -272,7 +272,11 @@ def _prediction_curves(h5, author: str, modes: list[str], solver: Kinematics, pa
                 else solver.get_1st_PK_stress(F, params)
             )
             components = get_stress_components(stress_tensor, family)
-            model_points.append({"x": float(x), "y": float(components[0])})
+            point = {"x": float(x), "y": float(components[0])}
+            if len(components) > 1:
+                point["x2"] = float(lam2 if family == "BT" else x)
+                point["y2"] = float(components[1])
+            model_points.append(point)
 
         curves.append(
             {

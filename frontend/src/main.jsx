@@ -1346,25 +1346,73 @@ function PredictionPage({
 }
 
 function PredictionChart({ prediction, preview }) {
-  const curvePoints = prediction.curves.flatMap((curve) => curve.points)
-  const points = [...prediction.experimental, ...curvePoints]
+  const hasSecondary = prediction.experimental.some((point) => point.x2 !== undefined && point.y2 !== undefined)
+    || prediction.curves.some((curve) => (curve.points ?? []).some((point) => point.x2 !== undefined && point.y2 !== undefined))
+  const primaryExperimental = prediction.experimental.map((point) => ({ ...point, plotX: point.x, plotY: point.y }))
+  const primaryCurves = prediction.curves.map((curve) => ({
+    ...curve,
+    points: (curve.points ?? []).map((point) => ({ ...point, plotX: point.x, plotY: point.y })),
+  }))
+  const secondaryExperimental = prediction.experimental
+    .filter((point) => point.x2 !== undefined && point.y2 !== undefined)
+    .map((point) => ({ ...point, plotX: point.x2, plotY: point.y2 }))
+  const secondaryCurves = prediction.curves.map((curve) => ({
+    ...curve,
+    points: (curve.points ?? [])
+      .filter((point) => point.x2 !== undefined && point.y2 !== undefined)
+      .map((point) => ({ ...point, plotX: point.x2, plotY: point.y2 })),
+  }))
+  return (
+    <div className={hasSecondary ? "grid h-full min-h-[540px] gap-3 xl:grid-cols-2" : "h-full min-h-[540px]"}>
+      <StressComponentChart
+        title={hasSecondary ? "Component P11" : "Prediction review"}
+        detail={preview.metadata?.selectedMode ?? "Selected datasets"}
+        experimental={primaryExperimental}
+        curves={primaryCurves}
+        xLabel={preview.axes?.x ?? "Stretch lambda_1 (-)"}
+        yLabel={preview.axes?.y ?? "Nominal stress P11"}
+        minHeight={hasSecondary ? 420 : 540}
+      />
+      {hasSecondary && (
+        <StressComponentChart
+          title="Component P22"
+          detail={secondaryDetail(prediction.curves)}
+          experimental={secondaryExperimental}
+          curves={secondaryCurves}
+          xLabel="Stretch lambda_2 (-)"
+          yLabel={secondaryStressLabel(preview)}
+          minHeight={420}
+        />
+      )}
+    </div>
+  )
+}
+
+function StressComponentChart({ title, detail, experimental, curves, xLabel, yLabel, minHeight = 460 }) {
+  const curvePoints = curves.flatMap((curve) => curve.points ?? [])
+  const points = [...experimental, ...curvePoints]
   const width = 760
   const height = 500
   const pad = { top: 34, right: 28, bottom: 60, left: 78 }
-  const xs = points.map((point) => point.x)
-  const ys = points.map((point) => point.y)
+  const xs = points.map((point) => point.plotX).filter((value) => Number.isFinite(value))
+  const ys = points.map((point) => point.plotY).filter((value) => Number.isFinite(value))
   const minX = Math.min(...xs, 1)
-  const maxX = Math.max(...xs, 3)
+  const maxX = Math.max(...xs, minX + 1)
   const minY = Math.min(...ys, 0)
-  const maxY = Math.max(...ys, 1)
-  const xScale = (x) => pad.left + ((x - minX) / Math.max(maxX - minX, 1e-6)) * (width - pad.left - pad.right)
-  const yScale = (y) => height - pad.bottom - ((y - minY) / Math.max(maxY - minY, 1e-6)) * (height - pad.top - pad.bottom)
-  const xAxisLabel = preview.axes?.x ?? "Stretch lambda (-)"
-  const yAxisLabel = preview.axes?.y ?? `${preview.metadata?.stressType ?? "Stress"} (MPa)`
+  const maxY = Math.max(...ys, minY + 1)
+  const xPad = Math.max((maxX - minX) * 0.06, 0.04)
+  const yPad = Math.max((maxY - minY) * 0.08, 0.04)
+  const x0 = minX - xPad
+  const x1 = maxX + xPad
+  const y0 = minY - yPad
+  const y1 = maxY + yPad
+  const xScale = (x) => pad.left + ((x - x0) / Math.max(x1 - x0, 1e-6)) * (width - pad.left - pad.right)
+  const yScale = (y) => height - pad.bottom - ((y - y0) / Math.max(y1 - y0, 1e-6)) * (height - pad.top - pad.bottom)
+  const legendColor = colorForSeries(curves[0]?.family ?? experimental[0]?.family, 0)
 
   return (
-    <div className="relative h-full min-h-[540px] rounded-lg border border-border bg-white">
-      <svg className="absolute inset-0 h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Prediction chart">
+    <div className="relative rounded-lg border border-border bg-white" style={{ minHeight }}>
+      <svg className="absolute inset-0 h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title} chart`}>
         <rect width={width} height={height} fill="#FFFFFF" />
         {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
           const x = pad.left + tick * (width - pad.left - pad.right)
@@ -1378,47 +1426,49 @@ function PredictionChart({ prediction, preview }) {
         })}
         <line x1={pad.left} x2={width - pad.right} y1={height - pad.bottom} y2={height - pad.bottom} stroke="#D1D1D6" />
         <line x1={pad.left} x2={pad.left} y1={pad.top} y2={height - pad.bottom} stroke="#D1D1D6" />
-        {prediction.curves.map((curve, index) => {
-          const curvePath = curve.points.map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${xScale(point.x)} ${yScale(point.y)}`).join(" ")
-          return curvePath ? (
-            <path key={curve.key} d={curvePath} fill="none" stroke={colorForSeries(curve.family, index)} strokeWidth="3" />
-          ) : null
+        {curves.map((curve, index) => {
+          const curvePath = (curve.points ?? []).map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${xScale(point.plotX)} ${yScale(point.plotY)}`).join(" ")
+          return curvePath ? <path key={curve.key} d={curvePath} fill="none" stroke={colorForSeries(curve.family, index)} strokeWidth="3" /> : null
         })}
-        {prediction.experimental.map((point, index) => (
-          <circle key={`${point.seriesKey}-${point.x}-${point.y}-${index}`} cx={xScale(point.x)} cy={yScale(point.y)} r="4" fill="#FFFFFF" stroke={colorForSeries(point.family, point.seriesIndex ?? 0)} strokeWidth="2" />
+        {experimental.map((point, index) => (
+          <circle key={`${point.seriesKey}-${point.plotX}-${point.plotY}-${index}`} cx={xScale(point.plotX)} cy={yScale(point.plotY)} r="4" fill="#FFFFFF" stroke={colorForSeries(point.family, point.seriesIndex ?? 0)} strokeWidth="2" />
         ))}
         <text x={width / 2} y={height - 18} textAnchor="middle" fontSize="12" fill="#6E6E73">
-          {xAxisLabel}
+          {xLabel}
         </text>
         <text x="18" y={height / 2} textAnchor="middle" fontSize="12" fill="#6E6E73" transform={`rotate(-90 18 ${height / 2})`}>
-          {yAxisLabel}
+          {yLabel}
         </text>
       </svg>
-      <div className="absolute left-3 top-3 rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
-        <div className="font-semibold">Prediction review</div>
-        <div className="mt-1 text-text-muted">{preview.metadata?.selectedMode ?? "Selected datasets"}</div>
-        {prediction.curves.some((curve) => curve.fixedStretch !== null && curve.fixedStretch !== undefined) && (
-          <div className="mt-1 text-text-muted">
-            {prediction.curves
-              .filter((curve) => curve.fixedStretch !== null && curve.fixedStretch !== undefined)
-              .slice(0, 2)
-              .map((curve) => `${curve.fixedStretchLabel ?? "fixed"}=${Number(curve.fixedStretch).toFixed(2)}`)
-              .join(" · ")}
-          </div>
-        )}
+      <div className="absolute left-3 top-3 max-w-[70%] rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
+        <div className="font-semibold">{title}</div>
+        <div className="mt-1 truncate text-text-muted">{detail}</div>
       </div>
       <div className="absolute bottom-3 right-3 rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
         <div className="flex items-center gap-2">
-          <span className="h-2 w-5 rounded-full" style={{ backgroundColor: colorForSeries(prediction.curves[0]?.family, 0) }} />
+          <span className="h-2 w-5 rounded-full" style={{ backgroundColor: legendColor }} />
           Prediction curve
         </div>
         <div className="mt-1 flex items-center gap-2">
-          <span className="h-3 w-3 rounded-full border-2 bg-white" style={{ borderColor: colorForSeries(prediction.curves[0]?.family, 0) }} />
+          <span className="h-3 w-3 rounded-full border-2 bg-white" style={{ borderColor: legendColor }} />
           Experimental data
         </div>
       </div>
     </div>
   )
+}
+
+function secondaryStressLabel(preview) {
+  return preview.metadata?.stressType === "Cauchy" ? "Cauchy stress sigma22" : "Nominal stress P22"
+}
+
+function secondaryDetail(curves) {
+  const fixed = curves
+    .filter((curve) => curve.fixedStretch !== null && curve.fixedStretch !== undefined)
+    .slice(0, 2)
+    .map((curve) => `${curve.fixedStretchLabel ?? "fixed"}=${Number(curve.fixedStretch).toFixed(2)}`)
+    .join(" · ")
+  return fixed || "Second biaxial component"
 }
 
 function buildPredictionSeries(preview, parameterRows, settings, overrides, optimization, authorModes) {
@@ -1478,17 +1528,26 @@ function buildPredictionSeries(preview, parameterRows, settings, overrides, opti
     : 1
   const curves = series.map((item, seriesIndex) => {
     const sourcePoints = (item.points ?? [])
-      .map((point) => ({ x: Number(point.x), y: Number(point.y) }))
+      .map((point) => ({ x: Number(point.x), y: Number(point.y), x2: Number(point.x2), y2: Number(point.y2) }))
       .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
       .sort((a, b) => a.x - b.x)
+    const secondarySourcePoints = sourcePoints
+      .filter((point) => Number.isFinite(point.x2) && Number.isFinite(point.y2))
+      .map((point) => ({ x: point.x2, y: point.y2 }))
+      .sort((a, b) => a.x - b.x)
     const familyFactor = (modeFactors[item.modeFamily] ?? 1) / averageFamilyFactor
+    const primaryPoints = buildSmoothPredictionCurve(sourcePoints, parameterEffect * familyFactor)
+    const secondaryPoints = buildSmoothPredictionCurve(secondarySourcePoints, parameterEffect * familyFactor)
     return {
       key: item.mode ?? `${item.modeFamily}-${seriesIndex}`,
       family: item.modeFamily,
       label: item.modeLabel,
       fixedStretch: item.fixedStretch,
       fixedStretchLabel: item.fixedStretchLabel,
-      points: buildSmoothPredictionCurve(sourcePoints, parameterEffect * familyFactor),
+      points: primaryPoints.map((point, index) => ({
+        ...point,
+        ...(secondaryPoints[index] ? { x2: secondaryPoints[index].x, y2: secondaryPoints[index].y } : {}),
+      })),
     }
   })
   return { experimental, curves }
@@ -2060,23 +2119,52 @@ function ScientificChart({ preview, xLabel, yLabel, mode }) {
   const series = preview.series?.length
     ? preview.series
     : [{ modeFamily: mode.family, modeLabel: mode.label, points: preview.points ?? [] }]
+  const hasSecondary = series.some((item) => (item.points ?? []).some((point) => point.x2 !== undefined && point.y2 !== undefined))
+  const primarySeries = series.map((item) => ({
+    ...item,
+    points: (item.points ?? []).map((point) => ({ ...point, plotX: point.x, plotY: point.y })),
+  }))
+  const secondarySeries = series.map((item) => ({
+    ...item,
+    points: (item.points ?? [])
+      .filter((point) => point.x2 !== undefined && point.y2 !== undefined)
+      .map((point) => ({ ...point, plotX: point.x2, plotY: point.y2 })),
+  }))
+  return (
+    <div className={hasSecondary ? "grid h-full min-h-[460px] gap-3 xl:grid-cols-2" : "h-full min-h-[460px]"}>
+      <ExperimentalComponentChart series={primarySeries} xLabel={xLabel} yLabel={yLabel} title={hasSecondary ? "Component P11" : "Selected data"} />
+      {hasSecondary && (
+        <ExperimentalComponentChart
+          series={secondarySeries}
+          xLabel="Stretch lambda_2 (-)"
+          yLabel={secondaryStressLabel(preview)}
+          title="Component P22"
+        />
+      )}
+    </div>
+  )
+}
+
+function ExperimentalComponentChart({ series, xLabel, yLabel, title }) {
   const points = series.flatMap((item) => item.points ?? [])
   const width = 720
   const height = 460
   const pad = { top: 34, right: 28, bottom: 58, left: 78 }
-  const xs = points.map((point) => point.x)
-  const ys = points.map((point) => point.y)
+  const xs = points.map((point) => point.plotX).filter((value) => Number.isFinite(value))
+  const ys = points.map((point) => point.plotY).filter((value) => Number.isFinite(value))
   const minX = Math.min(...xs, 0)
-  const maxX = Math.max(...xs, 1)
+  const maxX = Math.max(...xs, minX + 1)
   const minY = Math.min(...ys, 0)
-  const maxY = Math.max(...ys, 1)
-  const scaleX = (x) => pad.left + ((x - minX) / Math.max(maxX - minX, 1e-6)) * (width - pad.left - pad.right)
-  const scaleY = (y) => height - pad.bottom - ((y - minY) / Math.max(maxY - minY, 1e-6)) * (height - pad.top - pad.bottom)
+  const maxY = Math.max(...ys, minY + 1)
+  const xPad = Math.max((maxX - minX) * 0.06, 0.04)
+  const yPad = Math.max((maxY - minY) * 0.08, 0.04)
+  const scaleX = (x) => pad.left + ((x - minX + xPad) / Math.max(maxX - minX + 2 * xPad, 1e-6)) * (width - pad.left - pad.right)
+  const scaleY = (y) => height - pad.bottom - ((y - minY + yPad) / Math.max(maxY - minY + 2 * yPad, 1e-6)) * (height - pad.top - pad.bottom)
   const ticks = [0, 0.25, 0.5, 0.75, 1]
   const legendItems = series.slice(0, 5)
 
   return (
-    <div className="relative h-full w-full">
+    <div className="relative h-full min-h-[420px] w-full rounded-lg border border-border bg-white">
       <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Experimental stress stretch chart">
         <rect x="0" y="0" width={width} height={height} fill="#FFFFFF" />
         {ticks.map((tick) => {
@@ -2095,13 +2183,13 @@ function ScientificChart({ preview, xLabel, yLabel, mode }) {
           const meta = modeOptions.find((option) => option.family === item.modeFamily) ?? modeOptions[seriesIndex % modeOptions.length]
           const color = colorForSeries(meta.family, seriesIndex)
           const seriesPath = (item.points ?? [])
-            .map((point, index) => `${index === 0 ? "M" : "L"} ${scaleX(point.x)} ${scaleY(point.y)}`)
+            .map((point, index) => `${index === 0 ? "M" : "L"} ${scaleX(point.plotX)} ${scaleY(point.plotY)}`)
             .join(" ")
           return (
             <g key={item.mode}>
               {seriesPath && <path d={seriesPath} fill="none" stroke={color} strokeWidth="2" opacity="0.42" />}
               {(item.points ?? []).map((point, index) => (
-                <circle key={`${item.mode}-${point.x}-${point.y}-${index}`} cx={scaleX(point.x)} cy={scaleY(point.y)} r="4" fill={color} stroke="#FFFFFF" strokeWidth="1.5" />
+                <circle key={`${item.mode}-${point.plotX}-${point.plotY}-${index}`} cx={scaleX(point.plotX)} cy={scaleY(point.plotY)} r="4" fill={color} stroke="#FFFFFF" strokeWidth="1.5" />
               ))}
             </g>
           )
@@ -2114,7 +2202,7 @@ function ScientificChart({ preview, xLabel, yLabel, mode }) {
         </text>
       </svg>
       <div className="absolute right-4 top-4 max-w-[280px] rounded-md border border-border-strong bg-white/95 px-2 py-1.5 text-xs shadow-panel">
-        <div className="mb-1 font-semibold text-text-primary">Selected data</div>
+        <div className="mb-1 font-semibold text-text-primary">{title}</div>
         <div className="flex max-h-28 flex-col gap-1 overflow-hidden">
           {legendItems.map((item, index) => (
             <div key={item.mode ?? item.modeLabel} className="flex min-w-0 items-center gap-2">
