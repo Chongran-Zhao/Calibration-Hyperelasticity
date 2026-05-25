@@ -56,3 +56,17 @@ select {
 .formula-block .katex {
   font-size: 1.02rem;
 }
+
+.formula-compact .katex-display {
+  margin: 0;
+  text-align: left;
+}
+
+.formula-compact .katex {
+  font-size: 0.68rem;
+  line-height: 1;
+}
+
+.formula-compact .base {
+  max-width: 100%;
+}

@@ -249,6 +249,36 @@ function subscriptStrainFormula(formula, termIndex) {
     .replace(/(^|[^A-Za-z\\])n(?![A-Za-z])/g, `$1n_{${termIndex}}`)
 }
 
+function enforceCalibrationSelection(keys, authorModes) {
+  return keys.filter((key) => authorModes.find((item) => item.key === key)?.family !== "BT")
+}
+
+function preferredPredictionKeys(authorModes, fittedKeys = []) {
+  const fittedSet = new Set(fittedKeys)
+  const biaxial = authorModes.filter((item) => item.family === "BT" && !fittedSet.has(item.key))
+  if (biaxial.length) return biaxial.map((item) => item.key)
+  return authorModes.filter((item) => !fittedSet.has(item.key)).slice(0, 1).map((item) => item.key)
+}
+
+function buddayRegionOptions(author, authorModes) {
+  if (author !== "Budday_2017") return []
+  const byKey = new Map()
+  authorModes.forEach((mode) => {
+    if (mode.tissueRegion && !byKey.has(mode.tissueRegion)) {
+      byKey.set(mode.tissueRegion, {
+        key: mode.tissueRegion,
+        label: mode.tissueRegionLabel ?? formatDisplayLabel(mode.tissueRegion),
+      })
+    }
+  })
+  return Array.from(byKey.values()).sort((left, right) => left.label.localeCompare(right.label))
+}
+
+function fittingModeOptions(author, authorModes, buddayRegion) {
+  if (author !== "Budday_2017" || !buddayRegion) return authorModes
+  return authorModes.filter((mode) => mode.tissueRegion === buddayRegion)
+}
+
 function hillParameters(model, terms) {
   const strainByKey = Object.fromEntries((model.configurable?.strains ?? []).map((strain) => [strain.key, strain]))
   return terms.flatMap((term, index) => {
@@ -269,6 +299,7 @@ function App() {
   const [datasets, setDatasets] = useState([])
   const [author, setAuthor] = useState("")
   const [modes, setModes] = useState([])
+  const [buddayRegion, setBuddayRegion] = useState("")
   const [modelCatalog, setModelCatalog] = useState([])
   const [branches, setBranches] = useState(defaultBranches)
   const [selectedBranchId, setSelectedBranchId] = useState(defaultBranches[0].id)
@@ -336,6 +367,8 @@ function App() {
 
   const authorRecord = useMemo(() => datasets.find((item) => item.author === author), [author, datasets])
   const authorModes = authorRecord?.modes ?? []
+  const buddayRegions = useMemo(() => buddayRegionOptions(author, authorModes), [author, authorModes])
+  const fittingModes = useMemo(() => fittingModeOptions(author, authorModes, buddayRegion), [author, authorModes, buddayRegion])
   const selectedModeRecords = useMemo(
     () => modes.map((key) => authorModes.find((item) => item.key === key)).filter(Boolean),
     [authorModes, modes],
@@ -390,20 +423,44 @@ function App() {
     const validKeys = new Set(authorModes.map((item) => item.key))
     const validSelection = modes.filter((key) => validKeys.has(key))
     if (!validSelection.length) {
-      const fallback = authorModes.find((item) => item.family === "UT") ?? authorModes[0]
+      const fallback = authorModes.find((item) => item.family === "UT") ?? authorModes.find((item) => item.family !== "BT") ?? authorModes[0]
       setModes([fallback.key])
       return
     }
-    if (validSelection.join("|") !== modes.join("|")) {
-      setModes(validSelection)
+    const consistentSelection = enforceCalibrationSelection(validSelection, authorModes)
+    if (!consistentSelection.length) {
+      const fallback = authorModes.find((item) => item.family === "UT") ?? authorModes.find((item) => item.family !== "BT") ?? authorModes[0]
+      setModes(fallback ? [fallback.key] : [])
+      return
+    }
+    if (consistentSelection.join("|") !== modes.join("|")) {
+      setModes(consistentSelection)
     }
   }, [author, authorModes, modes])
+
+  useEffect(() => {
+    if (author !== "Budday_2017") return
+    if (!buddayRegions.length) return
+    const nextRegion = buddayRegions.some((region) => region.key === buddayRegion)
+      ? buddayRegion
+      : buddayRegions[0].key
+    if (nextRegion !== buddayRegion) {
+      setBuddayRegion(nextRegion)
+      return
+    }
+    const regionModes = fittingModeOptions(author, authorModes, nextRegion).filter((mode) => mode.family !== "BT")
+    if (regionModes.length && !modes.every((key) => regionModes.some((mode) => mode.key === key))) {
+      const fallback = regionModes.find((mode) => mode.family === "UT") ?? regionModes[0]
+      setModes([fallback.key])
+    }
+  }, [author, authorModes, buddayRegion, buddayRegions, modes])
 
   useEffect(() => {
     if (!authorModes.length) return
     const validKeys = new Set(authorModes.map((item) => item.key))
     const currentKeys = (predictionSettings.modeKeys ?? []).filter((key) => validKeys.has(key))
-    const fallbackKeys = modes.filter((key) => validKeys.has(key))
+    const fitted = modes.filter((key) => validKeys.has(key))
+    const fallbackKeys = preferredPredictionKeys(authorModes, fitted)
     const nextKeys = currentKeys.length
       ? currentKeys
       : fallbackKeys.length
@@ -428,14 +485,33 @@ function App() {
   function handleAuthorChange(value) {
     setAuthor(value)
     const record = datasets.find((item) => item.author === value)
-    const fallback = record?.modes?.find((item) => item.family === "UT") ?? record?.modes?.[0]
+    const regions = buddayRegionOptions(value, record?.modes ?? [])
+    const nextRegion = regions[0]?.key ?? ""
+    setBuddayRegion(nextRegion)
+    const options = fittingModeOptions(value, record?.modes ?? [], nextRegion)
+    const fallback = options.find((item) => item.family === "UT") ?? options.find((item) => item.family !== "BT") ?? options[0]
+    setModes(fallback ? [fallback.key] : [])
+  }
+
+  function handleBuddayRegionChange(value) {
+    setBuddayRegion(value)
+    const options = fittingModeOptions(author, authorModes, value).filter((mode) => mode.family !== "BT")
+    const fallback = options.find((item) => item.family === "UT") ?? options[0]
     setModes(fallback ? [fallback.key] : [])
   }
 
   function handleModeClick(modeRecord) {
+    if (modeRecord.family === "BT") {
+      window.alert("Biaxial tension data are reserved for prediction and cannot be used as fitting data.")
+      return
+    }
     setModes((current) => {
       if (current.includes(modeRecord.key)) {
         return current.length === 1 ? current : current.filter((key) => key !== modeRecord.key)
+      }
+      const currentFamily = authorModes.find((item) => item.key === current[0])?.family
+      if ((currentFamily === "BT" && modeRecord.family !== "BT") || (currentFamily !== "BT" && modeRecord.family === "BT")) {
+        return [modeRecord.key]
       }
       return [...current, modeRecord.key]
     })
@@ -553,7 +629,10 @@ function App() {
       const result = await response.json()
       const fitted = Object.fromEntries((result.parameters ?? []).map((param) => [param.key, String(Number(param.value).toPrecision(8))]))
       setFittedParameterValues(fitted)
-      setPredictionSettings((current) => ({ ...current, modeKeys: result.modes ?? modes }))
+      setPredictionSettings((current) => ({
+        ...current,
+        modeKeys: preferredPredictionKeys(authorModes, result.modes ?? modes),
+      }))
       setOptimization({
         status: result.success ? "Converged" : "Finished",
         running: false,
@@ -562,6 +641,8 @@ function App() {
         currentLoss: Number(result.loss ?? 0),
         r2: Number(result.r2 ?? 0),
         iterations: Number(result.iterations ?? 0),
+        fittedAuthor: result.author,
+        fittedModes: result.modes ?? modes,
         prediction: result.prediction,
         log: [
           `${result.success ? "Converged" : "Finished"} after ${result.iterations ?? 0} iterations: loss ${Number(result.loss ?? 0).toExponential(2)}, R2 ${Number(result.r2 ?? 0).toFixed(4)}.`,
@@ -614,6 +695,33 @@ function App() {
     setPredictionOverrides({})
   }
 
+  function buildPredictionPayload(modeKeys) {
+    const activeBranches = branches.filter((branch) => branch.enabled).map((branch) => {
+      const model = buildConfiguredModel(modelCatalog.find((item) => item.key === branch.modelKey), branch.modelConfig)
+      const overrides = parameterOverrides[branch.id] ?? {}
+      const parameters = Object.fromEntries((model?.parameters ?? []).map((param) => {
+        const key = `${branch.id}-${param.name}`
+        const value = predictionSettings.manualEdits && predictionOverrides[key] !== "" && predictionOverrides[key] !== undefined
+          ? predictionOverrides[key]
+          : fittedParameterValues[key] ?? overrides[param.name] ?? param.initial ?? 0
+        return [param.name, Number(value)]
+      }))
+      return {
+        id: branch.id,
+        name: branch.name,
+        modelKey: branch.modelKey,
+        modelConfig: model?.config ?? branch.modelConfig ?? {},
+        enabled: branch.enabled,
+        parameters,
+      }
+    })
+    return {
+      author,
+      modes: modeKeys,
+      branches: activeBranches,
+    }
+  }
+
   function togglePredictionMode(modeRecord) {
     setPredictionSettings((current) => {
       const currentKeys = current.modeKeys ?? []
@@ -626,6 +734,24 @@ function App() {
       return { ...current, modeKeys }
     })
   }
+
+  useEffect(() => {
+    const modeKeys = predictionSettings.modeKeys ?? []
+    if (!author || !modeKeys.length || !fittedParameterValues || !Object.keys(fittedParameterValues).length) return
+    fetch(`${API_BASE}/api/predict`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildPredictionPayload(modeKeys)),
+    })
+      .then((res) => res.ok ? res.json() : Promise.reject(new Error("Prediction failed")))
+      .then((prediction) => {
+        setOptimization((current) => ({
+          ...current,
+          prediction,
+        }))
+      })
+      .catch(() => {})
+  }, [author, predictionSettings.modeKeys, predictionSettings.manualEdits, predictionOverrides, fittedParameterValues, branches, modelCatalog, parameterOverrides])
 
   useEffect(() => {
     if (!optimization.running) return undefined
@@ -678,11 +804,15 @@ function App() {
                 datasets={datasets}
                 author={author}
                 authorModes={authorModes}
+                fittingModes={fittingModes}
+                buddayRegions={buddayRegions}
+                buddayRegion={buddayRegion}
                 modes={modes}
                 preview={preview}
                 apiState={apiState}
                 primaryModeMeta={primaryModeMeta}
                 onAuthorChange={handleAuthorChange}
+                onBuddayRegionChange={handleBuddayRegionChange}
                 onModeClick={handleModeClick}
               />
             ) : activeStep === "models" ? (
@@ -749,11 +879,15 @@ function ExperimentalDataPage({
   datasets,
   author,
   authorModes,
+  fittingModes,
+  buddayRegions,
+  buddayRegion,
   modes,
   preview,
   apiState,
   primaryModeMeta,
   onAuthorChange,
+  onBuddayRegionChange,
   onModeClick,
 }) {
   return (
@@ -772,15 +906,27 @@ function ExperimentalDataPage({
             <select className="mt-1 w-full rounded-lg border border-border-strong bg-surface px-2 py-2 text-sm normal-case text-text-primary" value={author} onChange={(event) => onAuthorChange(event.target.value)}>
               {datasets.map((item) => (
                 <option key={item.author} value={item.author}>
-                  {item.author}
+                  {item.name ?? item.author}
                 </option>
               ))}
             </select>
           </label>
+          {buddayRegions.length > 0 && (
+            <label className="mt-3 block text-xs font-bold uppercase text-text-muted">
+              Brain region
+              <select className="mt-1 w-full rounded-lg border border-border-strong bg-surface px-2 py-2 text-sm normal-case text-text-primary" value={buddayRegion} onChange={(event) => onBuddayRegionChange(event.target.value)}>
+                {buddayRegions.map((region) => (
+                  <option key={region.key} value={region.key}>
+                    {region.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <div className="mt-3">
             <Label>Stress Type</Label>
             <div className="rounded-lg border border-border bg-subtle px-3 py-2 text-sm font-semibold text-text-primary">
-              {preview.metadata?.stressType ?? "From dataset"}
+              <StressTypeText display={preview.metadata?.stressDisplay} fallback={preview.metadata?.stressType ?? "From dataset"} />
               <span className="ml-2 align-middle text-xs font-normal text-text-muted">read from experimental data</span>
             </div>
           </div>
@@ -791,7 +937,7 @@ function ExperimentalDataPage({
             Select one or more experimental sets to include in the calibration objective. Each database entry is shown separately.
           </p>
           <div className="flex max-h-72 flex-col gap-2 overflow-y-auto pr-1">
-            {authorModes.map((option) => (
+            {fittingModes.map((option) => (
               <ModeButton
                 key={option.key}
                 option={option}
@@ -1147,7 +1293,7 @@ function CalibrationFitChart({ preview, progress }) {
       </svg>
       <div className="absolute left-3 top-3 rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
         <div className="font-semibold">Experimental vs model fit</div>
-        <div className="mt-1 text-text-muted">{preview.metadata?.selectedMode ?? "Selected datasets"}</div>
+        <div className="mt-1 text-text-muted">{preview.metadata?.selectedModeShort ?? preview.metadata?.selectedMode ?? "Selected datasets"}</div>
       </div>
       <div className="absolute bottom-3 right-3 rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
         <div className="flex items-center gap-2"><span className="h-2 w-4 rounded-full bg-primary" /> Model fit</div>
@@ -1175,12 +1321,15 @@ function PredictionPage({
     () => buildPredictionSeries(preview, parameterRows, settings, overrides, optimization, authorModes),
     [preview, parameterRows, settings, overrides, optimization, authorModes],
   )
-  const allPredictionPoints = [...prediction.experimental, ...prediction.curves.flatMap((curve) => curve.points)]
+  const allPredictionPoints = [
+    ...prediction.experimental,
+    ...prediction.curves.flatMap((curve) => curve.points),
+  ]
   const xs = allPredictionPoints.map((point) => point.x)
-  const peakStress = allPredictionPoints.reduce((max, point) => Math.max(max, point.y), 0)
+  const peakStress = allPredictionPoints.reduce((max, point) => Math.max(max, point.y, point.y2 ?? 0), 0)
   const stretchRange = xs.length ? `${Math.min(...xs).toFixed(2)}-${Math.max(...xs).toFixed(2)}` : "-"
   const dataPointCount = prediction.experimental.length
-  const stressOutput = preview.metadata?.stressType ?? "From dataset"
+  const stressOutput = stressPlainText(preview.metadata?.stressDisplay, preview.metadata?.stressType ?? "From dataset")
   const metrics = [
     ["Peak stress", `${peakStress.toFixed(3)} MPa`],
     ["Data range", stretchRange],
@@ -1227,6 +1376,7 @@ function PredictionPage({
                 {authorModes.map((option) => {
                   const active = selectedModeKeys.includes(option.key)
                   const meta = modeOptions.find((item) => item.family === option.family) ?? modeOptions[0]
+                  const label = option.shortLabel ?? option.label
                   return (
                     <button
                       key={option.key}
@@ -1235,8 +1385,8 @@ function PredictionPage({
                     >
                       <span className={`h-3 w-3 rounded-full ${meta.dot}`} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-semibold">{option.label}</span>
-                        <span className="block truncate text-xs text-text-muted">{option.key} · {option.points} pts · {option.stressType}</span>
+                        <span className="block truncate text-sm font-semibold">{formatDisplayLabel(label)}</span>
+                        <span className="block truncate text-xs text-text-muted">{modeFamilyName(option.family)} · {option.points} pts · {stressPlainText(option.stressDisplay, option.stressType)}</span>
                       </span>
                       <span className={`grid h-5 w-5 place-items-center rounded border ${active ? "border-primary bg-primary text-white" : "border-border-strong bg-surface"}`}>
                         {active && <Icon className="text-sm">check_circle</Icon>}
@@ -1355,18 +1505,18 @@ function PredictionChart({ prediction, preview }) {
   }))
   const secondaryExperimental = prediction.experimental
     .filter((point) => point.x2 !== undefined && point.y2 !== undefined)
-    .map((point) => ({ ...point, plotX: point.x2, plotY: point.y2 }))
+    .map((point) => ({ ...point, plotX: point.x, plotY: point.y2 }))
   const secondaryCurves = prediction.curves.map((curve) => ({
     ...curve,
     points: (curve.points ?? [])
       .filter((point) => point.x2 !== undefined && point.y2 !== undefined)
-      .map((point) => ({ ...point, plotX: point.x2, plotY: point.y2 })),
+      .map((point) => ({ ...point, plotX: point.x, plotY: point.y2 })),
   }))
   return (
-    <div className={hasSecondary ? "grid h-full min-h-[540px] gap-3 xl:grid-cols-2" : "h-full min-h-[540px]"}>
+    <div className={hasSecondary ? "grid h-full min-h-[640px] gap-3" : "h-full min-h-[540px]"}>
       <StressComponentChart
         title={hasSecondary ? "Component P11" : "Prediction review"}
-        detail={preview.metadata?.selectedMode ?? "Selected datasets"}
+        detail={preview.metadata?.selectedModeShort ?? preview.metadata?.selectedMode ?? "Selected datasets"}
         experimental={primaryExperimental}
         curves={primaryCurves}
         xLabel={preview.axes?.x ?? "Stretch lambda_1 (-)"}
@@ -1379,9 +1529,9 @@ function PredictionChart({ prediction, preview }) {
           detail={secondaryDetail(prediction.curves)}
           experimental={secondaryExperimental}
           curves={secondaryCurves}
-          xLabel="Stretch lambda_2 (-)"
+          xLabel={preview.axes?.x ?? "Stretch lambda_1 (-)"}
           yLabel={secondaryStressLabel(preview)}
-          minHeight={420}
+          minHeight={320}
         />
       )}
     </div>
@@ -1475,7 +1625,10 @@ function buildPredictionSeries(preview, parameterRows, settings, overrides, opti
   const series = preview.series?.length
     ? preview.series
     : [{ modeFamily: "UT", modeLabel: "Experimental", points: preview.points ?? [] }]
-  const experimental = series.flatMap((item, seriesIndex) => (item.points ?? []).map((point) => ({
+  const fittedModes = new Set(optimization.fittedAuthor === preview.author ? optimization.fittedModes ?? [] : [])
+  const experimental = series
+    .filter((item) => !fittedModes.has(item.mode))
+    .flatMap((item, seriesIndex) => (item.points ?? []).map((point) => ({
     ...point,
     family: item.modeFamily,
     label: item.modeLabel,
@@ -1932,20 +2085,24 @@ function Label({ children }) {
 }
 
 function ModeButton({ option, meta, active, onClick }) {
+  const label = option.shortLabel ?? option.label
+  const predictionOnly = option.family === "BT"
   return (
     <button
       className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left ${
         active
           ? "border-primary bg-selection-bg"
-          : "border-border-strong bg-surface hover:bg-subtle"
+          : predictionOnly
+            ? "border-border-strong bg-subtle hover:bg-surface"
+            : "border-border-strong bg-surface hover:bg-subtle"
       }`}
       onClick={onClick}
     >
       <span className={`h-3 w-3 rounded-full ${meta.dot}`} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-semibold">{option.label}</span>
+        <span className="block truncate text-sm font-semibold">{formatDisplayLabel(label)}</span>
         <span className="mt-0.5 block truncate text-xs font-normal text-text-muted">
-          {option.key} · {option.points} pts · {option.stressType}
+          {predictionOnly ? "Prediction only" : option.loadingLabel ?? modeFamilyName(option.family)} · {option.points} pts · {stressPlainText(option.stressDisplay, option.stressType)}
         </span>
       </span>
       <span className={`grid h-5 w-5 place-items-center rounded border ${active ? "border-primary bg-primary text-white" : "border-border-strong bg-surface"}`}>
@@ -2014,6 +2171,33 @@ function LatexInline({ value, fallback }) {
   return rendered ? <span dangerouslySetInnerHTML={{ __html: rendered }} /> : fallback
 }
 
+function StressTypeText({ display, fallback }) {
+  if (!display?.symbol) return fallback
+  return (
+    <>
+      <span>{display.label}</span>
+      <span className="ml-1 align-middle">
+        <LatexInline value={display.symbol} fallback={display.plain ?? fallback} />
+      </span>
+    </>
+  )
+}
+
+function stressPlainText(display, fallback) {
+  return display?.plain ?? (fallback === "PK1" ? "First Piola-Kirchhoff stress P" : fallback)
+}
+
+function modeFamilyName(family) {
+  return modeOptions.find((item) => item.family === family)?.label ?? family
+}
+
+function formatDisplayLabel(label) {
+  return String(label ?? "")
+    .replace(/\\lambda_2/g, "λ₂")
+    .replace(/lambda2/g, "λ₂")
+    .replace(/\blambda\b/g, "λ")
+}
+
 function parameterSymbol(name) {
   const indexed = name.match(/^([A-Za-z]+)(\d+)$/)
   if (indexed) {
@@ -2068,12 +2252,12 @@ function Metadata({ preview, apiState }) {
       <MetaItem label="Rows parsed" value={metadata.rows ?? 0} />
       <MetaItem label="Data status" value={dataStatus} />
       <MetaItem label="Selected sets" value={metadata.setCount ?? 0} />
-      <MetaItem label="Stress type" value={metadata.stressType ?? "-"} />
-      <MetaItem label="Source" value="Database" />
-      <MetaItem label="Reference" value={metadata.source ?? "-"} />
+      <MetaItem label="Stress type" value={<StressTypeText display={metadata.stressDisplay} fallback={metadata.stressType ?? "-"} />} />
+      <MetaItem label="Source" value={metadata.source ?? "-"} />
+      <MetaLinkItem label="Reference" value={metadata.sourceReference ?? metadata.source ?? "-"} href={metadata.sourceUrl} />
       <div className="col-span-2 rounded-lg border border-border bg-subtle p-2">
         <dt className="text-[11px] font-bold uppercase text-text-muted">Loading modes</dt>
-        <dd className="mt-1 text-sm font-semibold">{metadata.selectedMode ?? "-"}</dd>
+        <dd className="mt-1 text-sm font-semibold">{metadata.selectedModeShort ?? metadata.selectedMode ?? "-"}</dd>
       </div>
     </dl>
   )
@@ -2088,7 +2272,23 @@ function MetaItem({ label, value }) {
   )
 }
 
+function MetaLinkItem({ label, value, href }) {
+  return (
+    <div className="rounded-lg border border-border bg-subtle p-2">
+      <dt className="text-[11px] font-bold uppercase text-text-muted">{label}</dt>
+      <dd className="mt-1 truncate text-sm font-semibold">
+        {href ? (
+          <a className="text-primary hover:underline" href={href} target="_blank" rel="noreferrer">
+            {value}
+          </a>
+        ) : value}
+      </dd>
+    </div>
+  )
+}
+
 function PlotCard({ preview, mode }) {
+  const chartGroups = groupPreviewSeries(preview, mode)
   return (
     <div className="flex h-full min-h-[640px] flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-panel">
       <div className="flex items-center justify-between border-b border-border bg-subtle px-4 py-3">
@@ -2104,21 +2304,47 @@ function PlotCard({ preview, mode }) {
           ))}
         </div>
       </div>
-      <div className="min-h-0 flex-1 p-5">
-        <ScientificChart preview={preview} xLabel={preview.axes?.x} yLabel={preview.axes?.y} mode={mode} />
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div className="grid gap-4">
+          {chartGroups.map((group) => (
+            <ScientificChart key={group.key} group={group} />
+          ))}
+        </div>
       </div>
       <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
-        <span className="text-text-muted">Data sampled from {preview.metadata?.source ?? "current selection"}</span>
+        <span className="text-text-muted">Data sampled from {preview.metadata?.sourceReference ?? preview.metadata?.source ?? "current selection"}</span>
         <button className="rounded-lg border border-border-strong bg-surface px-3 py-1.5 font-semibold hover:bg-subtle">Save Plot</button>
       </div>
     </div>
   )
 }
 
-function ScientificChart({ preview, xLabel, yLabel, mode }) {
+function groupPreviewSeries(preview, mode) {
   const series = preview.series?.length
     ? preview.series
-    : [{ modeFamily: mode.family, modeLabel: mode.label, points: preview.points ?? [] }]
+    : [{ modeFamily: mode.family, modeLabel: mode.label, modeShortLabel: mode.label, points: preview.points ?? [], axisSymbols: { x: "\\lambda", y: "P_{11}" } }]
+  const groups = new Map()
+  series.forEach((item) => {
+    const xSymbol = item.axisSymbols?.x ?? "\\lambda"
+    const ySymbol = item.axisSymbols?.y ?? "P_{11}"
+    const key = `${xSymbol}|${ySymbol}`
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        xSymbol,
+        ySymbol,
+        xLabel: xSymbol,
+        yLabel: ySymbol,
+        series: [],
+      })
+    }
+    groups.get(key).series.push(item)
+  })
+  return Array.from(groups.values())
+}
+
+function ScientificChart({ group }) {
+  const series = group.series
   const hasSecondary = series.some((item) => (item.points ?? []).some((point) => point.x2 !== undefined && point.y2 !== undefined))
   const primarySeries = series.map((item) => ({
     ...item,
@@ -2131,16 +2357,69 @@ function ScientificChart({ preview, xLabel, yLabel, mode }) {
       .map((point) => ({ ...point, plotX: point.x2, plotY: point.y2 })),
   }))
   return (
-    <div className={hasSecondary ? "grid h-full min-h-[460px] gap-3 xl:grid-cols-2" : "h-full min-h-[460px]"}>
-      <ExperimentalComponentChart series={primarySeries} xLabel={xLabel} yLabel={yLabel} title={hasSecondary ? "Component P11" : "Selected data"} />
+    <div className={hasSecondary ? "grid min-h-[460px] gap-3 xl:grid-cols-2" : "min-h-[460px]"}>
+      <ExperimentalComponentChart series={primarySeries} xLabel={group.xLabel} yLabel={group.yLabel} title={hasSecondary ? "Component P11" : "Selected data"} />
       {hasSecondary && (
         <ExperimentalComponentChart
           series={secondarySeries}
-          xLabel="Stretch lambda_2 (-)"
-          yLabel={secondaryStressLabel(preview)}
+          xLabel={group.xLabel}
+          yLabel="P_{22}"
           title="Component P22"
         />
       )}
+    </div>
+  )
+}
+
+function PreviewTensorOverlay({ series }) {
+  const [activeMode, setActiveMode] = useState(series[0]?.mode ?? "")
+  useEffect(() => {
+    if (!series.some((item) => item.mode === activeMode)) {
+      setActiveMode(series[0]?.mode ?? "")
+    }
+  }, [activeMode, series])
+  if (!series.length) return null
+  const primary = series.find((item) => item.mode === activeMode) ?? series[0]
+  return (
+    <div className="border-b border-border bg-subtle/70 px-3 py-2">
+      <div className="grid gap-2 xl:grid-cols-[minmax(190px,0.75fr)_minmax(0,1.45fr)]">
+        <div className="min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[10px] font-bold uppercase tracking-wide text-text-muted">Tensor form</div>
+            <span className="shrink-0 rounded border border-border bg-white px-1.5 py-0.5 text-[10px] font-semibold text-text-muted">{series.reduce((sum, item) => sum + (item.points?.length ?? 0), 0)} pts</span>
+          </div>
+          <div className="mt-1 flex max-h-[46px] flex-wrap gap-1 overflow-y-auto pr-0.5">
+            {series.map((item, index) => {
+              const active = item.mode === primary.mode
+              return (
+                <button key={item.mode} className={`min-w-0 max-w-full rounded border px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${active ? "border-primary bg-selection-bg text-primary" : "border-border bg-white text-text-muted hover:bg-subtle"}`} onClick={() => setActiveMode(item.mode)}>
+                  <span className="mr-1 inline-block h-2 w-2.5 rounded-full align-middle" style={{ backgroundColor: colorForSeries(item.modeFamily, index) }} />
+                  <span className="align-middle">{formatDisplayLabel(item.modeShortLabel ?? item.modeLabel)}</span>
+                </button>
+              )
+            })}
+          </div>
+          <div className="mt-1 truncate text-[10px] text-text-muted">
+            {primary.loadingLabel ?? modeFamilyName(primary.modeFamily)} · <LatexInline value={primary.tensorExpressions?.component ?? primary.axisSymbols?.y ?? "P"} fallback={primary.axisSymbols?.y ?? "P"} />
+          </div>
+        </div>
+        <div className="grid min-w-0 gap-2 md:grid-cols-2">
+        <FormulaMini label="F" value={primary.tensorExpressions?.deformationGradient} />
+        <FormulaMini label="P" value={primary.tensorExpressions?.firstPkStress} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FormulaMini({ label, value }) {
+  const rendered = useMemo(() => renderFormula(value), [value])
+  return (
+    <div className="min-h-[42px] rounded border border-border bg-white/80 px-1.5 py-1">
+      <div className="mb-0.5 text-[10px] font-bold uppercase text-text-muted">{label}</div>
+      <div className="formula-compact overflow-hidden text-xs">
+        {rendered ? <span dangerouslySetInnerHTML={{ __html: rendered }} /> : value ?? "-"}
+      </div>
     </div>
   )
 }
@@ -2164,7 +2443,9 @@ function ExperimentalComponentChart({ series, xLabel, yLabel, title }) {
   const legendItems = series.slice(0, 5)
 
   return (
-    <div className="relative h-full min-h-[420px] w-full rounded-lg border border-border bg-white">
+    <div className="flex h-full min-h-[520px] w-full flex-col overflow-hidden rounded-lg border border-border bg-white">
+      <PreviewTensorOverlay series={series} />
+      <div className="relative min-h-[410px] flex-1">
       <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Experimental stress stretch chart">
         <rect x="0" y="0" width={width} height={height} fill="#FFFFFF" />
         {ticks.map((tick) => {
@@ -2194,24 +2475,25 @@ function ExperimentalComponentChart({ series, xLabel, yLabel, title }) {
             </g>
           )
         })}
-        <text x={width / 2} y={height - 16} textAnchor="middle" fontSize="12" fill="#6E6E73">
-          {xLabel}
-        </text>
-        <text x="18" y={height / 2} textAnchor="middle" fontSize="12" fill="#6E6E73" transform={`rotate(-90 18 ${height / 2})`}>
-          {yLabel}
-        </text>
       </svg>
-      <div className="absolute right-4 top-4 max-w-[280px] rounded-md border border-border-strong bg-white/95 px-2 py-1.5 text-xs shadow-panel">
+      <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 text-xs text-text-muted">
+        <LatexInline value={xLabel} fallback={xLabel} />
+      </div>
+      <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 -rotate-90 text-xs text-text-muted">
+        <LatexInline value={yLabel} fallback={yLabel} />
+      </div>
+      <div className="absolute bottom-10 right-4 max-w-[240px] rounded-md border border-border-strong bg-white/95 px-2 py-1.5 text-xs shadow-panel">
         <div className="mb-1 font-semibold text-text-primary">{title}</div>
         <div className="flex max-h-28 flex-col gap-1 overflow-hidden">
           {legendItems.map((item, index) => (
             <div key={item.mode ?? item.modeLabel} className="flex min-w-0 items-center gap-2">
               <span className="h-2 w-4 shrink-0 rounded-full" style={{ backgroundColor: colorForSeries(item.modeFamily, index) }} />
-              <span className="truncate text-text-muted">{item.modeLabel ?? item.mode ?? "Experimental set"}</span>
+              <span className="truncate text-text-muted">{formatDisplayLabel(item.modeShortLabel ?? item.modeLabel ?? "Experimental set")}</span>
             </div>
           ))}
         </div>
         {series.length > legendItems.length && <div className="mt-1 text-text-muted">+{series.length - legendItems.length} more</div>}
+      </div>
       </div>
     </div>
   )
