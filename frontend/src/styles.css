@@ -49,6 +49,10 @@ select {
   text-align: left;
 }
 
+.formula-block {
+  max-width: 100%;
+}
+
 .formula-block .katex {
   font-size: 1.02rem;
 }

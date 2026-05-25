@@ -415,7 +415,7 @@ function App() {
         <Sidebar activeStep={activeStep} onStepChange={setActiveStep} />
         <div className="flex min-w-0 flex-col">
           <Topbar activeStep={activeStep} />
-          <main className="min-h-0 flex-1 overflow-y-auto p-4">
+          <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4">
             {activeStep === "experimental" ? (
               <ExperimentalDataPage
                 datasets={datasets}
@@ -550,9 +550,9 @@ function ModelArchitecturePage({
   const activeBranches = branches.filter((branch) => branch.enabled)
 
   return (
-    <div className="mx-auto flex min-h-[640px] max-w-[1240px] flex-col gap-4">
+    <div className="mx-auto flex min-h-[640px] w-full max-w-[1280px] flex-col gap-4 overflow-x-hidden">
       <ArchitectureSummary branches={branches} activeBranches={activeBranches} selectedDataCount={selectedDataCount} selectedBranch={selectedBranch} />
-      <section className="grid min-h-[560px] gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+      <section className="grid min-h-[560px] min-w-0 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <Card title="Parallel Branches">
           <div className="mb-3 flex items-center justify-between gap-3">
             <p className="text-xs font-semibold uppercase text-text-muted">{activeBranches.length} active · {branches.length} total</p>
@@ -561,7 +561,7 @@ function ModelArchitecturePage({
               Add
             </button>
           </div>
-          <div className="flex max-h-[500px] flex-col gap-2 overflow-y-auto pr-1">
+          <div className="flex flex-col gap-2 pr-1">
             {branches.map((branch, index) => (
               <BranchCard
                 key={branch.id}
@@ -579,7 +579,7 @@ function ModelArchitecturePage({
         </Card>
 
         <section className="grid min-w-0 gap-4">
-          <div className="grid gap-4 2xl:grid-cols-[minmax(440px,1.1fr)_minmax(360px,0.9fr)]">
+          <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
             <Card title="Architecture Workspace">
               <div className="rounded-lg border border-border bg-subtle p-3">
                 <ArchitectureVisualizer branches={branches} selectedBranchId={selectedBranch?.id} modelByKey={modelByKey} onSelectBranch={onSelectBranch} />
@@ -641,7 +641,7 @@ function ModelArchitecturePage({
             </Card>
           </div>
 
-          <div className="grid gap-4 2xl:grid-cols-[minmax(440px,1.1fr)_minmax(360px,0.9fr)]">
+          <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
             <Card title="Model Equations">
               {selectedModel ? (
                 <div className="space-y-3">
@@ -807,8 +807,8 @@ function ArchitectureVisualizer({ branches, selectedBranchId, modelByKey, onSele
   const top = 64
   const rowGap = 72
   return (
-    <div className="h-[420px] overflow-auto">
-      <svg className="min-h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Parallel spring architecture">
+    <div className="overflow-x-auto">
+      <svg className="h-auto min-h-[260px] w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Parallel spring architecture">
         <rect x="0" y="0" width={width} height={height} rx="10" fill="#FFFFFF" />
         <line x1={railLeft} y1={top - 24} x2={railLeft} y2={top + (branches.length - 1) * rowGap + 24} stroke="#717786" strokeWidth="4" strokeLinecap="round" />
         <line x1={railRight} y1={top - 24} x2={railRight} y2={top + (branches.length - 1) * rowGap + 24} stroke="#717786" strokeWidth="4" strokeLinecap="round" />
@@ -930,7 +930,7 @@ function Topbar({ activeStep }) {
 
 function Card({ title, children, className = "" }) {
   return (
-    <div className={`rounded-lg border border-border bg-surface p-3 shadow-panel ${className}`}>
+    <div className={`min-w-0 rounded-lg border border-border bg-surface p-3 shadow-panel ${className}`}>
       <h3 className="mb-3 text-[15px] font-semibold">{title}</h3>
       {children}
     </div>
