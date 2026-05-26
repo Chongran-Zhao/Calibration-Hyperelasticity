@@ -80,34 +80,42 @@ MODEL_META = {
     "NeoHookean": {
         "name": "Neo-Hookean",
         "reference": "Rivlin (1948); Mooney (1940)",
+        "referenceUrl": "https://doi.org/10.1098/rsta.1948.0024",
     },
     "MooneyRivlin": {
         "name": "Mooney-Rivlin",
         "reference": "Mooney (1940); Rivlin (1948)",
+        "referenceUrl": "https://doi.org/10.1063/1.1712836",
     },
     "Yeoh": {
         "name": "Yeoh",
         "reference": "Yeoh (1993)",
+        "referenceUrl": "https://doi.org/10.5254/1.3538343",
     },
     "ArrudaBoyce": {
         "name": "Arruda-Boyce",
         "reference": "Arruda and Boyce (1993)",
+        "referenceUrl": "https://doi.org/10.1016/0022-5096(93)90013-6",
     },
     "ZhanGaussian": {
         "name": "Zhan-Gaussian",
         "reference": "Zhan et al. (2023)",
+        "referenceUrl": "https://doi.org/10.1016/j.jmps.2022.105156",
     },
     "ZhanNonGaussian": {
         "name": "Zhan-Non-Gaussian",
         "reference": "Zhan et al. (2023)",
+        "referenceUrl": "https://doi.org/10.1016/j.jmps.2022.105156",
     },
     "Ogden": {
         "name": "Ogden",
         "reference": "Ogden (1972)",
+        "referenceUrl": "https://doi.org/10.1098/rspa.1972.0026",
     },
     "ModifiedOgden": {
         "name": "Modified-Ogden",
         "reference": "Budday et al. (2017); Ogden (1972)",
+        "referenceUrl": "https://doi.org/10.1007/s10237-016-0855-y",
     },
 }
 
@@ -216,11 +224,11 @@ def _stress_display(stress_type: str) -> dict:
         return {
             "label": "Cauchy stress",
             "symbol": r"\boldsymbol{\sigma}",
-            "plain": "Cauchy stress sigma",
+            "plain": "Cauchy stress σ",
         }
     return {
         "label": "First Piola-Kirchhoff stress",
-        "symbol": r"\boldsymbol{\mathit{P}}",
+        "symbol": r"\boldsymbol{P}",
         "plain": "First Piola-Kirchhoff stress P",
     }
 
@@ -237,12 +245,12 @@ def _stress_series(mode: str, stress_tensor: np.ndarray) -> np.ndarray:
 
 def _axis_labels(mode: str, stress_type: str) -> tuple[str, str]:
     if mode in ("SS", "CSS"):
-        return "Shear strain gamma (-)", "Shear stress P12"
+        return "Shear strain γ (-)", "Shear stress P₁₂"
     if mode == "BT":
-        stress_label = "Cauchy stress sigma11" if stress_type == "cauchy" else "Nominal stress P11"
-        return "Variable stretch lambda_1 (-)", stress_label
-    stress_label = "Cauchy stress sigma11" if stress_type == "cauchy" else "Nominal stress P11"
-    return "Stretch lambda (-)", stress_label
+        stress_label = "Cauchy stress σ₁₁" if stress_type == "cauchy" else "Nominal stress P₁₁"
+        return "Variable stretch λ₁ (-)", stress_label
+    stress_label = "Cauchy stress σ₁₁" if stress_type == "cauchy" else "Nominal stress P₁₁"
+    return "Stretch λ (-)", stress_label
 
 
 def _axis_symbols(mode: str, stress_type: str) -> dict:
@@ -257,32 +265,32 @@ def _axis_symbols(mode: str, stress_type: str) -> dict:
 def _mode_tensor_expressions(family: str, mode_raw: str, fixed_stretch: float | None = None) -> dict:
     if family == "UT":
         return {
-            "deformationGradient": r"\mathbf{F}=\begin{bmatrix}\lambda&0&0\\0&\lambda^{-1/2}&0\\0&0&\lambda^{-1/2}\end{bmatrix}",
-            "firstPkStress": r"\mathbf{P}=\begin{bmatrix}P_{11}&0&0\\0&0&0\\0&0&0\end{bmatrix}",
+            "deformationGradient": r"\boldsymbol{F}=\begin{bmatrix}\lambda&0&0\\0&\lambda^{-1/2}&0\\0&0&\lambda^{-1/2}\end{bmatrix}",
+            "firstPkStress": r"\boldsymbol{P}=\begin{bmatrix}P_{11}&0&0\\0&0&0\\0&0&0\end{bmatrix}",
             "component": r"P_{11}",
         }
     if family == "UC":
         return {
-            "deformationGradient": r"\mathbf{F}=\begin{bmatrix}\lambda&0&0\\0&\lambda^{-1/2}&0\\0&0&\lambda^{-1/2}\end{bmatrix}",
-            "firstPkStress": r"\mathbf{P}=\begin{bmatrix}P_{11}&0&0\\0&0&0\\0&0&0\end{bmatrix}",
+            "deformationGradient": r"\boldsymbol{F}=\begin{bmatrix}\lambda&0&0\\0&\lambda^{-1/2}&0\\0&0&\lambda^{-1/2}\end{bmatrix}",
+            "firstPkStress": r"\boldsymbol{P}=\begin{bmatrix}P_{11}&0&0\\0&0&0\\0&0&0\end{bmatrix}",
             "component": r"P_{11}",
         }
     if family == "ET":
         return {
-            "deformationGradient": r"\mathbf{F}=\begin{bmatrix}\lambda&0&0\\0&\lambda&0\\0&0&\lambda^{-2}\end{bmatrix}",
-            "firstPkStress": r"\mathbf{P}=\begin{bmatrix}P_{11}&0&0\\0&P_{22}&0\\0&0&0\end{bmatrix}",
+            "deformationGradient": r"\boldsymbol{F}=\begin{bmatrix}\lambda&0&0\\0&\lambda&0\\0&0&\lambda^{-2}\end{bmatrix}",
+            "firstPkStress": r"\boldsymbol{P}=\begin{bmatrix}P_{11}&0&0\\0&P_{22}&0\\0&0&0\end{bmatrix}",
             "component": r"P_{11}",
         }
     if family == "PS":
         return {
-            "deformationGradient": r"\mathbf{F}=\begin{bmatrix}\lambda&0&0\\0&1&0\\0&0&\lambda^{-1}\end{bmatrix}",
-            "firstPkStress": r"\mathbf{P}=\begin{bmatrix}P_{11}&0&0\\0&P_{22}&0\\0&0&0\end{bmatrix}",
+            "deformationGradient": r"\boldsymbol{F}=\begin{bmatrix}\lambda&0&0\\0&1&0\\0&0&\lambda^{-1}\end{bmatrix}",
+            "firstPkStress": r"\boldsymbol{P}=\begin{bmatrix}P_{11}&0&0\\0&P_{22}&0\\0&0&0\end{bmatrix}",
             "component": r"P_{11}",
         }
     if family == "SS":
         return {
-            "deformationGradient": r"\mathbf{F}=\begin{bmatrix}1&\gamma&0\\0&1&0\\0&0&1\end{bmatrix}",
-            "firstPkStress": r"\mathbf{P}=\begin{bmatrix}0&P_{12}&0\\0&0&0\\0&0&0\end{bmatrix}",
+            "deformationGradient": r"\boldsymbol{F}=\begin{bmatrix}1&\gamma&0\\0&1&0\\0&0&1\end{bmatrix}",
+            "firstPkStress": r"\boldsymbol{P}=\begin{bmatrix}0&P_{12}&0\\0&0&0\\0&0&0\end{bmatrix}",
             "component": r"P_{12}",
         }
     if family == "CSS":
@@ -292,20 +300,20 @@ def _mode_tensor_expressions(family: str, mode_raw: str, fixed_stretch: float | 
             lam = re.sub(r"(?<=\d)d(?=\d)", ".", match.group(1))
         lam_symbol = lam or r"\lambda"
         return {
-            "deformationGradient": rf"\mathbf{{F}}=\begin{{bmatrix}}{lam_symbol}&\gamma&0\\0&{lam_symbol}^{{-1/2}}&0\\0&0&{lam_symbol}^{{-1/2}}\end{{bmatrix}}",
-            "firstPkStress": r"\mathbf{P}=\begin{bmatrix}0&P_{12}&0\\0&0&0\\0&0&0\end{bmatrix}",
+            "deformationGradient": rf"\boldsymbol{{F}}=\begin{{bmatrix}}{lam_symbol}&\gamma&0\\0&{lam_symbol}^{{-1/2}}&0\\0&0&{lam_symbol}^{{-1/2}}\end{{bmatrix}}",
+            "firstPkStress": r"\boldsymbol{P}=\begin{bmatrix}0&P_{12}&0\\0&0&0\\0&0&0\end{bmatrix}",
             "component": r"P_{12}",
         }
     if family == "BT":
         lam2 = f"{fixed_stretch:.3g}" if fixed_stretch is not None else r"\lambda_2"
         return {
-            "deformationGradient": rf"\mathbf{{F}}=\begin{{bmatrix}}\lambda_1&0&0\\0&{lam2}&0\\0&0&(\lambda_1 {lam2})^{{-1}}\end{{bmatrix}}",
-            "firstPkStress": r"\mathbf{P}=\begin{bmatrix}P_{11}&0&0\\0&P_{22}&0\\0&0&0\end{bmatrix}",
+            "deformationGradient": rf"\boldsymbol{{F}}=\begin{{bmatrix}}\lambda_1&0&0\\0&{lam2}&0\\0&0&(\lambda_1 {lam2})^{{-1}}\end{{bmatrix}}",
+            "firstPkStress": r"\boldsymbol{P}=\begin{bmatrix}P_{11}&0&0\\0&P_{22}&0\\0&0&0\end{bmatrix}",
             "component": r"P_{11},\,P_{22}",
         }
     return {
-        "deformationGradient": r"\mathbf{F}",
-        "firstPkStress": r"\mathbf{P}",
+        "deformationGradient": r"\boldsymbol{F}",
+        "firstPkStress": r"\boldsymbol{P}",
         "component": r"P",
     }
 
@@ -501,6 +509,7 @@ def _model_payload(model_func, name: str | None = None, extra: dict | None = Non
         "type": getattr(model_func, "model_type", "unknown"),
         "category": getattr(model_func, "category", "unknown"),
         "reference": meta.get("reference", ""),
+        "referenceUrl": meta.get("referenceUrl", ""),
         "formula": getattr(model_func, "formula", ""),
         "strainFormula": getattr(model_func, "strain_formula", ""),
         "parameters": [

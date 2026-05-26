@@ -2,6 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-background: #f5f5f7;
+  --color-surface: #ffffff;
+  --color-subtle: #f2f2f7;
+  --color-border: #e5e5ea;
+  --color-border-strong: #d1d1d6;
+  --color-primary: #007aff;
+  --color-primary-hover: #0a84ff;
+  --color-selection-bg: #eaf3ff;
+  --color-text-primary: #1c1c1e;
+  --color-text-muted: #6e6e73;
+  --color-text-disabled: #8e8e93;
+  --color-error: #ff3b30;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -14,8 +29,8 @@ body,
 
 body {
   margin: 0;
-  color: #1c1c1e;
-  background: #f5f5f7;
+  color: var(--color-text-primary);
+  background: var(--color-background);
   font-family:
     "SF Pro Text",
     "SF Pro Display",
@@ -24,6 +39,22 @@ body {
     Arial,
     sans-serif;
 }
+
+.bg-background { background-color: var(--color-background); }
+.bg-surface { background-color: var(--color-surface); }
+.bg-subtle { background-color: var(--color-subtle); }
+.bg-selection-bg { background-color: var(--color-selection-bg); }
+.bg-primary { background-color: var(--color-primary); }
+.bg-surface\/95 { background-color: color-mix(in srgb, var(--color-surface) 95%, transparent); }
+.hover\:bg-primary-hover:hover { background-color: var(--color-primary-hover); }
+.border-border { border-color: var(--color-border); }
+.border-border-strong { border-color: var(--color-border-strong); }
+.border-primary { border-color: var(--color-primary); }
+.text-text-primary { color: var(--color-text-primary); }
+.text-text-muted { color: var(--color-text-muted); }
+.text-text-disabled { color: var(--color-text-disabled); }
+.text-primary { color: var(--color-primary); }
+.focus\:border-primary:focus { border-color: var(--color-primary); }
 
 button,
 select,
@@ -69,4 +100,15 @@ select {
 
 .formula-compact .base {
   max-width: 100%;
+}
+
+.stress-symbol .katex {
+  font-size: 1.08em;
+  font-weight: 700;
+}
+
+.tensor-letter,
+.tensor-formula .mathbf {
+  font-style: italic;
+  font-weight: 700;
 }

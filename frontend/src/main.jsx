@@ -4,10 +4,8 @@ import {
   Activity,
   ArrowLeft,
   ArrowRight,
-  BookOpen,
   CheckCircle2,
   ChevronRight,
-  CircleHelp,
   Database,
   FlaskConical,
   Info,
@@ -18,8 +16,6 @@ import {
   Play,
   RotateCcw,
   Save,
-  Search,
-  Settings,
   SlidersHorizontal,
   Square,
   Trash2,
@@ -32,8 +28,6 @@ import "./styles.css"
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000"
 const defaultBranches = [
   { id: "spring-1", name: "Spring 1", modelKey: "ZhanNonGaussian", enabled: true },
-  { id: "spring-2", name: "Spring 2", modelKey: "NeoHookean", enabled: true },
-  { id: "spring-3", name: "Spring 3", modelKey: "Ogden", modelConfig: { termCount: 2 }, enabled: false },
 ]
 
 const samplePoints = [
@@ -86,9 +80,7 @@ const iconMap = {
   check_circle: CheckCircle2,
   chevron_right: ChevronRight,
   dns: Database,
-  help: CircleHelp,
   info: Info,
-  menu_book: BookOpen,
   monitoring: Activity,
   add: Plus,
   play_arrow: Play,
@@ -97,8 +89,6 @@ const iconMap = {
   save: Save,
   schema: Layers,
   science: FlaskConical,
-  search: Search,
-  settings: Settings,
   stop: Square,
   delete: Trash2,
   tune: SlidersHorizontal,
@@ -260,6 +250,16 @@ function preferredPredictionKeys(authorModes, fittedKeys = []) {
   return authorModes.filter((item) => !fittedSet.has(item.key)).slice(0, 1).map((item) => item.key)
 }
 
+function defaultFittingKeys(authorRecord) {
+  const modes = authorRecord?.modes ?? []
+  const fittingModes = modes.filter((item) => item.family !== "BT")
+  if (authorRecord?.author === "Treloar_1944") {
+    return fittingModes.map((item) => item.key)
+  }
+  const fallback = fittingModes.find((item) => item.family === "UT") ?? fittingModes[0] ?? modes[0]
+  return fallback ? [fallback.key] : []
+}
+
 function buddayRegionOptions(author, authorModes) {
   if (author !== "Budday_2017") return []
   const byKey = new Map()
@@ -311,7 +311,7 @@ function App() {
   const [predictionOverrides, setPredictionOverrides] = useState({})
   const [preview, setPreview] = useState({
     points: samplePoints,
-    axes: { x: "Stretch lambda (-)", y: "Nominal stress P11 (MPa)" },
+    axes: { x: "Stretch λ (-)", y: "Nominal stress P₁₁ (MPa)" },
     metadata: {
       rows: samplePoints.length,
       source: "Waiting for database",
@@ -342,11 +342,10 @@ function App() {
             branch.modelConfig,
           ),
         })))
-        const preferred = authors.find((item) => item.author === "James_1975") ?? authors[0]
+        const preferred = authors.find((item) => item.author === "Treloar_1944") ?? authors[0]
         if (preferred) {
           setAuthor(preferred.author)
-          const fallback = preferred.modes?.find((item) => item.family === "UT") ?? preferred.modes?.[0]
-          setModes(fallback ? [fallback.key] : [])
+          setModes(defaultFittingKeys(preferred))
         }
         setApiState("Ready")
       })
@@ -489,8 +488,7 @@ function App() {
     const nextRegion = regions[0]?.key ?? ""
     setBuddayRegion(nextRegion)
     const options = fittingModeOptions(value, record?.modes ?? [], nextRegion)
-    const fallback = options.find((item) => item.family === "UT") ?? options.find((item) => item.family !== "BT") ?? options[0]
-    setModes(fallback ? [fallback.key] : [])
+    setModes(defaultFittingKeys({ ...record, modes: options }))
   }
 
   function handleBuddayRegionChange(value) {
@@ -979,7 +977,6 @@ function ModelArchitecturePage({
     () => Object.fromEntries(models.map((model) => [model.key, model])),
     [models],
   )
-  const selectedBaseModel = selectedBranch ? modelByKey[selectedBranch.modelKey] : null
   const activeBranches = branches.filter((branch) => branch.enabled)
 
   return (
@@ -1002,8 +999,11 @@ function ModelArchitecturePage({
                 index={index}
                 total={branches.length}
                 model={buildConfiguredModel(modelByKey[branch.modelKey], branch.modelConfig)}
+                baseModel={modelByKey[branch.modelKey]}
+                models={models}
                 active={branch.id === selectedBranch?.id}
                 onSelect={() => onSelectBranch(branch.id)}
+                onUpdate={(updates) => onUpdateBranch(branch.id, updates)}
                 onToggle={() => onUpdateBranch(branch.id, { enabled: !branch.enabled })}
                 onRemove={() => onRemoveBranch(branch.id)}
               />
@@ -1012,60 +1012,12 @@ function ModelArchitecturePage({
         </Card>
 
         <Card title="Architecture Workspace" className="min-w-0">
-          <div className="grid min-w-0 gap-x-5 gap-y-5 lg:grid-cols-[minmax(0,1.08fr)_minmax(340px,0.92fr)]">
+          <div className="grid min-w-0 gap-5">
             <section className="min-w-0">
               <h4 className="text-xs font-bold uppercase text-text-muted">Parallel Structure</h4>
               <div className="mt-2 rounded-lg border border-border bg-subtle p-3">
                 <ArchitectureVisualizer branches={branches} selectedBranchId={selectedBranch?.id} modelByKey={modelByKey} onSelectBranch={onSelectBranch} />
               </div>
-            </section>
-
-            <section className="min-w-0">
-              <h4 className="text-xs font-bold uppercase text-text-muted">Selected Branch</h4>
-              {selectedBranch ? (
-                <div className="mt-2 space-y-3">
-                  <label className="block">
-                    <Label>Branch Name</Label>
-                    <input className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary" value={selectedBranch.name} onChange={(event) => onUpdateBranch(selectedBranch.id, { name: event.target.value })} />
-                  </label>
-                  <label className="block">
-                    <Label>Constitutive Model</Label>
-                    <select
-                      className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary"
-                      value={selectedBranch.modelKey}
-                      onChange={(event) => {
-                        const nextModel = modelByKey[event.target.value]
-                        onUpdateBranch(selectedBranch.id, {
-                          modelKey: event.target.value,
-                          modelConfig: defaultConfigForModel(nextModel),
-                        })
-                      }}
-                    >
-                      {models.map((model) => (
-                        <option key={model.key} value={model.key}>{model.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <ModelConfigurationPanel
-                    model={selectedBaseModel}
-                    config={selectedBranch.modelConfig}
-                    onChange={(modelConfig) => onUpdateBranch(selectedBranch.id, { modelConfig })}
-                  />
-                  <button className={`flex h-9 w-full items-center justify-center gap-1 rounded-lg border px-3 text-sm font-semibold ${selectedBranch.enabled ? "border-primary bg-selection-bg text-primary" : "border-border-strong bg-surface text-text-muted"}`} onClick={() => onUpdateBranch(selectedBranch.id, { enabled: !selectedBranch.enabled })}>
-                    <Icon className="text-base">power_settings_new</Icon>
-                    {selectedBranch.enabled ? "Enabled in Architecture" : "Disabled"}
-                  </button>
-                  {selectedModel && (
-                    <div className="rounded-lg bg-subtle p-3">
-                      <h3 className="text-sm font-semibold">{selectedModel.name}</h3>
-                      <p className="mt-1 text-xs text-text-muted">{typeLabel(selectedModel.type)} · {selectedModel.category}{selectedModel.detail ? ` · ${selectedModel.detail}` : ""}</p>
-                      {selectedModel.reference && <p className="mt-2 text-xs text-text-muted">Reference: {selectedModel.reference}</p>}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <p className="mt-2 text-sm text-text-muted">No branch selected.</p>
-              )}
             </section>
 
             <section className="min-w-0 border-t border-border pt-4">
@@ -1074,6 +1026,7 @@ function ModelArchitecturePage({
                 <div className="space-y-3">
                   <FormulaBlock label="Branch Energy Density" value={selectedModel.formula} />
                   {selectedModel.strainFormula && <FormulaBlock label="Generalized Strain" value={selectedModel.strainFormula} />}
+                  <ModelReferenceCard model={selectedModel} />
                 </div>
               ) : (
                 <p className="text-sm text-text-muted">No model selected.</p>
@@ -1158,26 +1111,6 @@ function OptimizationPage({
             </div>
           </Card>
 
-          <Card title="Parameter Summary">
-            <div className="overflow-hidden rounded-lg border border-border">
-              <div className="grid grid-cols-[1fr_0.7fr_0.8fr] bg-subtle px-2 py-2 text-[11px] font-bold uppercase text-text-muted">
-                <span>Parameter</span>
-                <span>Initial</span>
-                <span>Branch</span>
-              </div>
-              <div className="max-h-44 overflow-y-auto">
-                {parameterRows.slice(0, 10).map((row) => (
-                  <div key={row.key} className="grid grid-cols-[1fr_0.7fr_0.8fr] border-t border-border px-2 py-2 text-sm">
-                    <span className="font-semibold"><LatexInline value={parameterSymbol(row.symbol)} fallback={row.symbol} /></span>
-                    <span>{row.initial || "-"}</span>
-                    <span className="truncate text-text-muted">{row.branch}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            {parameterRows.length > 10 && <p className="mt-2 text-xs text-text-muted">+{parameterRows.length - 10} more parameters included in the solve.</p>}
-          </Card>
-
           <Card title="Optimization Log">
             <div className="space-y-2">
               {optimization.log.map((entry, index) => (
@@ -1197,25 +1130,28 @@ function OptimizationPage({
           </Card>
 
           <Card title="Fitted Parameters">
-            <div className="grid grid-cols-[1fr_0.8fr_0.8fr_0.8fr] rounded-lg border border-border text-sm">
+            <div className="grid grid-cols-[0.85fr_0.7fr_0.75fr_0.9fr_1fr] rounded-lg border border-border text-sm">
               <div className="contents text-[11px] font-bold uppercase text-text-muted">
                 <div className="bg-subtle px-2 py-2">Name</div>
                 <div className="bg-subtle px-2 py-2">Initial</div>
                 <div className="bg-subtle px-2 py-2">Fitted</div>
                 <div className="bg-subtle px-2 py-2">Bounds</div>
+                <div className="bg-subtle px-2 py-2">Branch</div>
               </div>
-              {parameterRows.slice(0, 6).map((row) => {
+              {parameterRows.slice(0, 12).map((row) => {
                 const fitted = row.fitted ?? (optimization.running ? "Solving..." : "")
                 return (
                   <div key={`${row.key}-fit`} className="contents">
                     <div className="border-t border-border px-2 py-2 font-semibold"><LatexInline value={parameterSymbol(row.symbol)} fallback={row.symbol} /></div>
                     <div className="border-t border-border px-2 py-2">{row.initial || "-"}</div>
                     <div className="border-t border-border px-2 py-2">{fitted || "-"}</div>
-                    <div className="border-t border-border px-2 py-2 text-text-muted">{formatBound(row.lower)} / {formatBound(row.upper)}</div>
+                    <div className="border-t border-border px-2 py-2 text-text-muted">{formatBound(row.lower, "lower")} / {formatBound(row.upper, "upper")}</div>
+                    <div className="truncate border-t border-border px-2 py-2 text-text-muted">{row.branch}</div>
                   </div>
                 )
               })}
             </div>
+            {parameterRows.length > 12 && <p className="mt-2 text-xs text-text-muted">+{parameterRows.length - 12} more parameters included in the solve.</p>}
           </Card>
         </div>
       </section>
@@ -1249,58 +1185,118 @@ function CalibrationFitChart({ preview, progress }) {
     ? preview.series
     : [{ modeFamily: "UT", modeLabel: "Experimental", points: preview.points ?? [] }]
   const allPoints = series.flatMap((item) => item.points ?? [])
-  const xs = allPoints.map((point) => point.x)
-  const ys = allPoints.map((point) => point.y)
+  const width = 760
+  const height = 500
+  const pad = { top: 58, right: 36, bottom: 68, left: 84 }
+  const xs = allPoints.map((point) => point.x).filter((value) => Number.isFinite(value))
+  const ys = allPoints.map((point) => point.y).filter((value) => Number.isFinite(value))
   const minX = Math.min(...xs, 0)
-  const maxX = Math.max(...xs, 1)
+  const maxX = Math.max(...xs, minX + 1)
   const minY = Math.min(...ys, 0)
-  const maxY = Math.max(...ys, 1)
-  const padX = Math.max((maxX - minX) * 0.08, 0.1)
-  const padY = Math.max((maxY - minY) * 0.12, 0.1)
+  const maxY = Math.max(...ys, minY + 1)
+  const padX = Math.max((maxX - minX) * 0.06, 0.04)
+  const padY = Math.max((maxY - minY) * 0.12, 0.04)
   const x0 = minX - padX
   const x1 = maxX + padX
-  const y0 = minY - padY
+  const y0 = Math.min(0, minY - padY)
   const y1 = maxY + padY
-  const xScale = (x) => 8 + ((x - x0) / Math.max(x1 - x0, 1e-6)) * 88
-  const yScale = (y) => 92 - ((y - y0) / Math.max(y1 - y0, 1e-6)) * 84
+  const plotWidth = width - pad.left - pad.right
+  const plotHeight = height - pad.top - pad.bottom
+  const xScale = (x) => pad.left + ((x - x0) / Math.max(x1 - x0, 1e-6)) * plotWidth
+  const yScale = (y) => pad.top + (1 - (y - y0) / Math.max(y1 - y0, 1e-6)) * plotHeight
   const fitFactor = 0.82 + Math.min(progress, 100) * 0.0018
+  const ticks = [0, 0.25, 0.5, 0.75, 1]
+  const xLabel = svgMathLabel(series[0]?.axisSymbols?.x ?? "\\lambda")
+  const yLabel = svgMathLabel(series[0]?.axisSymbols?.y ?? "P_{11}")
+  const legendRows = series.map((item, index) => ({
+    key: previewSeriesKey(item, index),
+    color: colorForSeries(item.modeFamily, index),
+    label: formatDisplayLabel(item.modeShortLabel ?? item.modeLabel ?? `Dataset ${index + 1}`),
+  }))
 
   return (
-    <div className="relative h-full min-h-[460px] rounded-lg border border-border bg-white">
-      <svg className="absolute inset-0 h-full w-full" preserveAspectRatio="none" viewBox="0 0 100 100" role="img" aria-label="Calibration fit chart">
-        {[20, 40, 60, 80].map((tick) => (
-          <g key={tick}>
-            <line x1={tick} x2={tick} y1="8" y2="92" stroke="#E5E5EA" strokeDasharray="1.5 1.5" strokeWidth="0.25" />
-            <line x1="8" x2="96" y1={tick} y2={tick} stroke="#E5E5EA" strokeDasharray="1.5 1.5" strokeWidth="0.25" />
-          </g>
-        ))}
-        <line x1="8" x2="8" y1="8" y2="92" stroke="#D1D1D6" strokeWidth="0.5" />
-        <line x1="8" x2="96" y1="92" y2="92" stroke="#D1D1D6" strokeWidth="0.5" />
+    <div className="flex h-full min-h-[500px] flex-col overflow-hidden rounded-lg border border-border bg-white">
+      <svg className="min-h-[440px] w-full flex-1" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Calibration fit chart">
+        <rect x="0" y="0" width={width} height={height} fill="#FFFFFF" />
+        <text x={pad.left} y="28" fill="#1C1C1E" fontSize="18" fontWeight="700">Experimental data and model fit</text>
+        <text x={pad.left} y="48" fill="#6E6E73" fontSize="12">{preview.metadata?.selectedModeShort ?? preview.metadata?.selectedMode ?? "Selected datasets"}</text>
+        {ticks.map((tick) => {
+          const xValue = x0 + tick * (x1 - x0)
+          const yValue = y0 + tick * (y1 - y0)
+          const x = pad.left + tick * plotWidth
+          const y = pad.top + (1 - tick) * plotHeight
+          return (
+            <g key={tick}>
+              <line x1={x} y1={pad.top} x2={x} y2={height - pad.bottom} stroke="#E5E5EA" strokeDasharray="5 5" strokeWidth="1" />
+              <line x1={pad.left} y1={y} x2={width - pad.right} y2={y} stroke="#E5E5EA" strokeDasharray="5 5" strokeWidth="1" />
+              <line x1={x} y1={height - pad.bottom} x2={x} y2={height - pad.bottom + 5} stroke="#8E8E93" strokeWidth="1.2" />
+              <line x1={pad.left - 5} y1={y} x2={pad.left} y2={y} stroke="#8E8E93" strokeWidth="1.2" />
+              <text x={x} y={height - pad.bottom + 22} textAnchor="middle" fill="#3A3A3C" fontSize="12">{formatTick(xValue)}</text>
+              <text x={pad.left - 11} y={y + 4} textAnchor="end" fill="#3A3A3C" fontSize="12">{formatTick(yValue)}</text>
+            </g>
+          )
+        })}
+        <line x1={pad.left} y1={height - pad.bottom} x2={width - pad.right} y2={height - pad.bottom} stroke="#1C1C1E" strokeWidth="1.4" />
+        <line x1={pad.left} y1={pad.top} x2={pad.left} y2={height - pad.bottom} stroke="#1C1C1E" strokeWidth="1.4" />
+        <text x={pad.left + plotWidth / 2} y={height - 18} textAnchor="middle" fill="#1C1C1E" fontSize="14" fontStyle="italic">{xLabel}</text>
+        <text x="20" y={pad.top + plotHeight / 2} textAnchor="middle" fill="#1C1C1E" fontSize="14" fontStyle="italic" transform={`rotate(-90 20 ${pad.top + plotHeight / 2})`}>{yLabel}</text>
         {series.map((item, index) => {
-          const points = item.points ?? []
+          const points = [...(item.points ?? [])]
+            .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+            .sort((a, b) => a.x - b.x)
+          const color = colorForSeries(item.modeFamily, index)
           const fitPath = points
             .map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${xScale(point.x)} ${yScale(point.y * fitFactor)}`)
             .join(" ")
           return (
             <g key={item.mode ?? item.modeLabel ?? index}>
-              <path d={fitPath} fill="none" stroke={colorForSeries(item.modeFamily, index)} strokeWidth="0.8" />
+              {fitPath && <path d={fitPath} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
               {points.map((point, pointIndex) => (
-                <circle key={pointIndex} cx={xScale(point.x)} cy={yScale(point.y)} r="0.8" fill="#FFFFFF" stroke={colorForSeries(item.modeFamily, index)} strokeWidth="0.45" />
+                <circle key={pointIndex} cx={xScale(point.x)} cy={yScale(point.y)} r="4.2" fill="#FFFFFF" stroke={color} strokeWidth="2.2" />
               ))}
             </g>
           )
         })}
       </svg>
-      <div className="absolute left-3 top-3 rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
-        <div className="font-semibold">Experimental vs model fit</div>
-        <div className="mt-1 text-text-muted">{preview.metadata?.selectedModeShort ?? preview.metadata?.selectedMode ?? "Selected datasets"}</div>
-      </div>
-      <div className="absolute bottom-3 right-3 rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
-        <div className="flex items-center gap-2"><span className="h-2 w-4 rounded-full bg-primary" /> Model fit</div>
-        <div className="mt-1 flex items-center gap-2"><span className="h-2 w-2 rounded-full border border-primary bg-white" /> Experimental</div>
+      <div className="border-t border-border bg-white px-4 py-3 text-xs">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <span className="flex items-center gap-2 font-medium text-text-secondary">
+            <span className="h-0.5 w-8 rounded-full bg-text-primary" />
+            Model fit
+          </span>
+          <span className="flex items-center gap-2 font-medium text-text-secondary">
+            <span className="h-3 w-3 rounded-full border-2 border-text-primary bg-white" />
+            Experimental data
+          </span>
+          {legendRows.map((item) => (
+            <span key={item.key} className="flex min-w-0 items-center gap-2 text-text-muted">
+              <span className="h-2.5 w-5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+              <span className="truncate">{item.label}</span>
+            </span>
+          ))}
+        </div>
       </div>
     </div>
   )
+}
+
+function formatTick(value) {
+  if (!Number.isFinite(value)) return "-"
+  const abs = Math.abs(value)
+  if (abs > 0 && (abs < 0.01 || abs >= 1000)) return value.toExponential(1)
+  return Number(value.toPrecision(3)).toString()
+}
+
+function svgMathLabel(value) {
+  return String(value ?? "")
+    .replace(/\\lambda_1/g, "λ₁")
+    .replace(/\\lambda/g, "λ")
+    .replace(/\\gamma/g, "γ")
+    .replace(/\\sigma_\{11\}/g, "σ₁₁")
+    .replace(/\\sigma_\{22\}/g, "σ₂₂")
+    .replace(/P_\{11\}/g, "P₁₁")
+    .replace(/P_\{22\}/g, "P₂₂")
+    .replace(/P_\{12\}/g, "P₁₂")
 }
 
 function PredictionPage({
@@ -1386,7 +1382,7 @@ function PredictionPage({
                       <span className={`h-3 w-3 rounded-full ${meta.dot}`} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-semibold">{formatDisplayLabel(label)}</span>
-                        <span className="block truncate text-xs text-text-muted">{modeFamilyName(option.family)} · {option.points} pts · {stressPlainText(option.stressDisplay, option.stressType)}</span>
+                        <span className="block truncate text-xs text-text-muted">{modeFamilyName(option.family)} · {option.points} pts · <StressText display={option.stressDisplay} fallback={option.stressType} /></span>
                       </span>
                       <span className={`grid h-5 w-5 place-items-center rounded border ${active ? "border-primary bg-primary text-white" : "border-border-strong bg-surface"}`}>
                         {active && <Icon className="text-sm">check_circle</Icon>}
@@ -1559,9 +1555,17 @@ function StressComponentChart({ title, detail, experimental, curves, xLabel, yLa
   const xScale = (x) => pad.left + ((x - x0) / Math.max(x1 - x0, 1e-6)) * (width - pad.left - pad.right)
   const yScale = (y) => height - pad.bottom - ((y - y0) / Math.max(y1 - y0, 1e-6)) * (height - pad.top - pad.bottom)
   const legendColor = colorForSeries(curves[0]?.family ?? experimental[0]?.family, 0)
+  const legendItems = curves.length
+    ? curves.map((curve, index) => ({
+      key: curve.key ?? `${curve.family}-${index}`,
+      color: colorForSeries(curve.family, index),
+      label: curve.label ?? curve.name ?? `Curve ${index + 1}`,
+    }))
+    : [{ key: "experimental", color: legendColor, label: "Experimental data" }]
 
   return (
-    <div className="relative rounded-lg border border-border bg-white" style={{ minHeight }}>
+    <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-white" style={{ minHeight }}>
+      <div className="relative min-h-[360px] flex-1">
       <svg className="absolute inset-0 h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title} chart`}>
         <rect width={width} height={height} fill="#FFFFFF" />
         {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
@@ -1594,14 +1598,23 @@ function StressComponentChart({ title, detail, experimental, curves, xLabel, yLa
         <div className="font-semibold">{title}</div>
         <div className="mt-1 truncate text-text-muted">{detail}</div>
       </div>
-      <div className="absolute bottom-3 right-3 rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
-        <div className="flex items-center gap-2">
-          <span className="h-2 w-5 rounded-full" style={{ backgroundColor: legendColor }} />
+      </div>
+      <div className="border-t border-border bg-white px-4 py-3 text-xs">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+        <span className="flex items-center gap-2 font-medium text-text-secondary">
+          <span className="h-0.5 w-8 rounded-full bg-text-primary" />
           Prediction curve
-        </div>
-        <div className="mt-1 flex items-center gap-2">
-          <span className="h-3 w-3 rounded-full border-2 bg-white" style={{ borderColor: legendColor }} />
+        </span>
+        <span className="flex items-center gap-2 font-medium text-text-secondary">
+          <span className="h-3 w-3 rounded-full border-2 border-text-primary bg-white" />
           Experimental data
+        </span>
+        {legendItems.map((item) => (
+          <span key={item.key} className="flex min-w-0 items-center gap-2 text-text-muted">
+            <span className="h-2.5 w-5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+            <span className="truncate">{formatDisplayLabel(item.label)}</span>
+          </span>
+        ))}
         </div>
       </div>
     </div>
@@ -1609,7 +1622,7 @@ function StressComponentChart({ title, detail, experimental, curves, xLabel, yLa
 }
 
 function secondaryStressLabel(preview) {
-  return preview.metadata?.stressType === "Cauchy" ? "Cauchy stress sigma22" : "Nominal stress P22"
+  return preview.metadata?.stressType === "Cauchy" ? "Cauchy stress σ₂₂" : "Nominal stress P₂₂"
 }
 
 function secondaryDetail(curves) {
@@ -1814,7 +1827,7 @@ function ArchitectureSummary({ branches, activeBranches, selectedDataCount, sele
   )
 }
 
-function BranchCard({ branch, total, model, active, onSelect, onToggle, onRemove }) {
+function BranchCard({ branch, total, model, baseModel, models, active, onSelect, onUpdate, onToggle, onRemove }) {
   return (
     <div
       className={`rounded-lg border p-3 text-left transition ${active ? "border-primary bg-selection-bg" : branch.enabled ? "border-border-strong bg-surface hover:bg-subtle" : "border-border bg-subtle opacity-70"}`}
@@ -1840,10 +1853,55 @@ function BranchCard({ branch, total, model, active, onSelect, onToggle, onRemove
           <div className="mt-1 truncate text-xs text-text-muted">{model?.name ?? branch.modelKey}{model?.detail ? ` · ${model.detail}` : ""}</div>
         </div>
       </div>
+      <label className="mt-3 block" onClick={(event) => event.stopPropagation()}>
+        <Label>Constitutive Model</Label>
+        <select
+          className="h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary"
+          value={branch.modelKey}
+          onChange={(event) => {
+            const nextModel = models.find((item) => item.key === event.target.value)
+            onUpdate({
+              modelKey: event.target.value,
+              modelConfig: defaultConfigForModel(nextModel),
+            })
+          }}
+        >
+          {models.map((item) => (
+            <option key={item.key} value={item.key}>{item.name}</option>
+          ))}
+        </select>
+      </label>
+      <div className="mt-3" onClick={(event) => event.stopPropagation()}>
+        <ModelConfigurationPanel
+          model={baseModel}
+          config={branch.modelConfig}
+          onChange={(modelConfig) => onUpdate({ modelConfig })}
+        />
+      </div>
       <div className="mt-3 grid grid-cols-2 gap-1">
         <IconButton label={branch.enabled ? "Disable" : "Enable"} onClick={onToggle}>power_settings_new</IconButton>
         <IconButton label="Remove" disabled={total === 1} onClick={onRemove}>delete</IconButton>
       </div>
+    </div>
+  )
+}
+
+function ModelReferenceCard({ model }) {
+  if (!model) return null
+  return (
+    <div className="rounded-lg border border-border bg-subtle p-3">
+      <h3 className="text-sm font-semibold">{model.name}</h3>
+      <p className="mt-1 text-xs text-text-muted">{typeLabel(model.type)} · {model.category}{model.detail ? ` · ${model.detail}` : ""}</p>
+      {model.reference && (
+        <p className="mt-2 text-xs text-text-muted">
+          Reference:{" "}
+          {model.referenceUrl ? (
+            <a className="font-semibold text-primary hover:underline" href={model.referenceUrl} target="_blank" rel="noreferrer">
+              {model.reference}
+            </a>
+          ) : model.reference}
+        </p>
+      )}
     </div>
   )
 }
@@ -2021,16 +2079,21 @@ function Sidebar({ activeStep, onStepChange }) {
           )
         })}
       </nav>
-      <div className="border-t border-border pt-3">
-        {[
-          ["menu_book", "Documentation"],
-          ["settings", "Settings"],
-        ].map(([icon, label]) => (
-          <button key={label} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-primary hover:bg-subtle">
-            <Icon className="text-lg">{icon}</Icon>
-            {label}
-          </button>
-        ))}
+      <div className="space-y-3 border-t border-border pt-3">
+        <div className="rounded-lg border border-border bg-subtle p-3">
+          <div className="text-[11px] font-bold uppercase text-text-muted">Author</div>
+          <div className="mt-1 text-sm font-semibold text-text-primary">Chongran Zhao</div>
+          <div className="mt-0.5 text-xs leading-5 text-text-muted">Incoming Ph.D. Student · Brown University</div>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {["Constitutive Modeling", "Soft Tissues"].map((item) => (
+              <span key={item} className="rounded border border-border bg-white px-1.5 py-0.5 text-[10px] font-semibold text-text-muted">{item}</span>
+            ))}
+          </div>
+          <a className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline" href="https://chongran-zhao.github.io" target="_blank" rel="noreferrer">
+            Homepage
+            <Icon className="text-xs">arrow_forward</Icon>
+          </a>
+        </div>
       </div>
     </aside>
   )
@@ -2056,16 +2119,10 @@ function Topbar({ activeStep }) {
         <p className="text-xs text-text-muted">{subtitle} · {title}</p>
       </div>
       <div className="flex items-center gap-3">
-        <label className="relative">
-          <Icon className="absolute left-2 top-1/2 -translate-y-1/2 text-lg text-text-muted">search</Icon>
-          <input className="h-10 w-56 rounded-lg border border-border-strong bg-surface pl-8 pr-3 text-sm outline-none focus:border-primary" placeholder="Search..." />
-        </label>
-        <button className="grid h-9 w-9 place-items-center rounded-lg border border-border hover:bg-subtle">
-          <Icon className="text-lg">settings</Icon>
-        </button>
-        <button className="grid h-9 w-9 place-items-center rounded-lg border border-border hover:bg-subtle">
-          <Icon className="text-lg">help</Icon>
-        </button>
+        <a className="flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border border-border px-3 text-sm font-semibold hover:bg-subtle" href="mailto:chongran_zhao@brown.edu">
+          <Icon className="text-base">info</Icon>
+          Contact me
+        </a>
       </div>
     </header>
   )
@@ -2102,7 +2159,7 @@ function ModeButton({ option, meta, active, onClick }) {
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-semibold">{formatDisplayLabel(label)}</span>
         <span className="mt-0.5 block truncate text-xs font-normal text-text-muted">
-          {predictionOnly ? "Prediction only" : option.loadingLabel ?? modeFamilyName(option.family)} · {option.points} pts · {stressPlainText(option.stressDisplay, option.stressType)}
+          {predictionOnly ? "Prediction only" : option.loadingLabel ?? modeFamilyName(option.family)} · {option.points} pts · <StressText display={option.stressDisplay} fallback={option.stressType} />
         </span>
       </span>
       <span className={`grid h-5 w-5 place-items-center rounded border ${active ? "border-primary bg-primary text-white" : "border-border-strong bg-surface"}`}>
@@ -2151,8 +2208,8 @@ function ParameterTable({ parameters, values, onChange, onReset }) {
               value={values[param.name] ?? ""}
               onChange={(event) => onChange(param.name, event.target.value)}
             />
-            <span>{formatBound(param.bounds?.[0])}</span>
-            <span>{formatBound(param.bounds?.[1])}</span>
+            <span>{formatBound(param.bounds?.[0], "lower")}</span>
+            <span>{formatBound(param.bounds?.[1], "upper")}</span>
           </div>
         ))}
       </div>
@@ -2176,7 +2233,7 @@ function StressTypeText({ display, fallback }) {
   return (
     <>
       <span>{display.label}</span>
-      <span className="ml-1 align-middle">
+      <span className="ml-1 align-middle stress-symbol">
         <LatexInline value={display.symbol} fallback={display.plain ?? fallback} />
       </span>
     </>
@@ -2184,7 +2241,30 @@ function StressTypeText({ display, fallback }) {
 }
 
 function stressPlainText(display, fallback) {
-  return display?.plain ?? (fallback === "PK1" ? "First Piola-Kirchhoff stress P" : fallback)
+  return display?.plain ?? (fallback === "PK1" ? "First Piola-Kirchhoff stress P" : replaceStressWords(fallback))
+}
+
+function StressText({ display, fallback }) {
+  const text = stressPlainText(display, fallback)
+  if (display?.symbol) {
+    return (
+      <>
+        <span>{display.label}</span>
+        <span className="ml-1 align-middle stress-symbol">
+          <LatexInline value={display.symbol} fallback={text} />
+        </span>
+      </>
+    )
+  }
+  const rendered = replaceStressWords(text)
+  return rendered
+}
+
+function replaceStressWords(value) {
+  return String(value ?? "")
+    .replace(/sigma/g, "σ")
+    .replace(/lambda/g, "λ")
+    .replace(/gamma/g, "γ")
 }
 
 function modeFamilyName(family) {
@@ -2215,8 +2295,9 @@ function parameterSymbol(name) {
 
 function renderFormula(value, displayMode = true) {
   if (!value) return ""
+  const normalized = String(value).replace(/\\boldsymbol\{([^{}]+)\}/g, "\\mathbf{$1}")
   try {
-    return katex.renderToString(value, {
+    return katex.renderToString(normalized, {
       displayMode,
       throwOnError: false,
       strict: false,
@@ -2235,8 +2316,14 @@ function typeLabel(type) {
   }[type] ?? type
 }
 
-function formatBound(value) {
-  return value === null || value === undefined ? "free" : Number(value).toPrecision(4)
+function formatBound(value, side = "upper") {
+  if (value === null || value === undefined || value === "") {
+    return side === "lower" ? "-Inf" : "Inf"
+  }
+  const number = Number(value)
+  if (number === Infinity) return "Inf"
+  if (number === -Infinity) return "-Inf"
+  return number.toPrecision(4)
 }
 
 function Metadata({ preview, apiState }) {
@@ -2381,25 +2468,25 @@ function PreviewTensorOverlay({ series }) {
   if (!series.length) return null
   const primary = series.find((item) => item.mode === activeMode) ?? series[0]
   return (
-    <div className="border-b border-border bg-subtle/70 px-3 py-2">
+    <div className="border-b border-border bg-subtle/70 px-3 py-3">
       <div className="grid gap-2 xl:grid-cols-[minmax(190px,0.75fr)_minmax(0,1.45fr)]">
         <div className="min-w-0">
           <div className="flex items-center justify-between gap-2">
             <div className="text-[10px] font-bold uppercase tracking-wide text-text-muted">Tensor form</div>
             <span className="shrink-0 rounded border border-border bg-white px-1.5 py-0.5 text-[10px] font-semibold text-text-muted">{series.reduce((sum, item) => sum + (item.points?.length ?? 0), 0)} pts</span>
           </div>
-          <div className="mt-1 flex max-h-[46px] flex-wrap gap-1 overflow-y-auto pr-0.5">
+          <div className="mt-2 flex max-h-[62px] flex-wrap gap-1 overflow-y-auto pr-0.5">
             {series.map((item, index) => {
               const active = item.mode === primary.mode
               return (
-                <button key={item.mode} className={`min-w-0 max-w-full rounded border px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${active ? "border-primary bg-selection-bg text-primary" : "border-border bg-white text-text-muted hover:bg-subtle"}`} onClick={() => setActiveMode(item.mode)}>
+                <button key={previewSeriesKey(item, index)} className={`min-w-0 max-w-full rounded border px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${active ? "border-primary bg-selection-bg text-primary" : "border-border bg-white text-text-muted hover:bg-subtle"}`} onClick={() => setActiveMode(item.mode)}>
                   <span className="mr-1 inline-block h-2 w-2.5 rounded-full align-middle" style={{ backgroundColor: colorForSeries(item.modeFamily, index) }} />
                   <span className="align-middle">{formatDisplayLabel(item.modeShortLabel ?? item.modeLabel)}</span>
                 </button>
               )
             })}
           </div>
-          <div className="mt-1 truncate text-[10px] text-text-muted">
+          <div className="mt-2 truncate text-[10px] text-text-muted">
             {primary.loadingLabel ?? modeFamilyName(primary.modeFamily)} · <LatexInline value={primary.tensorExpressions?.component ?? primary.axisSymbols?.y ?? "P"} fallback={primary.axisSymbols?.y ?? "P"} />
           </div>
         </div>
@@ -2416,8 +2503,10 @@ function FormulaMini({ label, value }) {
   const rendered = useMemo(() => renderFormula(value), [value])
   return (
     <div className="min-h-[42px] rounded border border-border bg-white/80 px-1.5 py-1">
-      <div className="mb-0.5 text-[10px] font-bold uppercase text-text-muted">{label}</div>
-      <div className="formula-compact overflow-hidden text-xs">
+      <div className="mb-1 text-[10px] font-bold uppercase text-text-muted">
+        <span className="tensor-letter">{label}</span>
+      </div>
+      <div className="formula-compact tensor-formula overflow-hidden text-xs">
         {rendered ? <span dangerouslySetInnerHTML={{ __html: rendered }} /> : value ?? "-"}
       </div>
     </div>
@@ -2443,9 +2532,9 @@ function ExperimentalComponentChart({ series, xLabel, yLabel, title }) {
   const legendItems = series.slice(0, 5)
 
   return (
-    <div className="flex h-full min-h-[520px] w-full flex-col overflow-hidden rounded-lg border border-border bg-white">
+    <div className="flex h-full min-h-[560px] w-full flex-col overflow-hidden rounded-lg border border-border bg-white">
       <PreviewTensorOverlay series={series} />
-      <div className="relative min-h-[410px] flex-1">
+      <div className="relative min-h-[420px] flex-1">
       <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Experimental stress stretch chart">
         <rect x="0" y="0" width={width} height={height} fill="#FFFFFF" />
         {ticks.map((tick) => {
@@ -2467,10 +2556,10 @@ function ExperimentalComponentChart({ series, xLabel, yLabel, title }) {
             .map((point, index) => `${index === 0 ? "M" : "L"} ${scaleX(point.plotX)} ${scaleY(point.plotY)}`)
             .join(" ")
           return (
-            <g key={item.mode}>
+            <g key={previewSeriesKey(item, seriesIndex)}>
               {seriesPath && <path d={seriesPath} fill="none" stroke={color} strokeWidth="2" opacity="0.42" />}
               {(item.points ?? []).map((point, index) => (
-                <circle key={`${item.mode}-${point.plotX}-${point.plotY}-${index}`} cx={scaleX(point.plotX)} cy={scaleY(point.plotY)} r="4" fill={color} stroke="#FFFFFF" strokeWidth="1.5" />
+                <circle key={`${previewSeriesKey(item, seriesIndex)}-${point.plotX}-${point.plotY}-${index}`} cx={scaleX(point.plotX)} cy={scaleY(point.plotY)} r="4" fill={color} stroke="#FFFFFF" strokeWidth="1.5" />
               ))}
             </g>
           )
@@ -2482,21 +2571,25 @@ function ExperimentalComponentChart({ series, xLabel, yLabel, title }) {
       <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 -rotate-90 text-xs text-text-muted">
         <LatexInline value={yLabel} fallback={yLabel} />
       </div>
-      <div className="absolute bottom-10 right-4 max-w-[240px] rounded-md border border-border-strong bg-white/95 px-2 py-1.5 text-xs shadow-panel">
-        <div className="mb-1 font-semibold text-text-primary">{title}</div>
-        <div className="flex max-h-28 flex-col gap-1 overflow-hidden">
+      </div>
+      <div className="border-t border-border bg-white px-4 py-3 text-xs">
+        <div className="mb-2 font-semibold text-text-primary">{title}</div>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
           {legendItems.map((item, index) => (
-            <div key={item.mode ?? item.modeLabel} className="flex min-w-0 items-center gap-2">
-              <span className="h-2 w-4 shrink-0 rounded-full" style={{ backgroundColor: colorForSeries(item.modeFamily, index) }} />
+            <div key={previewSeriesKey(item, index)} className="flex min-w-0 items-center gap-2">
+              <span className="h-2.5 w-5 shrink-0 rounded-full" style={{ backgroundColor: colorForSeries(item.modeFamily, index) }} />
               <span className="truncate text-text-muted">{formatDisplayLabel(item.modeShortLabel ?? item.modeLabel ?? "Experimental set")}</span>
             </div>
           ))}
+          {series.length > legendItems.length && <div className="text-text-muted">+{series.length - legendItems.length} more</div>}
         </div>
-        {series.length > legendItems.length && <div className="mt-1 text-text-muted">+{series.length - legendItems.length} more</div>}
-      </div>
       </div>
     </div>
   )
+}
+
+function previewSeriesKey(item, index) {
+  return item.mode ?? `${item.modeFamily ?? "series"}-${item.modeLabel ?? item.modeShortLabel ?? "experimental"}-${index}`
 }
 
 function colorForSeries(family, index = 0) {
