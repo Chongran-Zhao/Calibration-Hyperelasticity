@@ -2044,6 +2044,22 @@ function springPath(startX, endX, y) {
   return points.join(" ")
 }
 
+function BrandMark({ className = "h-8 w-8" }) {
+  return (
+    <svg className={className} viewBox="0 0 64 64" role="img" aria-label="Calibration for Hyperelasticity logo">
+      <rect width="64" height="64" rx="14" fill="#FFFFFF" />
+      <rect x="4" y="4" width="56" height="56" rx="12" fill="#F5F5F7" stroke="#D1D1D6" strokeWidth="2" />
+      <path d="M16 46H52" fill="none" stroke="#1C1C1E" strokeWidth="2.6" strokeLinecap="round" />
+      <path d="M16 46V14" fill="none" stroke="#1C1C1E" strokeWidth="2.6" strokeLinecap="round" />
+      <path d="M18 43C24 38 29 36 34 34C40 31.5 45 27 50 17" fill="none" stroke="#007AFF" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M18 43C24 40 29 39 34 37C40 34.5 45 31 50 24" fill="none" stroke="#059669" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" opacity="0.9" />
+      {[["23", "39"], ["30", "36"], ["38", "32"], ["45", "25"]].map(([cx, cy]) => (
+        <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="2.2" fill="#FFFFFF" stroke="#EF4444" strokeWidth="2" />
+      ))}
+    </svg>
+  )
+}
+
 function Sidebar({ activeStep, onStepChange }) {
   const items = [
     ["experimental", "science", "Experimental Data", "ready"],
@@ -2053,9 +2069,12 @@ function Sidebar({ activeStep, onStepChange }) {
   ]
   return (
     <aside className="sticky top-0 flex h-screen flex-col border-r border-border bg-surface px-3 py-4">
-      <div className="px-2 pb-6">
-        <h1 className="text-[15px] font-semibold">Calibration Shell</h1>
-        <p className="mt-0.5 text-xs text-text-muted">Precision Workflow</p>
+      <div className="flex items-center gap-2 px-2 pb-6">
+        <BrandMark className="h-9 w-9 shrink-0" />
+        <div className="min-w-0">
+          <h1 className="truncate text-[15px] font-semibold">Calibration Shell</h1>
+          <p className="mt-0.5 truncate text-xs text-text-muted">Precision Workflow</p>
+        </div>
       </div>
       <nav className="flex flex-1 flex-col gap-1">
         {items.map(([key, icon, label, state]) => {
@@ -2114,9 +2133,12 @@ function Topbar({ activeStep }) {
   }[activeStep] ?? "Project: Experimental Data Workspace"
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-surface px-4">
-      <div>
+      <div className="flex min-w-0 items-center gap-3">
+        <BrandMark className="hidden h-9 w-9 shrink-0 sm:block" />
+        <div className="min-w-0">
         <h2 className="text-lg font-semibold">Calibration for Hyperelasticity</h2>
         <p className="text-xs text-text-muted">{subtitle} · {title}</p>
+        </div>
       </div>
       <div className="flex items-center gap-3">
         <a className="flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border border-border px-3 text-sm font-semibold hover:bg-subtle" href="mailto:chongran_zhao@brown.edu">
