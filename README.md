@@ -161,16 +161,6 @@ python3 tests/test_regression.py
 Recomputes stress tensors, objective values and full calibrations for every
 model family against `tests/baseline.json` and fails on numerical drift.
 
-## Example: Zhan non-Gaussian
-
-The signature example reproduces Fig. 7 of Zhan et al. (JMPS) — fit the Zhan
-non-Gaussian model to James (1975) uniaxial tension, then predict biaxial
-tension:
-
-<div align="center">
-  <img src="assets/examples/example.gif" width="640" alt="Zhan non-Gaussian calibration and prediction" />
-</div>
-
 ## Author
 
 **Chongran Zhao** — Ph.D. student in Engineering, Brown University · M.Eng. in
