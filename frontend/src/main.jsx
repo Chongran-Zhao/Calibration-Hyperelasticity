@@ -25,7 +25,9 @@ import katex from "katex"
 import "katex/dist/katex.min.css"
 import "./styles.css"
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000"
+// Same-origin by default: the FastAPI server also hosts the built frontend
+// (desktop app / production). `npm run dev` proxies /api via vite.config.js.
+const API_BASE = import.meta.env.VITE_API_BASE ?? ""
 const defaultBranches = [
   { id: "spring-1", name: "Spring 1", modelKey: "ZhanNonGaussian", enabled: true },
 ]
