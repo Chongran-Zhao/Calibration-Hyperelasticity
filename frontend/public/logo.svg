@@ -1,14 +1,49 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
-  <title id="title">Calibration for Hyperelasticity</title>
-  <desc id="desc">A calibrated stress-stretch curve inside a square frame.</desc>
-  <rect width="64" height="64" rx="14" fill="#ffffff"/>
-  <rect x="4" y="4" width="56" height="56" rx="12" fill="#f5f5f7" stroke="#d1d1d6" stroke-width="2"/>
-  <path d="M16 46H52" fill="none" stroke="#1c1c1e" stroke-width="2.6" stroke-linecap="round"/>
-  <path d="M16 46V14" fill="none" stroke="#1c1c1e" stroke-width="2.6" stroke-linecap="round"/>
-  <path d="M18 43C24 38 29 36 34 34C40 31.5 45 27 50 17" fill="none" stroke="#007aff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M18 43C24 40 29 39 34 37C40 34.5 45 31 50 24" fill="none" stroke="#059669" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
-  <circle cx="23" cy="39" r="2.2" fill="#ffffff" stroke="#ef4444" stroke-width="2"/>
-  <circle cx="30" cy="36" r="2.2" fill="#ffffff" stroke="#ef4444" stroke-width="2"/>
-  <circle cx="38" cy="32" r="2.2" fill="#ffffff" stroke="#ef4444" stroke-width="2"/>
-  <circle cx="45" cy="25" r="2.2" fill="#ffffff" stroke="#ef4444" stroke-width="2"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="t d">
+  <title id="t">Calibration for Hyperelasticity</title>
+  <desc id="d">A fitted strain-stiffening stress-stretch curve over calibration data points on a deep azure app tile.</desc>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4C8DFF"/>
+      <stop offset="0.5" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#1B3A96"/>
+    </linearGradient>
+    <radialGradient id="gloss" cx="0.5" cy="0.02" r="0.9">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.30"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="curve" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#EAF2FF"/>
+      <stop offset="1" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#0B1E52" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#tile)"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#gloss)"/>
+
+  <g stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="3">
+    <path d="M170 132V392"/>
+    <path d="M256 132V392"/>
+    <path d="M342 132V392"/>
+    <path d="M128 218H392"/>
+    <path d="M128 305H392"/>
+  </g>
+
+  <path d="M128 392V120" fill="none" stroke="#FFFFFF" stroke-opacity="0.5" stroke-width="7" stroke-linecap="round"/>
+  <path d="M128 392H396" fill="none" stroke="#FFFFFF" stroke-opacity="0.5" stroke-width="7" stroke-linecap="round"/>
+
+  <path d="M138 372C210 366 266 350 312 306C352 266 368 200 382 138"
+        fill="none" stroke="url(#curve)" stroke-width="26"
+        stroke-linecap="round" stroke-linejoin="round" filter="url(#soft)"/>
+
+  <g fill="#FBBF24" stroke="#FFFFFF" stroke-width="5">
+    <circle cx="176" cy="366" r="13"/>
+    <circle cx="242" cy="344" r="13"/>
+    <circle cx="300" cy="312" r="13"/>
+    <circle cx="344" cy="256" r="13"/>
+    <circle cx="374" cy="176" r="13"/>
+  </g>
 </svg>

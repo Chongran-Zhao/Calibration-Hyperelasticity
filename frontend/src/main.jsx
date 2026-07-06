@@ -823,7 +823,7 @@ function App() {
         <Sidebar activeStep={activeStep} onStepChange={setActiveStep} />
         <div className="flex min-w-0 flex-col">
           <Topbar activeStep={activeStep} />
-          <main className="min-w-0 flex-1 overflow-x-hidden p-4 pb-24">
+          <main className="min-w-0 flex-1 overflow-x-hidden p-5 pb-24">
             {activeStep === "experimental" ? (
               <ExperimentalDataPage
                 datasets={datasets}
@@ -886,6 +886,7 @@ function App() {
             rows={preview.metadata?.rows ?? 0}
             selectedBranch={selectedBranch}
             selectedModel={selectedModel}
+            onStepChange={setActiveStep}
             onNext={() => {
               if (activeStep === "experimental") setActiveStep("models")
               else if (activeStep === "models") setActiveStep("optimization")
@@ -2053,15 +2054,15 @@ function ArchitectureVisualizer({ branches, selectedBranchId, modelByKey, onSele
     <div className="overflow-x-auto">
       <svg className="h-auto min-h-[260px] w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Parallel spring architecture">
         <rect x="0" y="0" width={width} height={height} rx="10" fill="#FFFFFF" />
-        <line x1={railLeft} y1={top - 24} x2={railLeft} y2={top + (branches.length - 1) * rowGap + 24} stroke="#717786" strokeWidth="4" strokeLinecap="round" />
-        <line x1={railRight} y1={top - 24} x2={railRight} y2={top + (branches.length - 1) * rowGap + 24} stroke="#717786" strokeWidth="4" strokeLinecap="round" />
-        <text x={railLeft} y={top - 38} textAnchor="middle" fontSize="12" fontWeight="700" fill="#6E6E73">F input</text>
-        <text x={railRight} y={top - 38} textAnchor="middle" fontSize="12" fontWeight="700" fill="#6E6E73">P total</text>
+        <line x1={railLeft} y1={top - 24} x2={railLeft} y2={top + (branches.length - 1) * rowGap + 24} stroke="#8494AC" strokeWidth="4" strokeLinecap="round" />
+        <line x1={railRight} y1={top - 24} x2={railRight} y2={top + (branches.length - 1) * rowGap + 24} stroke="#8494AC" strokeWidth="4" strokeLinecap="round" />
+        <text x={railLeft} y={top - 38} textAnchor="middle" fontSize="12" fontWeight="700" fill="#5B6B84">F input</text>
+        <text x={railRight} y={top - 38} textAnchor="middle" fontSize="12" fontWeight="700" fill="#5B6B84">P total</text>
         {branches.map((branch, index) => {
           const model = buildConfiguredModel(modelByKey[branch.modelKey], branch.modelConfig)
           const y = top + index * rowGap
           const selected = branch.id === selectedBranchId
-          const color = selected ? "#007AFF" : branch.enabled ? "#414755" : "#C1C6D7"
+          const color = selected ? "#2563EB" : branch.enabled ? "#3B4A66" : "#C0CADC"
           const opacity = branch.enabled ? 1 : 0.45
           const springStart = railLeft + 70
           const springEnd = railRight - 70
@@ -2073,9 +2074,9 @@ function ArchitectureVisualizer({ branches, selectedBranchId, modelByKey, onSele
               <line x1={springEnd} y1={y} x2={railRight} y2={y} stroke={color} strokeWidth={selected ? "3" : "2"} />
               <circle cx={railLeft} cy={y} r="7" fill="#FFFFFF" stroke={color} strokeWidth="2" />
               <circle cx={railRight} cy={y} r="7" fill="#FFFFFF" stroke={color} strokeWidth="2" />
-              <rect x={springStart + 112} y={y - 25} width="210" height="50" rx="8" fill={selected ? "#EAF3FF" : "#F9F9FB"} stroke={selected ? "#007AFF" : "#E5E5EA"} />
-              <text x={springStart + 126} y={y - 5} fontSize="12" fontWeight="700" fill="#1C1C1E">{branch.name}</text>
-              <text x={springStart + 126} y={y + 13} fontSize="11" fill="#6E6E73">{model?.name ?? branch.modelKey}{model?.detail ? ` · ${model.detail}` : ""}</text>
+              <rect x={springStart + 112} y={y - 25} width="210" height="50" rx="8" fill={selected ? "#ECF2FE" : "#F6F9FF"} stroke={selected ? "#2563EB" : "#E3E9F2"} />
+              <text x={springStart + 126} y={y - 5} fontSize="12" fontWeight="700" fill="#0E1B33">{branch.name}</text>
+              <text x={springStart + 126} y={y + 13} fontSize="11" fill="#5B6B84">{model?.name ?? branch.modelKey}{model?.detail ? ` · ${model.detail}` : ""}</text>
             </g>
           )
         })}
@@ -2099,14 +2100,24 @@ function springPath(startX, endX, y) {
 function BrandMark({ className = "h-8 w-8" }) {
   return (
     <svg className={className} viewBox="0 0 64 64" role="img" aria-label="Calibration for Hyperelasticity logo">
-      <rect width="64" height="64" rx="14" fill="#FFFFFF" />
-      <rect x="4" y="4" width="56" height="56" rx="12" fill="#F5F5F7" stroke="#D1D1D6" strokeWidth="2" />
-      <path d="M16 46H52" fill="none" stroke="#1C1C1E" strokeWidth="2.6" strokeLinecap="round" />
-      <path d="M16 46V14" fill="none" stroke="#1C1C1E" strokeWidth="2.6" strokeLinecap="round" />
-      <path d="M18 43C24 38 29 36 34 34C40 31.5 45 27 50 17" fill="none" stroke="#007AFF" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M18 43C24 40 29 39 34 37C40 34.5 45 31 50 24" fill="none" stroke="#059669" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" opacity="0.9" />
-      {[["23", "39"], ["30", "36"], ["38", "32"], ["45", "25"]].map(([cx, cy]) => (
-        <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="2.2" fill="#FFFFFF" stroke="#EF4444" strokeWidth="2" />
+      <defs>
+        <linearGradient id="bm-tile" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#4C8DFF" />
+          <stop offset="0.5" stopColor="#2563EB" />
+          <stop offset="1" stopColor="#1B3A96" />
+        </linearGradient>
+      </defs>
+      <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#bm-tile)" />
+      <g stroke="#FFFFFF" strokeOpacity="0.16" strokeWidth="1">
+        <path d="M27 17V47" />
+        <path d="M40 17V47" />
+        <path d="M16 30H50" />
+      </g>
+      <path d="M16 47V15" fill="none" stroke="#FFFFFF" strokeOpacity="0.5" strokeWidth="2" strokeLinecap="round" />
+      <path d="M16 47H50" fill="none" stroke="#FFFFFF" strokeOpacity="0.5" strokeWidth="2" strokeLinecap="round" />
+      <path d="M18 44C28 43 34 40 39 33C43.5 27 46 22 48 16" fill="none" stroke="#FFFFFF" strokeWidth="4.2" strokeLinecap="round" strokeLinejoin="round" />
+      {[["24", "43"], ["34", "37"], ["44", "24"]].map(([cx, cy]) => (
+        <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="2.6" fill="#FBBF24" stroke="#FFFFFF" strokeWidth="1.4" />
       ))}
     </svg>
   )
@@ -2114,65 +2125,78 @@ function BrandMark({ className = "h-8 w-8" }) {
 
 function Sidebar({ activeStep, onStepChange }) {
   const items = [
-    ["experimental", "science", "Experimental Data", "ready"],
-    ["models", "schema", "Model Architecture", "ready"],
-    ["optimization", "tune", "Optimization", "ready"],
-    ["prediction", "analytics", "Prediction", "ready"],
+    ["experimental", "Experimental Data", "Select source datasets"],
+    ["models", "Model Architecture", "Compose the energy model"],
+    ["optimization", "Optimization", "Calibrate parameters"],
+    ["prediction", "Prediction", "Reuse and forecast"],
   ]
+  const activeIndex = items.findIndex(([key]) => key === activeStep)
   return (
-    <aside className="sticky top-0 flex h-screen flex-col border-r border-border bg-surface px-3 py-4">
-      <div className="flex items-center gap-2 px-2 pb-6">
-        <BrandMark className="h-9 w-9 shrink-0" />
+    <aside className="surface-rail sticky top-0 flex h-screen flex-col border-r border-border px-4 py-5">
+      <div className="flex items-center gap-3 px-1 pb-6">
+        <BrandMark className="h-10 w-10 shrink-0 rounded-[11px] shadow-card" />
         <div className="min-w-0">
-          <h1 className="truncate text-[15px] font-semibold">Calibration Shell</h1>
-          <p className="mt-0.5 truncate text-xs text-text-muted">Precision Workflow</p>
+          <h1 className="truncate text-[15px] font-semibold leading-tight">Hyperelastic</h1>
+          <h1 className="truncate text-[15px] font-semibold leading-tight">Calibration</h1>
         </div>
       </div>
-      <nav className="flex flex-1 flex-col gap-1">
-        {items.map(([key, icon, label, state]) => {
+
+      <div className="mb-2 px-1 text-[10px] font-bold uppercase tracking-[0.14em] text-text-disabled">Workflow</div>
+      <nav className="relative flex flex-1 flex-col gap-1">
+        {items.map(([key, label, description], index) => {
           const active = activeStep === key
+          const passed = activeIndex > -1 && index < activeIndex
+          const isLast = index === items.length - 1
           return (
-          <button
-            key={label}
-            onClick={() => state !== "locked" && onStepChange(key)}
-            className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition ${
-              active
-                ? "bg-selection-bg font-semibold text-primary"
-                : state === "locked"
-                  ? "text-text-disabled"
-                  : "text-text-primary hover:bg-subtle"
-            }`}
-          >
-            <Icon className="text-lg">{icon}</Icon>
-            <span className="flex-1">{label}</span>
-            {active && <Icon className="text-base">chevron_right</Icon>}
-          </button>
+            <button
+              key={key}
+              onClick={() => onStepChange(key)}
+              className={`group relative flex items-start gap-3 rounded-xl px-2.5 py-2.5 text-left transition ${
+                active ? "bg-selection-bg" : "hover:bg-subtle"
+              }`}
+            >
+              {!isLast && (
+                <span
+                  className="absolute left-[26px] top-[42px] h-[calc(100%-24px)] w-0.5 rounded-full"
+                  style={{ backgroundColor: passed ? "var(--color-primary)" : "var(--color-border-strong)" }}
+                />
+              )}
+              <span
+                className={`relative z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full text-[12px] font-bold transition ${
+                  active
+                    ? "primary-gradient text-white shadow-primary-glow"
+                    : passed
+                      ? "bg-primary text-white"
+                      : "border border-border-strong bg-surface text-text-muted group-hover:border-primary group-hover:text-primary"
+                }`}
+              >
+                {passed ? <Icon className="text-sm">check</Icon> : index + 1}
+              </span>
+              <span className="min-w-0 flex-1 pt-0.5">
+                <span className={`block truncate text-sm font-semibold ${active ? "text-primary" : "text-text-primary"}`}>{label}</span>
+                <span className="mt-0.5 block truncate text-[11px] leading-4 text-text-muted">{description}</span>
+              </span>
+            </button>
           )
         })}
       </nav>
-      <div className="space-y-3 border-t border-border pt-3">
-        <div className="rounded-lg border border-border bg-subtle p-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-[11px] font-bold uppercase tracking-wide text-text-muted">About</div>
-              <div className="mt-1 text-sm font-semibold text-text-primary">Chongran Zhao</div>
-            </div>
-            <span className="rounded border border-border bg-white px-1.5 py-0.5 text-[10px] font-semibold text-text-muted">Brown</span>
+
+      <div className="mt-3 rounded-xl border border-border bg-surface/80 p-3 shadow-panel">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-text-disabled">Author</div>
+            <div className="mt-1 text-sm font-semibold text-text-primary">Chongran Zhao</div>
           </div>
-          <div className="mt-2 space-y-1 text-xs leading-5 text-text-muted">
-            <div>Ph.D. student in Engineering, Brown University</div>
-            <div>M.Eng. in Mechanics, SUSTech</div>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {["Hyperelasticity", "Constitutive Modeling", "Soft Tissues"].map((item) => (
-              <span key={item} className="rounded border border-border bg-white px-1.5 py-0.5 text-[10px] font-semibold text-text-muted">{item}</span>
-            ))}
-          </div>
-          <div className="mt-3 grid grid-cols-3 gap-1 text-center text-[11px] font-semibold">
-            <a className="rounded border border-border bg-white px-1.5 py-1 text-primary hover:bg-selection-bg" href="https://chongran-zhao.github.io" target="_blank" rel="noreferrer">Website</a>
-            <a className="rounded border border-border bg-white px-1.5 py-1 text-primary hover:bg-selection-bg" href="https://github.com/Chongran-Zhao" target="_blank" rel="noreferrer">GitHub</a>
-            <a className="rounded border border-border bg-white px-1.5 py-1 text-primary hover:bg-selection-bg" href="mailto:chongran_zhao@brown.edu">Email</a>
-          </div>
+          <span className="rounded-md border border-border bg-subtle px-1.5 py-0.5 text-[10px] font-semibold text-text-muted">Brown</span>
+        </div>
+        <div className="mt-2 space-y-0.5 text-[11px] leading-4 text-text-muted">
+          <div>Ph.D. student in Engineering, Brown University</div>
+          <div>M.Eng. in Mechanics, SUSTech</div>
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-1.5 text-center text-[11px] font-semibold">
+          <a className="rounded-lg border border-border bg-surface px-1.5 py-1.5 text-primary transition hover:border-primary hover:bg-selection-bg" href="https://chongran-zhao.github.io" target="_blank" rel="noreferrer">Website</a>
+          <a className="rounded-lg border border-border bg-surface px-1.5 py-1.5 text-primary transition hover:border-primary hover:bg-selection-bg" href="https://github.com/Chongran-Zhao" target="_blank" rel="noreferrer">GitHub</a>
+          <a className="rounded-lg border border-border bg-surface px-1.5 py-1.5 text-primary transition hover:border-primary hover:bg-selection-bg" href="mailto:chongran_zhao@brown.edu">Email</a>
         </div>
       </div>
     </aside>
@@ -2180,26 +2204,47 @@ function Sidebar({ activeStep, onStepChange }) {
 }
 
 function Topbar({ activeStep }) {
+  const order = ["experimental", "models", "optimization", "prediction"]
+  const stepIndex = Math.max(0, order.indexOf(activeStep))
   const title = {
-    experimental: "Experimental Data Workspace",
+    experimental: "Experimental Data",
     models: "Model Architecture",
     optimization: "Optimization",
     prediction: "Prediction",
-  }[activeStep] ?? "Experimental Data Workspace"
+  }[activeStep] ?? "Experimental Data"
   const subtitle = {
-    experimental: "Project: Experimental Data Workspace",
-    models: "Constitutive model selection and parameter setup",
-    optimization: "Calibration run and convergence review",
-    prediction: "Fitted parameter reuse and prediction review",
-  }[activeStep] ?? "Project: Experimental Data Workspace"
+    experimental: "Select and preview source stress–stretch datasets",
+    models: "Compose the strain-energy model and set parameters",
+    optimization: "Run the calibration and review convergence",
+    prediction: "Reuse fitted parameters and forecast new modes",
+  }[activeStep] ?? ""
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-surface px-4">
-      <div className="flex min-w-0 items-center gap-3">
-        <BrandMark className="hidden h-9 w-9 shrink-0 sm:block" />
+    <header className="surface-topbar sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-border px-5">
+      <div className="flex min-w-0 items-center gap-3.5">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl primary-gradient text-sm font-bold text-white shadow-primary-glow">
+          {stepIndex + 1}
+        </span>
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold">Calibration for Hyperelasticity</h2>
-          <p className="text-xs text-text-muted">{subtitle} · {title}</p>
+          <h2 className="truncate text-[17px] font-semibold leading-tight tracking-[-0.01em]">{title}</h2>
+          <p className="truncate text-xs text-text-muted">{subtitle}</p>
         </div>
+      </div>
+      <div className="hidden items-center gap-3 sm:flex">
+        <div className="flex items-center gap-1.5">
+          {order.map((key, index) => (
+            <span
+              key={key}
+              className="h-1.5 rounded-full transition-all"
+              style={{
+                width: index === stepIndex ? "22px" : "8px",
+                backgroundColor: index <= stepIndex ? "var(--color-primary)" : "var(--color-border-strong)",
+              }}
+            />
+          ))}
+        </div>
+        <span className="rounded-lg border border-border bg-surface/80 px-2.5 py-1 text-xs font-semibold text-text-muted">
+          Step {stepIndex + 1} <span className="text-text-disabled">/ {order.length}</span>
+        </span>
       </div>
     </header>
   )
@@ -2207,8 +2252,13 @@ function Topbar({ activeStep }) {
 
 function Card({ title, children, className = "" }) {
   return (
-    <div className={`min-w-0 rounded-lg border border-border bg-surface p-3 shadow-panel ${className}`}>
-      <h3 className="mb-3 text-[15px] font-semibold">{title}</h3>
+    <div className={`min-w-0 rounded-xl border border-border bg-surface p-4 shadow-card ${className}`}>
+      {title && (
+        <h3 className="mb-3 flex items-center gap-2 text-[15px] font-semibold tracking-[-0.01em]">
+          <span className="h-3.5 w-1 rounded-full primary-gradient" />
+          {title}
+        </h3>
+      )}
       {children}
     </div>
   )
@@ -2657,7 +2707,7 @@ function colorForSeries(family, index = 0) {
   return index === 0 ? base : palette[index % palette.length]
 }
 
-function BottomBar({ activeStep, rows, selectedBranch, selectedModel, onNext }) {
+function BottomBar({ activeStep, rows, selectedBranch, selectedModel, onNext, onStepChange }) {
   const status = activeStep === "models"
     ? `Editing ${selectedBranch?.name ?? "branch"} · ${selectedModel?.name ?? "-"}`
     : activeStep === "optimization"
@@ -2671,15 +2721,28 @@ function BottomBar({ activeStep, rows, selectedBranch, selectedModel, onNext }) 
     optimization: "Prediction",
     prediction: "Back to Optimization",
   }[activeStep] ?? "Next Step"
+  const order = ["experimental", "models", "optimization", "prediction"]
+  const onBack = () => {
+    const index = order.indexOf(activeStep)
+    if (index > 0) onStepChange(order[index - 1])
+  }
+  const canGoBack = order.indexOf(activeStep) > 0
   return (
-    <footer className="sticky bottom-0 z-20 flex h-16 shrink-0 items-center justify-between border-t border-border bg-surface/95 px-4 backdrop-blur">
-      <button className="flex items-center gap-1 rounded-lg border border-border-strong px-4 py-2 text-sm font-semibold hover:bg-subtle">
+    <footer className="surface-topbar sticky bottom-0 z-20 flex h-16 shrink-0 items-center justify-between border-t border-border px-5">
+      <button
+        onClick={onBack}
+        disabled={!canGoBack}
+        className="flex items-center gap-1.5 rounded-xl border border-border-strong bg-surface px-4 py-2 text-sm font-semibold text-text-primary transition hover:bg-subtle disabled:opacity-40"
+      >
         <Icon className="text-lg">arrow_back</Icon>
         Back
       </button>
       <div className="flex items-center gap-4">
-        <span className="text-sm text-text-muted">{status}</span>
-        <button className="flex items-center gap-1 rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-white shadow-panel hover:bg-primary-hover" onClick={onNext}>
+        <span className="hidden text-sm text-text-muted sm:inline">{status}</span>
+        <button
+          className="flex items-center gap-1.5 rounded-xl primary-gradient px-5 py-2 text-sm font-semibold text-white shadow-primary-glow transition hover:brightness-105 active:brightness-95"
+          onClick={onNext}
+        >
           {nextLabel}
           <Icon className="text-lg">arrow_forward</Icon>
         </button>
