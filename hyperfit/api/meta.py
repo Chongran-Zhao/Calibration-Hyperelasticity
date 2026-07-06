@@ -210,12 +210,12 @@ def stress_display(stress_type: str) -> dict:
 
 def axis_labels(mode: str, stress_type: str) -> tuple[str, str]:
     if mode in ("SS", "CSS"):
-        return "Shear strain γ (-)", "Shear stress P₁₂"
+        return "Shear strain γ [-]", "Shear stress P₁₂ [MPa]"
     if mode == "BT":
-        stress_label = "Cauchy stress σ₁₁" if stress_type == "cauchy" else "Nominal stress P₁₁"
-        return "Variable stretch λ₁ (-)", stress_label
-    stress_label = "Cauchy stress σ₁₁" if stress_type == "cauchy" else "Nominal stress P₁₁"
-    return "Stretch λ (-)", stress_label
+        stress_label = "Cauchy stress σ₁₁ [MPa]" if stress_type == "cauchy" else "Nominal stress P₁₁ [MPa]"
+        return "Variable stretch λ₁ [-]", stress_label
+    stress_label = "Cauchy stress σ₁₁ [MPa]" if stress_type == "cauchy" else "Nominal stress P₁₁ [MPa]"
+    return "Stretch λ [-]", stress_label
 
 
 def axis_symbols(mode: str, stress_type: str) -> dict:

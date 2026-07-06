@@ -38,11 +38,18 @@ def resolve_data_file() -> Path:
 
 
 DATA_FILE = resolve_data_file()
+HIDDEN_DATA_FAMILIES = {"CSS"}
 
 
 def require_data_file():
     if not DATA_FILE.exists():
         raise HTTPException(status_code=500, detail="data/data.h5 not found")
+
+
+def reject_hidden_modes(modes):
+    hidden = [mode for mode in modes if meta.mode_family(mode) in HIDDEN_DATA_FAMILIES]
+    if hidden:
+        raise HTTPException(status_code=404, detail="CSS data are not available in the app.")
 
 
 # --- dataset reading ---------------------------------------------------------
@@ -105,12 +112,15 @@ def list_datasets() -> dict:
         for author in sorted(h5.keys()):
             modes = []
             for mode_raw in sorted(h5[author].keys()):
+                family = meta.mode_family(mode_raw)
+                if family in HIDDEN_DATA_FAMILIES:
+                    continue
                 group = h5[author][mode_raw]
                 stress_type = meta.as_text(group.attrs.get("stress_type", "PK1"))
                 modes.append(
                     {
                         "key": mode_raw,
-                        "family": meta.mode_family(mode_raw),
+                        "family": family,
                         "label": meta.mode_label(mode_raw),
                         "shortLabel": meta.mode_short_label(mode_raw),
                         **meta.mode_ui_meta(mode_raw),
@@ -119,6 +129,8 @@ def list_datasets() -> dict:
                         "stressDisplay": meta.stress_display(stress_type),
                     }
                 )
+            if not modes:
+                continue
             entry = {"author": author, "modes": modes}
             entry.update(meta.source_meta(author))
             authors.append(entry)
@@ -127,6 +139,7 @@ def list_datasets() -> dict:
 
 def preview_payload(author: str, modes: list) -> dict:
     require_data_file()
+    reject_hidden_modes(modes)
     with h5py.File(DATA_FILE, "r") as h5:
         series = [read_mode_preview(h5, author, item) for item in modes]
 
@@ -408,6 +421,7 @@ def calibrate(payload: dict) -> dict:
     solver_settings = payload.get("solver") or {}
     if not author or not modes:
         raise HTTPException(status_code=400, detail="Author and at least one mode are required.")
+    reject_hidden_modes(modes)
 
     solver, initial_guess, bounds, mappings = build_solver_from_payload(branches)
     datasets = load_experimental_data_h5(
@@ -458,6 +472,7 @@ def predict(payload: dict) -> dict:
     branches = payload.get("branches") or []
     if not author or not modes:
         raise HTTPException(status_code=400, detail="Author and at least one prediction mode are required.")
+    reject_hidden_modes(modes)
 
     solver, params_array, _bounds, _mappings = build_solver_from_payload(branches)
     params_dict = dict(zip(solver.param_names_ordered, np.asarray(params_array, dtype=float)))

@@ -107,6 +107,17 @@ select {
   font-weight: 700;
 }
 
+.chart-axis-label {
+  color: #1c1c1e;
+  font-weight: 400;
+}
+
+.chart-axis-label .katex {
+  color: #1c1c1e;
+  font-size: 0.98rem;
+  font-weight: 400;
+}
+
 .tensor-letter,
 .tensor-formula .mathbf {
   font-style: italic;

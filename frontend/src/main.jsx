@@ -31,6 +31,8 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? ""
 const defaultBranches = [
   { id: "spring-1", name: "Spring 1", modelKey: "ZhanNonGaussian", enabled: true },
 ]
+const hiddenDataFamilies = new Set(["CSS"])
+const fittingDisabledFamilies = new Set(["BT"])
 
 const samplePoints = [
   { x: 1.0, y: 0.0 },
@@ -108,6 +110,23 @@ const defaultSolverSettings = {
   maxLoss: 0.05,
 }
 
+const chartTheme = {
+  width: 720,
+  height: 400,
+  pad: { top: 24, right: 24, bottom: 52, left: 78 },
+  ticks: [0, 0.25, 0.5, 0.75, 1],
+  grid: "#E5E5EA",
+  axis: "#C7C7CC",
+  tick: "#8E8E93",
+  label: "#1C1C1E",
+  gridDash: "4 4",
+  tickFont: 11,
+  lineWidth: 2.2,
+  fitLineWidth: 2.4,
+  pointRadius: 3.3,
+  pointStrokeWidth: 1.2,
+}
+
 const initialOptimizationState = {
   status: "Ready",
   running: false,
@@ -120,7 +139,6 @@ const initialOptimizationState = {
 }
 
 const defaultPredictionSettings = {
-  source: "lastOptimization",
   modeKeys: [],
   manualEdits: false,
 }
@@ -242,7 +260,17 @@ function subscriptStrainFormula(formula, termIndex) {
 }
 
 function enforceCalibrationSelection(keys, authorModes) {
-  return keys.filter((key) => authorModes.find((item) => item.key === key)?.family !== "BT")
+  return keys.filter((key) => !fittingDisabledFamilies.has(authorModes.find((item) => item.key === key)?.family))
+}
+
+function visibleDataModes(modes = []) {
+  return modes.filter((item) => !hiddenDataFamilies.has(item.family))
+}
+
+function visibleDatasetAuthors(authors = []) {
+  return authors
+    .map((item) => ({ ...item, modes: visibleDataModes(item.modes ?? []) }))
+    .filter((item) => item.modes.length)
 }
 
 function preferredPredictionKeys(authorModes, fittedKeys = []) {
@@ -254,7 +282,7 @@ function preferredPredictionKeys(authorModes, fittedKeys = []) {
 
 function defaultFittingKeys(authorRecord) {
   const modes = authorRecord?.modes ?? []
-  const fittingModes = modes.filter((item) => item.family !== "BT")
+  const fittingModes = modes.filter((item) => !fittingDisabledFamilies.has(item.family))
   if (authorRecord?.author === "Treloar_1944") {
     return fittingModes.map((item) => item.key)
   }
@@ -323,14 +351,13 @@ function App() {
     },
   })
   const [predictionPreview, setPredictionPreview] = useState(preview)
-  const [apiState, setApiState] = useState("Connecting")
 
   useEffect(() => {
     Promise.all([fetch(`${API_BASE}/api/datasets`), fetch(`${API_BASE}/api/models`)])
       .then(async ([datasetRes, modelRes]) => {
         const datasetData = await datasetRes.json()
         const modelData = await modelRes.json()
-        const authors = datasetData.authors ?? []
+        const authors = visibleDatasetAuthors(datasetData.authors ?? [])
         const models = modelData.models ?? []
         setDatasets(authors)
         setModelCatalog(models)
@@ -349,9 +376,8 @@ function App() {
           setAuthor(preferred.author)
           setModes(defaultFittingKeys(preferred))
         }
-        setApiState("Ready")
       })
-      .catch(() => setApiState("Offline"))
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -363,7 +389,7 @@ function App() {
       .then((data) => {
         setPreview(data)
       })
-      .catch(() => setApiState("Preview error"))
+      .catch(() => {})
   }, [author, modes])
 
   const authorRecord = useMemo(() => datasets.find((item) => item.author === author), [author, datasets])
@@ -424,13 +450,13 @@ function App() {
     const validKeys = new Set(authorModes.map((item) => item.key))
     const validSelection = modes.filter((key) => validKeys.has(key))
     if (!validSelection.length) {
-      const fallback = authorModes.find((item) => item.family === "UT") ?? authorModes.find((item) => item.family !== "BT") ?? authorModes[0]
+      const fallback = authorModes.find((item) => item.family === "UT") ?? authorModes.find((item) => !fittingDisabledFamilies.has(item.family)) ?? authorModes[0]
       setModes([fallback.key])
       return
     }
     const consistentSelection = enforceCalibrationSelection(validSelection, authorModes)
     if (!consistentSelection.length) {
-      const fallback = authorModes.find((item) => item.family === "UT") ?? authorModes.find((item) => item.family !== "BT") ?? authorModes[0]
+      const fallback = authorModes.find((item) => item.family === "UT") ?? authorModes.find((item) => !fittingDisabledFamilies.has(item.family)) ?? authorModes[0]
       setModes(fallback ? [fallback.key] : [])
       return
     }
@@ -449,7 +475,7 @@ function App() {
       setBuddayRegion(nextRegion)
       return
     }
-    const regionModes = fittingModeOptions(author, authorModes, nextRegion).filter((mode) => mode.family !== "BT")
+    const regionModes = fittingModeOptions(author, authorModes, nextRegion).filter((mode) => !fittingDisabledFamilies.has(mode.family))
     if (regionModes.length && !modes.every((key) => regionModes.some((mode) => mode.key === key))) {
       const fallback = regionModes.find((mode) => mode.family === "UT") ?? regionModes[0]
       setModes([fallback.key])
@@ -495,7 +521,7 @@ function App() {
 
   function handleBuddayRegionChange(value) {
     setBuddayRegion(value)
-    const options = fittingModeOptions(author, authorModes, value).filter((mode) => mode.family !== "BT")
+    const options = fittingModeOptions(author, authorModes, value).filter((mode) => !fittingDisabledFamilies.has(mode.family))
     const fallback = options.find((item) => item.family === "UT") ?? options[0]
     setModes(fallback ? [fallback.key] : [])
   }
@@ -678,7 +704,6 @@ function App() {
     setPredictionSettings((current) => ({
       ...current,
       [name]: value,
-      manualEdits: name === "source" && value === "manualOverride" ? true : current.manualEdits,
     }))
   }
 
@@ -809,7 +834,6 @@ function App() {
                 buddayRegion={buddayRegion}
                 modes={modes}
                 preview={preview}
-                apiState={apiState}
                 primaryModeMeta={primaryModeMeta}
                 onAuthorChange={handleAuthorChange}
                 onBuddayRegionChange={handleBuddayRegionChange}
@@ -884,12 +908,13 @@ function ExperimentalDataPage({
   buddayRegion,
   modes,
   preview,
-  apiState,
   primaryModeMeta,
   onAuthorChange,
   onBuddayRegionChange,
   onModeClick,
 }) {
+  const tensorGroups = groupPreviewSeries(preview, primaryModeMeta)
+  const hasDisabledFittingModes = fittingModes.some((option) => fittingDisabledFamilies.has(option.family))
   return (
     <div className="mx-auto grid min-h-[640px] max-w-[1240px] grid-cols-[minmax(360px,0.82fr)_minmax(520px,1.18fr)] gap-4">
       <section className="flex min-w-0 flex-col gap-3">
@@ -936,6 +961,11 @@ function ExperimentalDataPage({
           <p className="mb-2 text-xs leading-5 text-text-muted">
             Select one or more experimental sets to include in the calibration objective. Each database entry is shown separately.
           </p>
+          {hasDisabledFittingModes && (
+            <p className="mb-2 rounded-lg border border-border bg-subtle px-3 py-2 text-xs leading-5 text-text-muted">
+              Biaxial tension (BT) data cannot be used for fitting.
+            </p>
+          )}
           <div className="flex max-h-72 flex-col gap-2 overflow-y-auto pr-1">
             {fittingModes.map((option) => (
               <ModeButton
@@ -947,10 +977,9 @@ function ExperimentalDataPage({
               />
             ))}
           </div>
-        </Card>
-
-        <Card title="Dataset Metadata" className="flex-1">
-          <Metadata preview={preview} apiState={apiState} />
+          {tensorGroups.map((group) => (
+            <PreviewTensorOverlay key={group.key} series={group.series} />
+          ))}
         </Card>
       </section>
 
@@ -1187,29 +1216,16 @@ function CalibrationFitChart({ preview, progress }) {
     ? preview.series
     : [{ modeFamily: "UT", modeLabel: "Experimental", points: preview.points ?? [] }]
   const allPoints = series.flatMap((item) => item.points ?? [])
-  const width = 760
-  const height = 500
-  const pad = { top: 58, right: 36, bottom: 68, left: 84 }
-  const xs = allPoints.map((point) => point.x).filter((value) => Number.isFinite(value))
-  const ys = allPoints.map((point) => point.y).filter((value) => Number.isFinite(value))
-  const minX = Math.min(...xs, 0)
-  const maxX = Math.max(...xs, minX + 1)
-  const minY = Math.min(...ys, 0)
-  const maxY = Math.max(...ys, minY + 1)
-  const padX = Math.max((maxX - minX) * 0.06, 0.04)
-  const padY = Math.max((maxY - minY) * 0.12, 0.04)
-  const x0 = minX - padX
-  const x1 = maxX + padX
-  const y0 = Math.min(0, minY - padY)
-  const y1 = maxY + padY
-  const plotWidth = width - pad.left - pad.right
-  const plotHeight = height - pad.top - pad.bottom
-  const xScale = (x) => pad.left + ((x - x0) / Math.max(x1 - x0, 1e-6)) * plotWidth
-  const yScale = (y) => pad.top + (1 - (y - y0) / Math.max(y1 - y0, 1e-6)) * plotHeight
   const fitFactor = 0.82 + Math.min(progress, 100) * 0.0018
-  const ticks = [0, 0.25, 0.5, 0.75, 1]
-  const xLabel = svgMathLabel(series[0]?.axisSymbols?.x ?? "\\lambda")
-  const yLabel = svgMathLabel(series[0]?.axisSymbols?.y ?? "P_{11}")
+  const layout = chartLayout([
+    ...allPoints.map((point) => ({ plotX: point.x, plotY: point.y })),
+    ...allPoints.map((point) => ({ plotX: point.x, plotY: point.y * fitFactor })),
+  ])
+  const { width, height, scaleX, scaleY } = layout
+  const xSymbol = series[0]?.axisSymbols?.x ?? axisSymbolFromLabel(preview.axes?.x, "\\lambda")
+  const ySymbol = series[0]?.axisSymbols?.y ?? axisSymbolFromLabel(preview.axes?.y, "P_{11}")
+  const xUnit = axisUnitFromLabel(preview.axes?.x, "-")
+  const yUnit = axisUnitFromLabel(preview.axes?.y, "MPa")
   const legendRows = series.map((item, index) => ({
     key: previewSeriesKey(item, index),
     color: colorForSeries(item.modeFamily, index),
@@ -1218,48 +1234,34 @@ function CalibrationFitChart({ preview, progress }) {
 
   return (
     <div className="flex h-full min-h-[500px] flex-col overflow-hidden rounded-lg border border-border bg-white">
-      <svg className="min-h-[440px] w-full flex-1" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Calibration fit chart">
-        <rect x="0" y="0" width={width} height={height} fill="#FFFFFF" />
-        <text x={pad.left} y="28" fill="#1C1C1E" fontSize="18" fontWeight="700">Experimental data and model fit</text>
-        <text x={pad.left} y="48" fill="#6E6E73" fontSize="12">{preview.metadata?.selectedModeShort ?? preview.metadata?.selectedMode ?? "Selected datasets"}</text>
-        {ticks.map((tick) => {
-          const xValue = x0 + tick * (x1 - x0)
-          const yValue = y0 + tick * (y1 - y0)
-          const x = pad.left + tick * plotWidth
-          const y = pad.top + (1 - tick) * plotHeight
-          return (
-            <g key={tick}>
-              <line x1={x} y1={pad.top} x2={x} y2={height - pad.bottom} stroke="#E5E5EA" strokeDasharray="5 5" strokeWidth="1" />
-              <line x1={pad.left} y1={y} x2={width - pad.right} y2={y} stroke="#E5E5EA" strokeDasharray="5 5" strokeWidth="1" />
-              <line x1={x} y1={height - pad.bottom} x2={x} y2={height - pad.bottom + 5} stroke="#8E8E93" strokeWidth="1.2" />
-              <line x1={pad.left - 5} y1={y} x2={pad.left} y2={y} stroke="#8E8E93" strokeWidth="1.2" />
-              <text x={x} y={height - pad.bottom + 22} textAnchor="middle" fill="#3A3A3C" fontSize="12">{formatTick(xValue)}</text>
-              <text x={pad.left - 11} y={y + 4} textAnchor="end" fill="#3A3A3C" fontSize="12">{formatTick(yValue)}</text>
-            </g>
-          )
-        })}
-        <line x1={pad.left} y1={height - pad.bottom} x2={width - pad.right} y2={height - pad.bottom} stroke="#1C1C1E" strokeWidth="1.4" />
-        <line x1={pad.left} y1={pad.top} x2={pad.left} y2={height - pad.bottom} stroke="#1C1C1E" strokeWidth="1.4" />
-        <text x={pad.left + plotWidth / 2} y={height - 18} textAnchor="middle" fill="#1C1C1E" fontSize="14" fontStyle="italic">{xLabel}</text>
-        <text x="20" y={pad.top + plotHeight / 2} textAnchor="middle" fill="#1C1C1E" fontSize="14" fontStyle="italic" transform={`rotate(-90 20 ${pad.top + plotHeight / 2})`}>{yLabel}</text>
-        {series.map((item, index) => {
-          const points = [...(item.points ?? [])]
-            .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
-            .sort((a, b) => a.x - b.x)
-          const color = colorForSeries(item.modeFamily, index)
-          const fitPath = points
-            .map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${xScale(point.x)} ${yScale(point.y * fitFactor)}`)
-            .join(" ")
-          return (
-            <g key={item.mode ?? item.modeLabel ?? index}>
-              {fitPath && <path d={fitPath} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
-              {points.map((point, pointIndex) => (
-                <circle key={pointIndex} cx={xScale(point.x)} cy={yScale(point.y)} r="4.2" fill="#FFFFFF" stroke={color} strokeWidth="2.2" />
-              ))}
-            </g>
-          )
-        })}
-      </svg>
+      <div className="relative min-h-[360px] flex-1">
+        <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Calibration fit chart">
+          <rect x="0" y="0" width={width} height={height} fill="#FFFFFF" />
+          <ChartGrid layout={layout} />
+          {series.map((item, index) => {
+            const points = [...(item.points ?? [])]
+              .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+              .sort((a, b) => a.x - b.x)
+            const color = colorForSeries(item.modeFamily, index)
+            const fitPath = points
+              .map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${scaleX(point.x)} ${scaleY(point.y * fitFactor)}`)
+              .join(" ")
+            return (
+              <g key={item.mode ?? item.modeLabel ?? index}>
+                {fitPath && <path d={fitPath} fill="none" stroke={color} strokeWidth={chartTheme.fitLineWidth} strokeLinecap="round" strokeLinejoin="round" />}
+                {points.map((point, pointIndex) => (
+                  <circle key={pointIndex} cx={scaleX(point.x)} cy={scaleY(point.y)} r={chartTheme.pointRadius} fill="#FFFFFF" stroke={color} strokeWidth={chartTheme.pointStrokeWidth} />
+                ))}
+              </g>
+            )
+          })}
+        </svg>
+        <ChartAxisLabels xSymbol={xSymbol} ySymbol={ySymbol} xUnit={xUnit} yUnit={yUnit} />
+        <div className="absolute left-3 top-3 max-w-[72%] rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
+          <div className="font-semibold">Experimental data and model fit</div>
+          <div className="mt-1 truncate text-text-muted">{preview.metadata?.selectedModeShort ?? preview.metadata?.selectedMode ?? "Selected datasets"}</div>
+        </div>
+      </div>
       <div className="border-t border-border bg-white px-4 py-3 text-xs">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
           <span className="flex items-center gap-2 font-medium text-text-secondary">
@@ -1282,23 +1284,128 @@ function CalibrationFitChart({ preview, progress }) {
   )
 }
 
-function formatTick(value) {
-  if (!Number.isFinite(value)) return "-"
-  const abs = Math.abs(value)
-  if (abs > 0 && (abs < 0.01 || abs >= 1000)) return value.toExponential(1)
-  return Number(value.toPrecision(3)).toString()
+function chartLayout(points, { yZero = true } = {}) {
+  const width = chartTheme.width
+  const height = chartTheme.height
+  const pad = chartTheme.pad
+  const plotWidth = width - pad.left - pad.right
+  const plotHeight = height - pad.top - pad.bottom
+  const xs = points.map((point) => point.plotX).filter((value) => Number.isFinite(value))
+  const ys = points.map((point) => point.plotY).filter((value) => Number.isFinite(value))
+  const rawMinX = xs.length ? Math.min(...xs) : 0
+  const rawMaxX = xs.length ? Math.max(...xs) : 1
+  const rawMinY = ys.length ? Math.min(...ys) : 0
+  const rawMaxY = ys.length ? Math.max(...ys) : 1
+  const xSpan = Math.max(rawMaxX - rawMinX, 1e-6)
+  const yBaseMin = yZero ? Math.min(rawMinY, 0) : rawMinY
+  const yBaseMax = yZero ? Math.max(rawMaxY, 0) : rawMaxY
+  const ySpan = Math.max(yBaseMax - yBaseMin, 1e-6)
+  const xPad = Math.max(xSpan * 0.04, 0.02)
+  const yPad = Math.max(ySpan * 0.08, 0.04)
+  const xMin = rawMinX >= 0 ? Math.max(0, rawMinX - xPad) : rawMinX - xPad
+  const xMax = rawMaxX + xPad
+  const yMin = yZero && rawMinY >= 0 ? 0 : yBaseMin - yPad
+  const yMax = yBaseMax + yPad
+  return {
+    width,
+    height,
+    pad,
+    plotWidth,
+    plotHeight,
+    xMin,
+    xMax,
+    yMin,
+    yMax,
+    ticks: chartTheme.ticks,
+    scaleX: (x) => pad.left + ((x - xMin) / Math.max(xMax - xMin, 1e-6)) * plotWidth,
+    scaleY: (y) => pad.top + ((yMax - y) / Math.max(yMax - yMin, 1e-6)) * plotHeight,
+  }
 }
 
-function svgMathLabel(value) {
-  return String(value ?? "")
-    .replace(/\\lambda_1/g, "λ₁")
-    .replace(/\\lambda/g, "λ")
-    .replace(/\\gamma/g, "γ")
-    .replace(/\\sigma_\{11\}/g, "σ₁₁")
-    .replace(/\\sigma_\{22\}/g, "σ₂₂")
-    .replace(/P_\{11\}/g, "P₁₁")
-    .replace(/P_\{22\}/g, "P₂₂")
-    .replace(/P_\{12\}/g, "P₁₂")
+function ChartGrid({ layout }) {
+  const { width, height, pad, plotWidth, plotHeight, xMin, xMax, yMin, yMax, ticks } = layout
+  return (
+    <>
+      {ticks.map((tick) => {
+        const x = pad.left + tick * plotWidth
+        const y = pad.top + tick * plotHeight
+        const xValue = xMin + tick * (xMax - xMin)
+        const yValue = yMax - tick * (yMax - yMin)
+        return (
+          <g key={tick}>
+            <line x1={x} y1={pad.top} x2={x} y2={height - pad.bottom} stroke={chartTheme.grid} strokeDasharray={chartTheme.gridDash} />
+            <line x1={pad.left} y1={y} x2={width - pad.right} y2={y} stroke={chartTheme.grid} strokeDasharray={chartTheme.gridDash} />
+            <text x={x} y={height - pad.bottom + 18} textAnchor="middle" fill={chartTheme.tick} fontSize={chartTheme.tickFont}>{formatChartTick(xValue)}</text>
+            <text x={pad.left - 12} y={y + 4} textAnchor="end" fill={chartTheme.tick} fontSize={chartTheme.tickFont}>{formatChartTick(yValue)}</text>
+          </g>
+        )
+      })}
+      <line x1={pad.left} y1={height - pad.bottom} x2={width - pad.right} y2={height - pad.bottom} stroke={chartTheme.axis} />
+      <line x1={pad.left} y1={pad.top} x2={pad.left} y2={height - pad.bottom} stroke={chartTheme.axis} />
+    </>
+  )
+}
+
+function ChartAxisLabels({ xSymbol, ySymbol, xUnit, yUnit }) {
+  const xFormula = axisLabelFormula(xSymbol, xUnit)
+  const yFormula = axisLabelFormula(ySymbol, yUnit)
+  return (
+    <>
+      <div
+        className="chart-axis-label pointer-events-none absolute bottom-2 flex items-center justify-center text-sm"
+        style={{ left: chartTheme.pad.left, right: chartTheme.pad.right }}
+      >
+        <LatexInline value={xFormula} fallback={`${plainAxisLabel(xSymbol)} ${xUnit ?? ""}`} />
+      </div>
+      <div
+        className="chart-axis-label pointer-events-none absolute flex items-center justify-center text-sm"
+        style={{ left: 10, top: chartTheme.pad.top, bottom: chartTheme.pad.bottom, width: 28 }}
+      >
+        <div className="origin-center -rotate-90 whitespace-nowrap">
+          <LatexInline value={yFormula} fallback={`${plainAxisLabel(ySymbol)} ${yUnit ?? ""}`} />
+        </div>
+      </div>
+    </>
+  )
+}
+
+function axisLabelFormula(symbol, unit) {
+  const latexUnit = latexAxisUnit(unit)
+  return latexUnit ? `${symbol}\\,${latexUnit}` : symbol
+}
+
+function latexAxisUnit(unit) {
+  const inner = String(unit ?? "").replace(/^\[/, "").replace(/\]$/, "").trim()
+  if (!inner) return ""
+  if (inner === "-") return "[-]"
+  return `[\\mathrm{${inner.replace(/[{}\\]/g, "")}}]`
+}
+
+function axisUnitFromLabel(label, fallback = "") {
+  const text = String(label ?? "")
+  const bracket = text.match(/\[([^\]]+)\]/)
+  const paren = text.match(/\(([^)]+)\)\s*$/)
+  const unit = bracket?.[1] ?? paren?.[1] ?? fallback
+  if (!unit) return ""
+  return `[${unit}]`
+}
+
+function axisSymbolFromLabel(label, fallback) {
+  const text = String(label ?? "")
+  if (/sigma|σ/.test(text)) {
+    if (/22|₂₂/.test(text)) return "\\sigma_{22}"
+    if (/12|₁₂/.test(text)) return "\\sigma_{12}"
+    return "\\sigma_{11}"
+  }
+  if (/(^|[^A-Za-z])P([^A-Za-z]|$)|P[₁₂0-9_]/.test(text)) {
+    if (/22|₂₂/.test(text)) return "P_{22}"
+    if (/12|₁₂/.test(text)) return "P_{12}"
+    return "P_{11}"
+  }
+  if (/lambda_1|λ₁/.test(text)) return "\\lambda_1"
+  if (/lambda|λ/.test(text)) return "\\lambda"
+  if (/gamma|γ/.test(text)) return "\\gamma"
+  return fallback
 }
 
 function PredictionPage({
@@ -1346,27 +1453,6 @@ function PredictionPage({
 
       <section className="grid min-w-0 gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-4">
-          <Card title="Parameter Source">
-            <div className="space-y-2">
-              {[
-                ["lastOptimization", "Last Optimization", optimization.iterations ? `R2 ${optimization.r2.toFixed(4)} · ${optimization.status}` : "Use the latest fitted parameter set"],
-                ["manualOverride", "Manual Parameters", `${changedCount} changed value${changedCount === 1 ? "" : "s"}`],
-              ].map(([value, label, detail]) => (
-                <button
-                  key={value}
-                  className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left ${settings.source === value ? "border-primary bg-selection-bg" : "border-border-strong hover:bg-subtle"}`}
-                  onClick={() => onSettingChange("source", value)}
-                >
-                  <span className={`h-3 w-3 rounded-full ${settings.source === value ? "bg-primary" : "bg-border-strong"}`} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold">{label}</span>
-                    <span className="block truncate text-xs text-text-muted">{detail}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </Card>
-
           <Card title="Prediction Setup">
             <div>
               <Label>Loading Modes</Label>
@@ -1472,21 +1558,6 @@ function PredictionPage({
               <PredictionChart prediction={prediction} preview={preview} />
             </div>
           </Card>
-
-          <Card title="Parameter Provenance">
-            <div className="grid gap-2 sm:grid-cols-3">
-              {[
-                ["Source", sourceLabel(settings.source)],
-                ["Manual changed", changedCount],
-                ["Prediction sets", selectedModeKeys.length],
-              ].map(([label, value]) => (
-                <div key={label} className="rounded-lg border border-border bg-subtle p-2">
-                  <div className="text-[11px] font-bold uppercase text-text-muted">{label}</div>
-                  <div className="mt-1 truncate text-sm font-semibold">{value}</div>
-                </div>
-              ))}
-            </div>
-          </Card>
         </div>
       </section>
     </div>
@@ -1496,6 +1567,11 @@ function PredictionPage({
 function PredictionChart({ prediction, preview }) {
   const hasSecondary = prediction.experimental.some((point) => point.x2 !== undefined && point.y2 !== undefined)
     || prediction.curves.some((curve) => (curve.points ?? []).some((point) => point.x2 !== undefined && point.y2 !== undefined))
+  const primarySymbols = preview.series?.[0]?.axisSymbols ?? {}
+  const xSymbol = primarySymbols.x ?? axisSymbolFromLabel(preview.axes?.x, "\\lambda")
+  const ySymbol = primarySymbols.y ?? axisSymbolFromLabel(preview.axes?.y, "P_{11}")
+  const xUnit = axisUnitFromLabel(preview.axes?.x, "-")
+  const yUnit = axisUnitFromLabel(preview.axes?.y, "MPa")
   const primaryExperimental = prediction.experimental.map((point) => ({ ...point, plotX: point.x, plotY: point.y }))
   const primaryCurves = prediction.curves.map((curve) => ({
     ...curve,
@@ -1519,6 +1595,10 @@ function PredictionChart({ prediction, preview }) {
         curves={primaryCurves}
         xLabel={preview.axes?.x ?? "Stretch lambda_1 (-)"}
         yLabel={preview.axes?.y ?? "Nominal stress P11"}
+        xSymbol={xSymbol}
+        ySymbol={ySymbol}
+        xUnit={xUnit}
+        yUnit={yUnit}
         minHeight={hasSecondary ? 420 : 540}
       />
       {hasSecondary && (
@@ -1529,6 +1609,10 @@ function PredictionChart({ prediction, preview }) {
           curves={secondaryCurves}
           xLabel={preview.axes?.x ?? "Stretch lambda_1 (-)"}
           yLabel={secondaryStressLabel(preview)}
+          xSymbol={xSymbol}
+          ySymbol={preview.metadata?.stressType === "Cauchy" ? "\\sigma_{22}" : "P_{22}"}
+          xUnit={xUnit}
+          yUnit={yUnit}
           minHeight={320}
         />
       )}
@@ -1536,26 +1620,15 @@ function PredictionChart({ prediction, preview }) {
   )
 }
 
-function StressComponentChart({ title, detail, experimental, curves, xLabel, yLabel, minHeight = 460 }) {
+function StressComponentChart({ title, detail, experimental, curves, xLabel, yLabel, xSymbol, ySymbol, xUnit, yUnit, minHeight = 460 }) {
   const curvePoints = curves.flatMap((curve) => curve.points ?? [])
   const points = [...experimental, ...curvePoints]
-  const width = 760
-  const height = 500
-  const pad = { top: 34, right: 28, bottom: 60, left: 78 }
-  const xs = points.map((point) => point.plotX).filter((value) => Number.isFinite(value))
-  const ys = points.map((point) => point.plotY).filter((value) => Number.isFinite(value))
-  const minX = Math.min(...xs, 1)
-  const maxX = Math.max(...xs, minX + 1)
-  const minY = Math.min(...ys, 0)
-  const maxY = Math.max(...ys, minY + 1)
-  const xPad = Math.max((maxX - minX) * 0.06, 0.04)
-  const yPad = Math.max((maxY - minY) * 0.08, 0.04)
-  const x0 = minX - xPad
-  const x1 = maxX + xPad
-  const y0 = minY - yPad
-  const y1 = maxY + yPad
-  const xScale = (x) => pad.left + ((x - x0) / Math.max(x1 - x0, 1e-6)) * (width - pad.left - pad.right)
-  const yScale = (y) => height - pad.bottom - ((y - y0) / Math.max(y1 - y0, 1e-6)) * (height - pad.top - pad.bottom)
+  const layout = chartLayout(points)
+  const { width, height, scaleX, scaleY } = layout
+  const axisX = xSymbol ?? axisSymbolFromLabel(xLabel, "\\lambda")
+  const axisY = ySymbol ?? axisSymbolFromLabel(yLabel, "P_{11}")
+  const unitX = xUnit ?? axisUnitFromLabel(xLabel, "-")
+  const unitY = yUnit ?? axisUnitFromLabel(yLabel, "MPa")
   const legendColor = colorForSeries(curves[0]?.family ?? experimental[0]?.family, 0)
   const legendItems = curves.length
     ? curves.map((curve, index) => ({
@@ -1568,55 +1641,39 @@ function StressComponentChart({ title, detail, experimental, curves, xLabel, yLa
   return (
     <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-white" style={{ minHeight }}>
       <div className="relative min-h-[360px] flex-1">
-      <svg className="absolute inset-0 h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title} chart`}>
-        <rect width={width} height={height} fill="#FFFFFF" />
-        {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
-          const x = pad.left + tick * (width - pad.left - pad.right)
-          const y = pad.top + tick * (height - pad.top - pad.bottom)
-          return (
-            <g key={tick}>
-              <line x1={x} x2={x} y1={pad.top} y2={height - pad.bottom} stroke="#E5E5EA" strokeDasharray="4 4" />
-              <line x1={pad.left} x2={width - pad.right} y1={y} y2={y} stroke="#E5E5EA" strokeDasharray="4 4" />
-            </g>
-          )
-        })}
-        <line x1={pad.left} x2={width - pad.right} y1={height - pad.bottom} y2={height - pad.bottom} stroke="#D1D1D6" />
-        <line x1={pad.left} x2={pad.left} y1={pad.top} y2={height - pad.bottom} stroke="#D1D1D6" />
-        {curves.map((curve, index) => {
-          const curvePath = (curve.points ?? []).map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${xScale(point.plotX)} ${yScale(point.plotY)}`).join(" ")
-          return curvePath ? <path key={curve.key} d={curvePath} fill="none" stroke={colorForSeries(curve.family, index)} strokeWidth="3" /> : null
-        })}
-        {experimental.map((point, index) => (
-          <circle key={`${point.seriesKey}-${point.plotX}-${point.plotY}-${index}`} cx={xScale(point.plotX)} cy={yScale(point.plotY)} r="4" fill="#FFFFFF" stroke={colorForSeries(point.family, point.seriesIndex ?? 0)} strokeWidth="2" />
-        ))}
-        <text x={width / 2} y={height - 18} textAnchor="middle" fontSize="12" fill="#6E6E73">
-          {xLabel}
-        </text>
-        <text x="18" y={height / 2} textAnchor="middle" fontSize="12" fill="#6E6E73" transform={`rotate(-90 18 ${height / 2})`}>
-          {yLabel}
-        </text>
-      </svg>
-      <div className="absolute left-3 top-3 max-w-[70%] rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
-        <div className="font-semibold">{title}</div>
-        <div className="mt-1 truncate text-text-muted">{detail}</div>
-      </div>
+        <svg className="absolute inset-0 h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title} chart`}>
+          <rect width={width} height={height} fill="#FFFFFF" />
+          <ChartGrid layout={layout} />
+          {curves.map((curve, index) => {
+            const curvePath = (curve.points ?? []).map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${scaleX(point.plotX)} ${scaleY(point.plotY)}`).join(" ")
+            return curvePath ? <path key={curve.key} d={curvePath} fill="none" stroke={colorForSeries(curve.family, index)} strokeWidth={chartTheme.fitLineWidth} strokeLinecap="round" strokeLinejoin="round" /> : null
+          })}
+          {experimental.map((point, index) => (
+            <circle key={`${point.seriesKey}-${point.plotX}-${point.plotY}-${index}`} cx={scaleX(point.plotX)} cy={scaleY(point.plotY)} r={chartTheme.pointRadius} fill="#FFFFFF" stroke={colorForSeries(point.family, point.seriesIndex ?? 0)} strokeWidth={chartTheme.pointStrokeWidth} />
+          ))}
+        </svg>
+        <ChartAxisLabels xSymbol={axisX} ySymbol={axisY} xUnit={unitX} yUnit={unitY} />
+        <div className="absolute left-3 top-3 max-w-[70%] rounded-md border border-border-strong bg-white/95 px-2 py-1 text-xs shadow-panel">
+          <div className="font-semibold">{title}</div>
+          <div className="mt-1 truncate text-text-muted">{detail}</div>
+        </div>
       </div>
       <div className="border-t border-border bg-white px-4 py-3 text-xs">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-        <span className="flex items-center gap-2 font-medium text-text-secondary">
-          <span className="h-0.5 w-8 rounded-full bg-text-primary" />
-          Prediction curve
-        </span>
-        <span className="flex items-center gap-2 font-medium text-text-secondary">
-          <span className="h-3 w-3 rounded-full border-2 border-text-primary bg-white" />
-          Experimental data
-        </span>
-        {legendItems.map((item) => (
-          <span key={item.key} className="flex min-w-0 items-center gap-2 text-text-muted">
-            <span className="h-2.5 w-5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
-            <span className="truncate">{formatDisplayLabel(item.label)}</span>
+          <span className="flex items-center gap-2 font-medium text-text-secondary">
+            <span className="h-0.5 w-8 rounded-full bg-text-primary" />
+            Prediction curve
           </span>
-        ))}
+          <span className="flex items-center gap-2 font-medium text-text-secondary">
+            <span className="h-3 w-3 rounded-full border-2 border-text-primary bg-white" />
+            Experimental data
+          </span>
+          {legendItems.map((item) => (
+            <span key={item.key} className="flex min-w-0 items-center gap-2 text-text-muted">
+              <span className="h-2.5 w-5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+              <span className="truncate">{formatDisplayLabel(item.label)}</span>
+            </span>
+          ))}
         </div>
       </div>
     </div>
@@ -1676,7 +1733,7 @@ function buildPredictionSeries(preview, parameterRows, settings, overrides, opti
     return Number.isFinite(numeric) ? Math.abs(numeric) / (index + 3) : 0
   })
   const parameterScale = values.reduce((sum, value) => sum + value, 0)
-  const sourceBoost = settings.source === "manualOverride" ? 1.08 : 1 + optimization.progress / 700
+  const sourceBoost = settings.manualEdits ? 1.08 : 1 + optimization.progress / 700
   const parameterEffect = Math.max(0.75, Math.min(1.35, (0.92 + parameterScale * 0.01) * sourceBoost))
   const modeFactors = {
     CSS: 0.88,
@@ -1801,13 +1858,6 @@ function solveLinearSystem3(matrix, vector) {
     }
   }
   return [a[0][3], a[1][3], a[2][3]]
-}
-
-function sourceLabel(source) {
-  return {
-    lastOptimization: "Last Optimization",
-    manualOverride: "Manual Parameters",
-  }[source] ?? source
 }
 
 function ArchitectureSummary({ branches, activeBranches, selectedDataCount, selectedBranch }) {
@@ -2102,18 +2152,27 @@ function Sidebar({ activeStep, onStepChange }) {
       </nav>
       <div className="space-y-3 border-t border-border pt-3">
         <div className="rounded-lg border border-border bg-subtle p-3">
-          <div className="text-[11px] font-bold uppercase text-text-muted">Author</div>
-          <div className="mt-1 text-sm font-semibold text-text-primary">Chongran Zhao</div>
-          <div className="mt-0.5 text-xs leading-5 text-text-muted">Incoming Ph.D. Student · Brown University</div>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-wide text-text-muted">About</div>
+              <div className="mt-1 text-sm font-semibold text-text-primary">Chongran Zhao</div>
+            </div>
+            <span className="rounded border border-border bg-white px-1.5 py-0.5 text-[10px] font-semibold text-text-muted">Brown</span>
+          </div>
+          <div className="mt-2 space-y-1 text-xs leading-5 text-text-muted">
+            <div>Ph.D. student in Engineering, Brown University</div>
+            <div>M.Eng. in Mechanics, SUSTech</div>
+          </div>
           <div className="mt-2 flex flex-wrap gap-1">
-            {["Constitutive Modeling", "Soft Tissues"].map((item) => (
+            {["Hyperelasticity", "Constitutive Modeling", "Soft Tissues"].map((item) => (
               <span key={item} className="rounded border border-border bg-white px-1.5 py-0.5 text-[10px] font-semibold text-text-muted">{item}</span>
             ))}
           </div>
-          <a className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline" href="https://chongran-zhao.github.io" target="_blank" rel="noreferrer">
-            Homepage
-            <Icon className="text-xs">arrow_forward</Icon>
-          </a>
+          <div className="mt-3 grid grid-cols-3 gap-1 text-center text-[11px] font-semibold">
+            <a className="rounded border border-border bg-white px-1.5 py-1 text-primary hover:bg-selection-bg" href="https://chongran-zhao.github.io" target="_blank" rel="noreferrer">Website</a>
+            <a className="rounded border border-border bg-white px-1.5 py-1 text-primary hover:bg-selection-bg" href="https://github.com/Chongran-Zhao" target="_blank" rel="noreferrer">GitHub</a>
+            <a className="rounded border border-border bg-white px-1.5 py-1 text-primary hover:bg-selection-bg" href="mailto:chongran_zhao@brown.edu">Email</a>
+          </div>
         </div>
       </div>
     </aside>
@@ -2138,15 +2197,9 @@ function Topbar({ activeStep }) {
       <div className="flex min-w-0 items-center gap-3">
         <BrandMark className="hidden h-9 w-9 shrink-0 sm:block" />
         <div className="min-w-0">
-        <h2 className="text-lg font-semibold">Calibration for Hyperelasticity</h2>
-        <p className="text-xs text-text-muted">{subtitle} · {title}</p>
+          <h2 className="text-lg font-semibold">Calibration for Hyperelasticity</h2>
+          <p className="text-xs text-text-muted">{subtitle} · {title}</p>
         </div>
-      </div>
-      <div className="flex items-center gap-3">
-        <a className="flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border border-border px-3 text-sm font-semibold hover:bg-subtle" href="mailto:chongran_zhao@brown.edu">
-          <Icon className="text-base">info</Icon>
-          Contact me
-        </a>
       </div>
     </header>
   )
@@ -2167,26 +2220,28 @@ function Label({ children }) {
 
 function ModeButton({ option, meta, active, onClick }) {
   const label = option.shortLabel ?? option.label
-  const predictionOnly = option.family === "BT"
+  const disabledForFitting = fittingDisabledFamilies.has(option.family)
   return (
     <button
       className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left ${
         active
           ? "border-primary bg-selection-bg"
-          : predictionOnly
-            ? "border-border-strong bg-subtle hover:bg-surface"
+          : disabledForFitting
+            ? "cursor-not-allowed border-border bg-subtle opacity-60"
             : "border-border-strong bg-surface hover:bg-subtle"
       }`}
+      disabled={disabledForFitting}
       onClick={onClick}
+      title={disabledForFitting ? "BT cannot be used for fitting." : undefined}
     >
       <span className={`h-3 w-3 rounded-full ${meta.dot}`} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-semibold">{formatDisplayLabel(label)}</span>
+        <span className={`block truncate text-sm font-semibold ${disabledForFitting ? "text-text-muted" : ""}`}>{formatDisplayLabel(label)}</span>
         <span className="mt-0.5 block truncate text-xs font-normal text-text-muted">
-          {predictionOnly ? "Prediction only" : option.loadingLabel ?? modeFamilyName(option.family)} · {option.points} pts · <StressText display={option.stressDisplay} fallback={option.stressType} />
+          {disabledForFitting ? "BT cannot be used for fitting" : option.loadingLabel ?? modeFamilyName(option.family)} · {option.points} pts · <StressText display={option.stressDisplay} fallback={option.stressType} />
         </span>
       </span>
-      <span className={`grid h-5 w-5 place-items-center rounded border ${active ? "border-primary bg-primary text-white" : "border-border-strong bg-surface"}`}>
+      <span className={`grid h-5 w-5 place-items-center rounded border ${active ? "border-primary bg-primary text-white" : disabledForFitting ? "border-border-strong bg-subtle" : "border-border-strong bg-surface"}`}>
         {active && <Icon className="text-sm">check_circle</Icon>}
       </span>
     </button>
@@ -2350,56 +2405,10 @@ function formatBound(value, side = "upper") {
   return number.toPrecision(4)
 }
 
-function Metadata({ preview, apiState }) {
-  const metadata = preview.metadata ?? {}
-  const dataStatus = {
-    Ready: "Loaded",
-    Connecting: "Connecting",
-    Offline: "Offline",
-    "Preview error": "Preview error",
-  }[apiState] ?? apiState
-  return (
-    <dl className="grid grid-cols-2 gap-2 text-sm">
-      <MetaItem label="Rows parsed" value={metadata.rows ?? 0} />
-      <MetaItem label="Data status" value={dataStatus} />
-      <MetaItem label="Selected sets" value={metadata.setCount ?? 0} />
-      <MetaItem label="Stress type" value={<StressTypeText display={metadata.stressDisplay} fallback={metadata.stressType ?? "-"} />} />
-      <MetaItem label="Source" value={metadata.source ?? "-"} />
-      <MetaLinkItem label="Reference" value={metadata.sourceReference ?? metadata.source ?? "-"} href={metadata.sourceUrl} />
-      <div className="col-span-2 rounded-lg border border-border bg-subtle p-2">
-        <dt className="text-[11px] font-bold uppercase text-text-muted">Loading modes</dt>
-        <dd className="mt-1 text-sm font-semibold">{metadata.selectedModeShort ?? metadata.selectedMode ?? "-"}</dd>
-      </div>
-    </dl>
-  )
-}
-
-function MetaItem({ label, value }) {
-  return (
-    <div className="rounded-lg border border-border bg-subtle p-2">
-      <dt className="text-[11px] font-bold uppercase text-text-muted">{label}</dt>
-      <dd className="mt-1 truncate text-sm font-semibold">{value}</dd>
-    </div>
-  )
-}
-
-function MetaLinkItem({ label, value, href }) {
-  return (
-    <div className="rounded-lg border border-border bg-subtle p-2">
-      <dt className="text-[11px] font-bold uppercase text-text-muted">{label}</dt>
-      <dd className="mt-1 truncate text-sm font-semibold">
-        {href ? (
-          <a className="text-primary hover:underline" href={href} target="_blank" rel="noreferrer">
-            {value}
-          </a>
-        ) : value}
-      </dd>
-    </div>
-  )
-}
-
 function PlotCard({ preview, mode }) {
   const chartGroups = groupPreviewSeries(preview, mode)
+  const sourceReference = preview.metadata?.sourceReference ?? preview.metadata?.source ?? "current selection"
+  const sourceUrl = preview.metadata?.sourceUrl
   return (
     <div className="flex h-full min-h-[640px] flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-panel">
       <div className="flex items-center justify-between border-b border-border bg-subtle px-4 py-3">
@@ -2415,15 +2424,24 @@ function PlotCard({ preview, mode }) {
           ))}
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        <div className="grid gap-4">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        <div className="grid gap-3">
           {chartGroups.map((group) => (
             <ScientificChart key={group.key} group={group} />
           ))}
         </div>
       </div>
-      <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
-        <span className="text-text-muted">Data sampled from {preview.metadata?.sourceReference ?? preview.metadata?.source ?? "current selection"}</span>
+      <div className="flex items-center justify-end gap-4 border-t border-border px-4 py-3 text-sm">
+        <span className="text-text-muted">
+          Data sampled from{" "}
+          {sourceUrl ? (
+            <a className="font-semibold text-primary hover:underline" href={sourceUrl} target="_blank" rel="noreferrer">
+              {sourceReference}
+            </a>
+          ) : (
+            <span className="font-semibold text-text-primary">{sourceReference}</span>
+          )}
+        </span>
         <button className="rounded-lg border border-border-strong bg-surface px-3 py-1.5 font-semibold hover:bg-subtle">Save Plot</button>
       </div>
     </div>
@@ -2435,6 +2453,8 @@ function groupPreviewSeries(preview, mode) {
     ? preview.series
     : [{ modeFamily: mode.family, modeLabel: mode.label, modeShortLabel: mode.label, points: preview.points ?? [], axisSymbols: { x: "\\lambda", y: "P_{11}" } }]
   const groups = new Map()
+  const xUnit = axisUnitFromLabel(preview.axes?.x, "-")
+  const yUnit = axisUnitFromLabel(preview.axes?.y, "MPa")
   series.forEach((item) => {
     const xSymbol = item.axisSymbols?.x ?? "\\lambda"
     const ySymbol = item.axisSymbols?.y ?? "P_{11}"
@@ -2446,6 +2466,8 @@ function groupPreviewSeries(preview, mode) {
         ySymbol,
         xLabel: xSymbol,
         yLabel: ySymbol,
+        xUnit,
+        yUnit,
         series: [],
       })
     }
@@ -2469,12 +2491,14 @@ function ScientificChart({ group }) {
   }))
   return (
     <div className={hasSecondary ? "grid min-h-[460px] gap-3 xl:grid-cols-2" : "min-h-[460px]"}>
-      <ExperimentalComponentChart series={primarySeries} xLabel={group.xLabel} yLabel={group.yLabel} title={hasSecondary ? "Component P11" : "Selected data"} />
+      <ExperimentalComponentChart series={primarySeries} xLabel={group.xLabel} yLabel={group.yLabel} xUnit={group.xUnit} yUnit={group.yUnit} title={hasSecondary ? "Component P11" : "Selected data"} />
       {hasSecondary && (
         <ExperimentalComponentChart
           series={secondarySeries}
           xLabel={group.xLabel}
           yLabel="P_{22}"
+          xUnit={group.xUnit}
+          yUnit={group.yUnit}
           title="Component P22"
         />
       )}
@@ -2492,8 +2516,8 @@ function PreviewTensorOverlay({ series }) {
   if (!series.length) return null
   const primary = series.find((item) => item.mode === activeMode) ?? series[0]
   return (
-    <div className="border-b border-border bg-subtle/70 px-3 py-3">
-      <div className="grid gap-2 xl:grid-cols-[minmax(190px,0.75fr)_minmax(0,1.45fr)]">
+    <div className="mt-3 overflow-hidden rounded-lg border border-border bg-subtle/70 px-3 py-3">
+      <div className="grid gap-2">
         <div className="min-w-0">
           <div className="flex items-center justify-between gap-2">
             <div className="text-[10px] font-bold uppercase tracking-wide text-text-muted">Tensor form</div>
@@ -2514,9 +2538,9 @@ function PreviewTensorOverlay({ series }) {
             {primary.loadingLabel ?? modeFamilyName(primary.modeFamily)} · <LatexInline value={primary.tensorExpressions?.component ?? primary.axisSymbols?.y ?? "P"} fallback={primary.axisSymbols?.y ?? "P"} />
           </div>
         </div>
-        <div className="grid min-w-0 gap-2 md:grid-cols-2">
-        <FormulaMini label="F" value={primary.tensorExpressions?.deformationGradient} />
-        <FormulaMini label="P" value={primary.tensorExpressions?.firstPkStress} />
+        <div className="grid min-w-0 grid-cols-2 gap-2">
+          <FormulaMini label="F" value={primary.tensorExpressions?.deformationGradient} />
+          <FormulaMini label="P" value={primary.tensorExpressions?.firstPkStress} />
         </div>
       </div>
     </div>
@@ -2526,7 +2550,7 @@ function PreviewTensorOverlay({ series }) {
 function FormulaMini({ label, value }) {
   const rendered = useMemo(() => renderFormula(value), [value])
   return (
-    <div className="min-h-[42px] rounded border border-border bg-white/80 px-1.5 py-1">
+    <div className="min-h-[42px] min-w-0 rounded border border-border bg-white/80 px-1.5 py-1">
       <div className="mb-1 text-[10px] font-bold uppercase text-text-muted">
         <span className="tensor-letter">{label}</span>
       </div>
@@ -2537,64 +2561,68 @@ function FormulaMini({ label, value }) {
   )
 }
 
-function ExperimentalComponentChart({ series, xLabel, yLabel, title }) {
+function formatChartTick(value) {
+  if (!Number.isFinite(value)) return ""
+  const abs = Math.abs(value)
+  if (abs === 0) return "0"
+  if (abs >= 100 || abs < 0.01) return value.toExponential(1)
+  if (abs >= 10) return value.toFixed(1).replace(/\.0$/, "")
+  return value.toFixed(2).replace(/\.?0+$/, "")
+}
+
+function plainAxisLabel(value) {
+  const subscript = {
+    0: "₀",
+    1: "₁",
+    2: "₂",
+    3: "₃",
+    4: "₄",
+    5: "₅",
+    6: "₆",
+    7: "₇",
+    8: "₈",
+    9: "₉",
+  }
+  return String(value ?? "")
+    .replace(/\\lambda/g, "λ")
+    .replace(/\\gamma/g, "γ")
+    .replace(/\\sigma/g, "σ")
+    .replace(/\\mathbf\{([^{}]+)\}/g, "$1")
+    .replace(/\\boldsymbol\{([^{}]+)\}/g, "$1")
+    .replace(/_\{([^{}]+)\}/g, (_match, digits) => String(digits).replace(/[0-9]/g, (digit) => subscript[digit] ?? digit))
+    .replace(/_([0-9]+)/g, (_match, digits) => String(digits).replace(/[0-9]/g, (digit) => subscript[digit] ?? digit))
+    .replace(/[{}\\]/g, "")
+}
+
+function ExperimentalComponentChart({ series, xLabel, yLabel, xUnit, yUnit, title }) {
   const points = series.flatMap((item) => item.points ?? [])
-  const width = 720
-  const height = 460
-  const pad = { top: 34, right: 28, bottom: 58, left: 78 }
-  const xs = points.map((point) => point.plotX).filter((value) => Number.isFinite(value))
-  const ys = points.map((point) => point.plotY).filter((value) => Number.isFinite(value))
-  const minX = Math.min(...xs, 0)
-  const maxX = Math.max(...xs, minX + 1)
-  const minY = Math.min(...ys, 0)
-  const maxY = Math.max(...ys, minY + 1)
-  const xPad = Math.max((maxX - minX) * 0.06, 0.04)
-  const yPad = Math.max((maxY - minY) * 0.08, 0.04)
-  const scaleX = (x) => pad.left + ((x - minX + xPad) / Math.max(maxX - minX + 2 * xPad, 1e-6)) * (width - pad.left - pad.right)
-  const scaleY = (y) => height - pad.bottom - ((y - minY + yPad) / Math.max(maxY - minY + 2 * yPad, 1e-6)) * (height - pad.top - pad.bottom)
-  const ticks = [0, 0.25, 0.5, 0.75, 1]
+  const layout = chartLayout(points)
+  const { width, height, scaleX, scaleY } = layout
   const legendItems = series.slice(0, 5)
 
   return (
-    <div className="flex h-full min-h-[560px] w-full flex-col overflow-hidden rounded-lg border border-border bg-white">
-      <PreviewTensorOverlay series={series} />
-      <div className="relative min-h-[420px] flex-1">
-      <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Experimental stress stretch chart">
-        <rect x="0" y="0" width={width} height={height} fill="#FFFFFF" />
-        {ticks.map((tick) => {
-          const x = pad.left + tick * (width - pad.left - pad.right)
-          const y = pad.top + tick * (height - pad.top - pad.bottom)
-          return (
-            <g key={tick}>
-              <line x1={x} y1={pad.top} x2={x} y2={height - pad.bottom} stroke="#E5E5EA" strokeDasharray="4 4" />
-              <line x1={pad.left} y1={y} x2={width - pad.right} y2={y} stroke="#E5E5EA" strokeDasharray="4 4" />
-            </g>
-          )
-        })}
-        <line x1={pad.left} y1={height - pad.bottom} x2={width - pad.right} y2={height - pad.bottom} stroke="#D1D1D6" />
-        <line x1={pad.left} y1={pad.top} x2={pad.left} y2={height - pad.bottom} stroke="#D1D1D6" />
-        {series.map((item, seriesIndex) => {
-          const meta = modeOptions.find((option) => option.family === item.modeFamily) ?? modeOptions[seriesIndex % modeOptions.length]
-          const color = colorForSeries(meta.family, seriesIndex)
-          const seriesPath = (item.points ?? [])
-            .map((point, index) => `${index === 0 ? "M" : "L"} ${scaleX(point.plotX)} ${scaleY(point.plotY)}`)
-            .join(" ")
-          return (
-            <g key={previewSeriesKey(item, seriesIndex)}>
-              {seriesPath && <path d={seriesPath} fill="none" stroke={color} strokeWidth="2" opacity="0.42" />}
-              {(item.points ?? []).map((point, index) => (
-                <circle key={`${previewSeriesKey(item, seriesIndex)}-${point.plotX}-${point.plotY}-${index}`} cx={scaleX(point.plotX)} cy={scaleY(point.plotY)} r="4" fill={color} stroke="#FFFFFF" strokeWidth="1.5" />
-              ))}
-            </g>
-          )
-        })}
-      </svg>
-      <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 text-xs text-text-muted">
-        <LatexInline value={xLabel} fallback={xLabel} />
-      </div>
-      <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 -rotate-90 text-xs text-text-muted">
-        <LatexInline value={yLabel} fallback={yLabel} />
-      </div>
+    <div className="flex h-full min-h-[500px] w-full flex-col overflow-hidden rounded-lg border border-border bg-white">
+      <div className="relative min-h-[360px] flex-1">
+        <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Experimental stress stretch chart">
+          <rect x="0" y="0" width={width} height={height} fill="#FFFFFF" />
+          <ChartGrid layout={layout} />
+          {series.map((item, seriesIndex) => {
+            const meta = modeOptions.find((option) => option.family === item.modeFamily) ?? modeOptions[seriesIndex % modeOptions.length]
+            const color = colorForSeries(meta.family, seriesIndex)
+            const seriesPath = (item.points ?? [])
+              .map((point, index) => `${index === 0 ? "M" : "L"} ${scaleX(point.plotX)} ${scaleY(point.plotY)}`)
+              .join(" ")
+            return (
+              <g key={previewSeriesKey(item, seriesIndex)}>
+                {seriesPath && <path d={seriesPath} fill="none" stroke={color} strokeWidth={chartTheme.fitLineWidth} strokeLinecap="round" strokeLinejoin="round" />}
+                {(item.points ?? []).map((point, index) => (
+                  <circle key={`${previewSeriesKey(item, seriesIndex)}-${point.plotX}-${point.plotY}-${index}`} cx={scaleX(point.plotX)} cy={scaleY(point.plotY)} r={chartTheme.pointRadius} fill="#FFFFFF" stroke={color} strokeWidth={chartTheme.pointStrokeWidth} />
+                ))}
+              </g>
+            )
+          })}
+        </svg>
+        <ChartAxisLabels xSymbol={xLabel} ySymbol={yLabel} xUnit={xUnit} yUnit={yUnit} />
       </div>
       <div className="border-t border-border bg-white px-4 py-3 text-xs">
         <div className="mb-2 font-semibold text-text-primary">{title}</div>
