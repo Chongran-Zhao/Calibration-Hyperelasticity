@@ -1124,13 +1124,11 @@ function App() {
                 onUpdateBranch={updateBranch}
                 onParameterChange={handleParameterChange}
                 onResetParameters={resetSelectedParameters}
-                selectedDataCount={modes.length}
                 onModelsRefresh={refreshModels}
               />
             ) : activeStep === "optimization" ? (
               <OptimizationPage
                 preview={preview}
-                branches={branches}
                 parameterRows={optimizationParameters}
                 solverSettings={solverSettings}
                 optimization={optimization}
@@ -1486,12 +1484,11 @@ function ExperimentalDataPage({
               </select>
             </label>
           )}
-          <div className="mt-3">
-            <Label>Stress Type</Label>
-            <div className="rounded-lg border border-border bg-subtle px-3 py-2 text-sm font-semibold text-text-primary">
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-border bg-subtle px-3 py-1.5">
+            <span className="text-[11px] font-bold uppercase text-text-muted">Stress type</span>
+            <span className="truncate text-sm font-semibold text-text-primary">
               <StressTypeText display={preview.metadata?.stressDisplay} fallback={preview.metadata?.stressType ?? "From dataset"} />
-              <span className="ml-2 align-middle text-xs font-normal text-text-muted">read from experimental data</span>
-            </div>
+            </span>
           </div>
         </Card>
 
@@ -1540,7 +1537,6 @@ function ModelArchitecturePage({
   onUpdateBranch,
   onParameterChange,
   onResetParameters,
-  selectedDataCount,
   onModelsRefresh,
 }) {
   const modelByKey = useMemo(
@@ -1578,7 +1574,6 @@ function ModelArchitecturePage({
 
   return (
     <div className="mx-auto flex min-h-[640px] w-full max-w-[1280px] flex-col gap-4 overflow-x-hidden">
-      <ArchitectureSummary branches={branches} activeBranches={activeBranches} selectedDataCount={selectedDataCount} selectedBranch={selectedBranch} />
       <section className="grid min-h-[560px] min-w-0 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <Card title="Parallel Branches">
           <div className="mb-3 flex items-center justify-between gap-3">
@@ -1652,7 +1647,6 @@ function ModelArchitecturePage({
 
 function OptimizationPage({
   preview,
-  branches,
   parameterRows,
   solverSettings,
   optimization,
@@ -1661,9 +1655,8 @@ function OptimizationPage({
   onStop,
   onReset,
 }) {
-  const activeBranches = branches.filter((branch) => branch.enabled)
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const metrics = [
-    ["Initial loss", optimization.initialLoss.toExponential(2)],
     ["Current loss", optimization.currentLoss.toExponential(2)],
     ["R squared", optimization.r2.toFixed(4)],
     ["Iterations", optimization.iterations],
@@ -1672,7 +1665,7 @@ function OptimizationPage({
 
   return (
     <div className="mx-auto flex min-h-[640px] w-full max-w-[1280px] flex-col gap-4 overflow-x-hidden">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {metrics.map(([label, value]) => (
           <MetricCard key={label} label={label} value={value} active={label === "Status" && optimization.running} />
         ))}
@@ -1690,14 +1683,21 @@ function OptimizationPage({
             <div className="mt-3 grid grid-cols-2 gap-2">
               <SolverNumber label="Max Iter." value={solverSettings.maxIter} onChange={(value) => onSolverChange("maxIter", value)} />
               <SolverNumber label="R2 Target" value={solverSettings.r2Target} step="0.001" onChange={(value) => onSolverChange("r2Target", value)} />
-              <SolverNumber label="Abs. Tol." value={solverSettings.absTol} step="0.000001" onChange={(value) => onSolverChange("absTol", value)} />
-              <SolverNumber label="Rel. Tol." value={solverSettings.relTol} step="0.0001" onChange={(value) => onSolverChange("relTol", value)} />
-              <SolverNumber label="Max Loss" value={solverSettings.maxLoss} step="0.001" onChange={(value) => onSolverChange("maxLoss", value)} />
-              <div className="rounded-lg border border-border bg-subtle p-2">
-                <Label>Active Branches</Label>
-                <div className="text-sm font-semibold">{activeBranches.length}</div>
-              </div>
             </div>
+            <button
+              className="mt-2 flex w-full items-center justify-between rounded-lg border border-border bg-subtle px-3 py-1.5 text-xs font-semibold text-text-muted transition hover:text-text-primary"
+              onClick={() => setShowAdvanced((current) => !current)}
+            >
+              Advanced criteria
+              <Icon className={`text-sm transition-transform ${showAdvanced ? "rotate-90" : ""}`}>chevron_right</Icon>
+            </button>
+            {showAdvanced && (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <SolverNumber label="Abs. Tol." value={solverSettings.absTol} step="0.000001" onChange={(value) => onSolverChange("absTol", value)} />
+                <SolverNumber label="Rel. Tol." value={solverSettings.relTol} step="0.0001" onChange={(value) => onSolverChange("relTol", value)} />
+                <SolverNumber label="Max Loss" value={solverSettings.maxLoss} step="0.001" onChange={(value) => onSolverChange("maxLoss", value)} />
+              </div>
+            )}
             <div className="mt-3 h-2 overflow-hidden rounded-full bg-subtle">
               <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${optimization.progress}%` }} />
             </div>
@@ -2008,21 +2008,18 @@ function PredictionPage({
   const xs = allPredictionPoints.map((point) => point.x)
   const peakStress = allPredictionPoints.reduce((max, point) => Math.max(max, point.y, point.y2 ?? 0), 0)
   const stretchRange = xs.length ? `${Math.min(...xs).toFixed(2)}-${Math.max(...xs).toFixed(2)}` : "-"
-  const dataPointCount = prediction.experimental.length
   const stressOutput = stressPlainText(preview.metadata?.stressDisplay, preview.metadata?.stressType ?? "From dataset")
   const metrics = [
     ["Peak stress", `${peakStress.toFixed(3)} MPa`],
     ["Data range", stretchRange],
-    ["Data points", dataPointCount],
     ["Stress output", stressOutput],
-    ["Status", settings.manualEdits ? "Manual edits" : "Ready"],
   ]
 
   return (
     <div className="mx-auto flex min-h-[640px] w-full max-w-[1280px] flex-col gap-4 overflow-x-hidden">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         {metrics.map(([label, value]) => (
-          <MetricCard key={label} label={label} value={value} active={label === "Status" && settings.manualEdits} />
+          <MetricCard key={label} label={label} value={value} />
         ))}
       </div>
 
@@ -2053,16 +2050,6 @@ function PredictionPage({
                     </button>
                   )
                 })}
-              </div>
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="rounded-lg border border-border bg-subtle p-2">
-                <Label>Data Points</Label>
-                <div className="text-sm font-semibold">{dataPointCount}</div>
-              </div>
-              <div className="rounded-lg border border-border bg-subtle p-2">
-                <Label>Stress Output</Label>
-                <div className="text-sm font-semibold">{stressOutput}</div>
               </div>
             </div>
           </Card>
@@ -2433,25 +2420,6 @@ function solveLinearSystem3(matrix, vector) {
     }
   }
   return [a[0][3], a[1][3], a[2][3]]
-}
-
-function ArchitectureSummary({ branches, activeBranches, selectedDataCount, selectedBranch }) {
-  const items = [
-    ["Total branches", branches.length],
-    ["Active branches", activeBranches.length],
-    ["Experimental sets", selectedDataCount],
-    ["Editing branch", selectedBranch?.name ?? "-"],
-  ]
-  return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      {items.map(([label, value]) => (
-        <div key={label} className="rounded-lg border border-border bg-surface p-3 shadow-panel">
-          <div className="text-[11px] font-bold uppercase text-text-muted">{label}</div>
-          <div className="mt-1 text-lg font-semibold">{value}</div>
-        </div>
-      ))}
-    </div>
-  )
 }
 
 const MODEL_LAB_HINT = "Symbols: I1, I2 (invariant) or lambda_1..3 (stretch) · functions: exp, log, sqrt, sinh, cosh, tanh, atan… · everything else becomes a parameter"
