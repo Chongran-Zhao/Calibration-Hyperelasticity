@@ -10,14 +10,14 @@ import h5py
 import numpy as np
 from fastapi import HTTPException
 
-from ..datasets import load_experimental_data_h5
+from ..datasets import dataset_from_columns, load_experimental_data_h5
 from ..evaluation import predict_curve
 from ..kinematics import Kinematics
 from ..models import MaterialModels
 from ..network import ParallelNetwork
 from ..optimizer import MaterialOptimizer
 from ..strains import STRAIN_CONFIGS, STRAIN_FORMULAS
-from . import meta
+from . import meta, user_data, user_models
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -50,6 +50,12 @@ def reject_hidden_modes(modes):
     hidden = [mode for mode in modes if meta.mode_family(mode) in HIDDEN_DATA_FAMILIES]
     if hidden:
         raise HTTPException(status_code=404, detail="CSS data are not available in the app.")
+
+
+def resolve_source_meta(author: str) -> dict:
+    if user_data.is_user_author(author):
+        return {"name": user_data.material_of(author), "reference": "User data", "url": ""}
+    return meta.source_meta(author)
 
 
 # --- dataset reading ---------------------------------------------------------
@@ -134,21 +140,127 @@ def list_datasets() -> dict:
             entry = {"author": author, "modes": modes}
             entry.update(meta.source_meta(author))
             authors.append(entry)
+
+    # User-uploaded materials behave as additional sources.
+    for material, docs in user_data.materials().items():
+        modes = [
+            {
+                "key": doc["modeKey"],
+                "family": doc["family"],
+                "label": meta.mode_label(doc["modeKey"]),
+                "shortLabel": meta.mode_label(doc["modeKey"]),
+                "points": len(doc.get("points", [])),
+                "stressType": doc["stressType"],
+                "stressDisplay": meta.stress_display(doc["stressType"]),
+                "datasetId": doc["id"],
+                "isUserData": True,
+            }
+            for doc in docs
+        ]
+        authors.append({
+            "author": user_data.USER_AUTHOR_PREFIX + material,
+            "modes": modes,
+            "name": material,
+            "reference": "User data",
+            "url": "",
+            "isUserData": True,
+        })
     return {"authors": authors}
 
 
-def preview_payload(author: str, modes: list) -> dict:
+def user_mode_preview(author: str, mode_key: str) -> dict:
+    """Preview payload item for a user-uploaded dataset (same shape as
+    :func:`read_mode_preview`)."""
+    doc = user_data.get_dataset(user_data.material_of(author), mode_key)
+    family = doc["family"]
+    stress_type = doc["stressType"]
+    pts = np.asarray(doc["points"], dtype=float)
+
+    if family == "BT":
+        stretch = pts[:, 0]
+        stretch_secondary = pts[:, 1]
+        stress = pts[:, 2]
+        stress_secondary = pts[:, 3] if pts.shape[1] == 4 else None
+    else:
+        stretch = pts[:, 0]
+        stress = pts[:, 1]
+        stretch_secondary = None
+        stress_secondary = None
+
+    fixed_secondary = None
+    if stretch_secondary is not None and stretch_secondary.size and np.allclose(stretch_secondary, stretch_secondary[0]):
+        fixed_secondary = float(stretch_secondary[0])
+
+    points = [
+        {
+            "x": float(x),
+            "y": float(y),
+            **({"x2": float(stretch_secondary[index])} if stretch_secondary is not None else {}),
+            **({"y2": float(stress_secondary[index])} if stress_secondary is not None else {}),
+        }
+        for index, (x, y) in enumerate(zip(stretch, stress))
+    ]
+    return {
+        "mode": mode_key,
+        "modeFamily": family,
+        "modeLabel": meta.mode_label(mode_key),
+        "modeShortLabel": meta.mode_label(mode_key),
+        "tensorExpressions": meta.mode_tensor_expressions(family, mode_key, fixed_secondary),
+        "axisSymbols": meta.axis_symbols(family, stress_type),
+        "stressType": stress_type,
+        "stressDisplay": meta.stress_display(stress_type),
+        "component": "P11",
+        "variableStretch": "lambda_1" if family == "BT" else ("gamma" if family in ("SS", "CSS") else "lambda"),
+        "fixedStretch": fixed_secondary,
+        "fixedStretchLabel": "lambda_2" if family == "BT" and fixed_secondary is not None else None,
+        "points": points,
+    }
+
+
+def mode_previews(author: str, modes: list) -> list:
+    """Preview items for any source: built-in HDF5 or user uploads."""
+    if user_data.is_user_author(author):
+        return [user_mode_preview(author, mode) for mode in modes]
     require_data_file()
     reject_hidden_modes(modes)
     with h5py.File(DATA_FILE, "r") as h5:
-        series = [read_mode_preview(h5, author, item) for item in modes]
+        return [read_mode_preview(h5, author, mode) for mode in modes]
+
+
+def load_calibration_datasets(author: str, modes: list) -> list:
+    """Optimizer-ready dataset entries for any source."""
+    if user_data.is_user_author(author):
+        material = user_data.material_of(author)
+        entries = []
+        for mode in modes:
+            doc = user_data.get_dataset(material, mode)
+            entries.append(
+                dataset_from_columns(
+                    material,
+                    doc["modeKey"],
+                    doc["points"],
+                    stress_type=doc["stressType"],
+                    tag=f"{material}_{doc['modeKey']}",
+                )
+            )
+        return entries
+    require_data_file()
+    reject_hidden_modes(modes)
+    return load_experimental_data_h5(
+        [{"author": author, "mode": mode} for mode in modes],
+        str(DATA_FILE),
+    )
+
+
+def preview_payload(author: str, modes: list) -> dict:
+    series = mode_previews(author, modes)
 
     rows = sum(len(item["points"]) for item in series)
     stress_types = sorted({item["stressType"] for item in series})
     families = [item["modeFamily"] for item in series]
     primary_family = families[0] if families else ""
     primary_stress = stress_types[0] if len(stress_types) == 1 else "mixed"
-    source = meta.source_meta(author)
+    source = resolve_source_meta(author)
     x_label, y_label = meta.axis_labels(primary_family, primary_stress)
 
     return {
@@ -280,6 +392,33 @@ def model_catalogue() -> dict:
         for name in base_names
     ]
     model_items.append(hill_payload())
+
+    # User-defined models join the catalogue as first-class entries.
+    for doc in user_models.all_models():
+        try:
+            model_func = user_models.build_model_function(doc)
+        except Exception:  # noqa: BLE001 - a broken stored model must not kill the catalogue
+            continue
+        model_items.append({
+            "key": user_models.USER_MODEL_PREFIX + doc["id"],
+            "name": doc["name"],
+            "type": model_func.model_type,
+            "category": "user",
+            "reference": doc.get("notes", "") or "User-defined model",
+            "referenceUrl": "",
+            "formula": model_func.formula,
+            "strainFormula": "",
+            "isUserModel": True,
+            "parameters": [
+                {
+                    "name": item["name"],
+                    "initial": item.get("initial"),
+                    "bounds": [item.get("lower"), item.get("upper")],
+                }
+                for item in doc.get("params", [])
+            ],
+        })
+
     return {
         "models": model_items,
         "categories": sorted({item["category"] for item in model_items}),
@@ -297,6 +436,8 @@ def safe_prefix(value: str) -> str:
 
 def model_function(model_key, model_config=None):
     config = model_config or {}
+    if user_models.is_user_model_key(model_key):
+        return user_models.build_model_function(user_models.get_model(user_models.model_id_of(model_key)))
     if model_key == "Ogden":
         return MaterialModels.create_ogden_model(int(config.get("termCount", 1)))
     if model_key == "Hill":
@@ -369,10 +510,9 @@ def params_payload(mappings: list, params) -> list:
 
 # --- prediction curves --------------------------------------------------------------
 
-def prediction_curves(h5, author: str, modes: list, solver: Kinematics, params: dict) -> list:
+def prediction_curves(author: str, modes: list, solver: Kinematics, params: dict) -> list:
     curves = []
-    for mode in modes:
-        item = read_mode_preview(h5, author, mode)
+    for item, mode in zip(mode_previews(author, modes), modes):
         points = sorted(item["points"], key=lambda point: point["x"])
         if not points:
             curves.append({**item, "key": mode, "family": item["modeFamily"], "points": []})
@@ -414,20 +554,15 @@ def prediction_curves(h5, author: str, modes: list, solver: Kinematics, params: 
 # --- top-level operations --------------------------------------------------------------
 
 def calibrate(payload: dict) -> dict:
-    require_data_file()
     author = payload.get("author")
     modes = payload.get("modes") or []
     branches = payload.get("branches") or []
     solver_settings = payload.get("solver") or {}
     if not author or not modes:
         raise HTTPException(status_code=400, detail="Author and at least one mode are required.")
-    reject_hidden_modes(modes)
 
     solver, initial_guess, bounds, mappings = build_solver_from_payload(branches)
-    datasets = load_experimental_data_h5(
-        [{"author": author, "mode": mode} for mode in modes],
-        str(DATA_FILE),
-    )
+    datasets = load_calibration_datasets(author, modes)
     optimizer = MaterialOptimizer(solver, datasets)
 
     result = optimizer.fit(
@@ -442,9 +577,7 @@ def calibrate(payload: dict) -> dict:
     )
     params_array = np.asarray(result.x, dtype=float)
     params_dict = dict(zip(solver.param_names_ordered, params_array))
-
-    with h5py.File(DATA_FILE, "r") as h5:
-        curves = prediction_curves(h5, author, modes, solver, params_dict)
+    curves = prediction_curves(author, modes, solver, params_dict)
 
     return {
         "success": bool(result.success),
@@ -466,19 +599,15 @@ def calibrate(payload: dict) -> dict:
 
 
 def predict(payload: dict) -> dict:
-    require_data_file()
     author = payload.get("author")
     modes = payload.get("modes") or []
     branches = payload.get("branches") or []
     if not author or not modes:
         raise HTTPException(status_code=400, detail="Author and at least one prediction mode are required.")
-    reject_hidden_modes(modes)
 
     solver, params_array, _bounds, _mappings = build_solver_from_payload(branches)
     params_dict = dict(zip(solver.param_names_ordered, np.asarray(params_array, dtype=float)))
-
-    with h5py.File(DATA_FILE, "r") as h5:
-        curves = prediction_curves(h5, author, modes, solver, params_dict)
+    curves = prediction_curves(author, modes, solver, params_dict)
 
     return {
         "author": author,

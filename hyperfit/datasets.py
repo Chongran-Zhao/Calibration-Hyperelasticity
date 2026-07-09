@@ -30,7 +30,7 @@ class DataLoadError(RuntimeError):
 
 
 def _parse_mode(mode_raw):
-    for family in ("BT", "UT", "UC", "CSS", "SS"):
+    for family in ("BT", "UT", "UC", "CSS", "SS", "ET", "PS"):
         if mode_raw.startswith(family):
             return family
     return mode_raw
@@ -62,17 +62,33 @@ def _load_text_dataset(cfg, data_root):
         return None
 
     raw_data = np.loadtxt(file_path)
-    if raw_data.ndim == 1:
-        raw_data = raw_data.reshape(1, -1)
 
     stress_type = "PK1"
     quirk_stress, bt_component = _source_quirks(author, mode)
     if quirk_stress:
         stress_type = quirk_stress
 
+    entry = dataset_from_columns(author, mode_raw, raw_data, stress_type=stress_type)
+    if bt_component:
+        entry["bt_component"] = bt_component
+    return entry
+
+
+def dataset_from_columns(author, mode_raw, raw_data, stress_type="PK1", tag=None):
+    """Build a dataset entry from a raw numeric column array.
+
+    Column conventions (shared by text files and user uploads):
+    ``UT/UC/ET/PS``: stretch, stress; ``SS``: gamma, P12;
+    ``BT``: lambda1, lambda2, P11 [, P22].
+    """
+    mode = _parse_mode(mode_raw)
+    raw_data = np.asarray(raw_data, dtype=float)
+    if raw_data.ndim == 1:
+        raw_data = raw_data.reshape(1, -1)
+
     if mode == "BT":
         if raw_data.shape[1] not in (3, 4):
-            raise ValueError(f"BT data must have 3 or 4 columns: {file_path}")
+            raise ValueError(f"BT data must have 3 or 4 columns, got {raw_data.shape[1]}")
         stretch_list = raw_data[:, 0]
         stretch_secondary = raw_data[:, 1]
         if raw_data.shape[1] == 4:
@@ -84,9 +100,9 @@ def _load_text_dataset(cfg, data_root):
             get_deformation_gradient((lam1, lam2), mode)
             for lam1, lam2 in zip(stretch_list, stretch_secondary)
         ]
-        entry = {
+        return {
             "author": author,
-            "tag": f"{author}_{mode_raw}",
+            "tag": tag or f"{author}_{mode_raw}",
             "mode": mode,
             "mode_raw": mode_raw,
             "stress_type": stress_type,
@@ -95,23 +111,21 @@ def _load_text_dataset(cfg, data_root):
             "stress_exp": stress_exp_list,
             "F_list": np.array(f_tensors),
         }
-    else:
-        stretch_list = raw_data[:, 0]
-        f_tensors = [get_deformation_gradient(lam, mode) for lam in stretch_list]
-        entry = {
-            "author": author,
-            "tag": f"{author}_{mode_raw}",
-            "mode": mode,
-            "mode_raw": mode_raw,
-            "stress_type": stress_type,
-            "stretch": stretch_list,
-            "stress_exp": raw_data[:, 1],
-            "F_list": np.array(f_tensors),
-        }
 
-    if bt_component:
-        entry["bt_component"] = bt_component
-    return entry
+    if raw_data.shape[1] < 2:
+        raise ValueError(f"{mode} data must have 2 columns, got {raw_data.shape[1]}")
+    stretch_list = raw_data[:, 0]
+    f_tensors = [get_deformation_gradient(lam, mode) for lam in stretch_list]
+    return {
+        "author": author,
+        "tag": tag or f"{author}_{mode_raw}",
+        "mode": mode,
+        "mode_raw": mode_raw,
+        "stress_type": stress_type,
+        "stretch": stretch_list,
+        "stress_exp": raw_data[:, 1],
+        "F_list": np.array(f_tensors),
+    }
 
 
 def _load_h5_dataset(cfg, h5f):

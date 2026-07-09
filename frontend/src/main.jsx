@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react"
+import React, { useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import {
   Activity,
@@ -6,8 +6,10 @@ import {
   ArrowRight,
   CheckCircle2,
   ChevronRight,
+  Copy,
   Database,
   FlaskConical,
+  Home,
   Info,
   Layers,
   LineChart,
@@ -16,6 +18,7 @@ import {
   Play,
   RotateCcw,
   Save,
+  Search,
   SlidersHorizontal,
   Square,
   Trash2,
@@ -97,6 +100,10 @@ const iconMap = {
   delete: Trash2,
   tune: SlidersHorizontal,
   zoom_in: ZoomIn,
+  copy: Copy,
+  home: Home,
+  search: Search,
+  check: CheckCircle2,
 }
 
 const solverMethods = ["L-BFGS-B", "trust-constr", "trf", "dogbox", "lm"]
@@ -324,7 +331,40 @@ function hillParameters(model, terms) {
   })
 }
 
+function downsamplePoints(points, target) {
+  const source = (points ?? []).filter((point) => Number.isFinite(point?.x) && Number.isFinite(point?.y))
+  if (source.length <= target) return source.map((point) => [point.x, point.y])
+  const step = (source.length - 1) / (target - 1)
+  return Array.from({ length: target }, (_, index) => {
+    const point = source[Math.round(index * step)]
+    return [point.x, point.y]
+  })
+}
+
+function sessionDateGroup(updatedAt) {
+  const now = new Date()
+  const date = new Date(updatedAt * 1000)
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  if (date.getTime() >= startOfToday) return "Today"
+  if (date.getTime() >= startOfToday - 6 * 24 * 3600 * 1000) return "Earlier this week"
+  return "Earlier"
+}
+
+function sessionDateLabel(updatedAt) {
+  const date = new Date(updatedAt * 1000)
+  const now = new Date()
+  const hm = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  if (date.getTime() >= startOfToday) return `Today ${hm}`
+  if (date.getTime() >= startOfToday - 24 * 3600 * 1000) return `Yesterday ${hm}`
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+}
+
 function App() {
+  const [view, setView] = useState("start")
+  const [sessions, setSessions] = useState(null) // null = loading
+  const [currentSessionId, setCurrentSessionId] = useState(null)
+  const [myDatasets, setMyDatasets] = useState([])
   const [activeStep, setActiveStep] = useState("experimental")
   const [datasets, setDatasets] = useState([])
   const [author, setAuthor] = useState("")
@@ -351,6 +391,9 @@ function App() {
     },
   })
   const [predictionPreview, setPredictionPreview] = useState(preview)
+  // Set once a session restore has been applied (or is pending), so the boot
+  // effect does not clobber restored selections with defaults.
+  const restoredRef = useRef(false)
 
   useEffect(() => {
     Promise.all([fetch(`${API_BASE}/api/datasets`), fetch(`${API_BASE}/api/models`)])
@@ -371,14 +414,88 @@ function App() {
             branch.modelConfig,
           ),
         })))
-        const preferred = authors.find((item) => item.author === "Treloar_1944") ?? authors[0]
-        if (preferred) {
-          setAuthor(preferred.author)
-          setModes(defaultFittingKeys(preferred))
+        if (!restoredRef.current) {
+          const preferred = authors.find((item) => item.author === "Treloar_1944") ?? authors[0]
+          if (preferred) {
+            setAuthor(preferred.author)
+            setModes(defaultFittingKeys(preferred))
+          }
         }
       })
       .catch(() => {})
+    refreshMyDatasets()
   }, [])
+
+  async function refreshDatasets() {
+    const response = await fetch(`${API_BASE}/api/datasets`)
+    const data = await response.json()
+    const authors = visibleDatasetAuthors(data.authors ?? [])
+    setDatasets(authors)
+    return authors
+  }
+
+  async function refreshModels() {
+    try {
+      const response = await fetch(`${API_BASE}/api/models`)
+      const data = await response.json()
+      setModelCatalog(data.models ?? [])
+      return data.models ?? []
+    } catch {
+      return modelCatalog
+    }
+  }
+
+  async function refreshMyDatasets() {
+    try {
+      const response = await fetch(`${API_BASE}/api/user-datasets`)
+      const data = await response.json()
+      setMyDatasets(data.datasets ?? [])
+    } catch {
+      setMyDatasets([])
+    }
+  }
+
+  async function handleUploaded(newAuthor, modeKey) {
+    refreshMyDatasets()
+    try {
+      await refreshDatasets()
+    } catch {
+      return
+    }
+    setBuddayRegion("")
+    setAuthor(newAuthor)
+    setModes([modeKey])
+  }
+
+  async function handleDeleteUserDataset(datasetId) {
+    try {
+      await fetch(`${API_BASE}/api/user-datasets/${datasetId}`, { method: "DELETE" })
+    } catch {
+      /* ignore */
+    }
+    refreshMyDatasets()
+    try {
+      const authors = await refreshDatasets()
+      if (!authors.some((item) => item.author === author)) {
+        const preferred = authors.find((item) => item.author === "Treloar_1944") ?? authors[0]
+        if (preferred) {
+          setBuddayRegion("")
+          setAuthor(preferred.author)
+          setModes(defaultFittingKeys(preferred))
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  useEffect(() => {
+    if (view !== "start") return
+    fetch(`${API_BASE}/api/sessions`)
+      .then((res) => res.json())
+      .then((data) => setSessions(data.sessions ?? []))
+      .catch(() => setSessions([]))
+  }, [view])
 
   useEffect(() => {
     if (!author || !modes.length) return
@@ -626,6 +743,111 @@ function App() {
     }
   }
 
+  function buildSessionSnapshot(overrides = {}) {
+    return {
+      activeStep,
+      author,
+      buddayRegion,
+      modes,
+      branches,
+      selectedBranchId,
+      parameterOverrides,
+      fittedParameterValues,
+      solverSettings,
+      optimization: { ...optimization, running: false },
+      predictionSettings,
+      predictionOverrides,
+      ...overrides,
+    }
+  }
+
+  function applySessionState(state) {
+    restoredRef.current = true
+    setAuthor(state.author ?? "")
+    setBuddayRegion(state.buddayRegion ?? "")
+    setModes(Array.isArray(state.modes) ? state.modes : [])
+    const restoredBranches = Array.isArray(state.branches) && state.branches.length ? state.branches : defaultBranches
+    setBranches(restoredBranches)
+    setSelectedBranchId(state.selectedBranchId ?? restoredBranches[0].id)
+    setParameterOverrides(state.parameterOverrides ?? {})
+    setFittedParameterValues(state.fittedParameterValues ?? {})
+    setSolverSettings({ ...defaultSolverSettings, ...(state.solverSettings ?? {}) })
+    setOptimization(state.optimization ? { ...state.optimization, running: false } : initialOptimizationState)
+    setPredictionSettings({ ...defaultPredictionSettings, ...(state.predictionSettings ?? {}) })
+    setPredictionOverrides(state.predictionOverrides ?? {})
+    setActiveStep(state.activeStep ?? "optimization")
+  }
+
+  async function persistSession(document) {
+    try {
+      const response = await fetch(`${API_BASE}/api/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(document),
+      })
+      if (!response.ok) return
+      const saved = await response.json()
+      setCurrentSessionId(saved.id)
+    } catch {
+      /* saving is best-effort; the workbench keeps working offline */
+    }
+  }
+
+  async function openSession(sessionId) {
+    try {
+      const response = await fetch(`${API_BASE}/api/sessions/${sessionId}`)
+      if (!response.ok) return
+      const doc = await response.json()
+      applySessionState(doc.state ?? {})
+      setCurrentSessionId(doc.id)
+      setView("work")
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function removeSession(sessionId) {
+    try {
+      await fetch(`${API_BASE}/api/sessions/${sessionId}`, { method: "DELETE" })
+    } catch {
+      /* ignore */
+    }
+    setSessions((current) => (current ?? []).filter((item) => item.id !== sessionId))
+    if (sessionId === currentSessionId) setCurrentSessionId(null)
+  }
+
+  async function duplicateSessionCard(sessionId) {
+    try {
+      const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/duplicate`, { method: "POST" })
+      if (!response.ok) return
+      const refreshed = await fetch(`${API_BASE}/api/sessions`).then((res) => res.json())
+      setSessions(refreshed.sessions ?? [])
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function startNewCalibration() {
+    restoredRef.current = false
+    setCurrentSessionId(null)
+    setBranches(defaultBranches)
+    setSelectedBranchId(defaultBranches[0].id)
+    setParameterOverrides({})
+    setFittedParameterValues({})
+    setSolverSettings(defaultSolverSettings)
+    setOptimization(initialOptimizationState)
+    setPredictionSettings(defaultPredictionSettings)
+    setPredictionOverrides({})
+    setBuddayRegion("")
+    const preferred = datasets.find((item) => item.author === "Treloar_1944") ?? datasets[0]
+    if (preferred) {
+      setAuthor(preferred.author)
+      setModes(defaultFittingKeys(preferred))
+    }
+    setActiveStep("experimental")
+    setView("work")
+  }
+
   async function startOptimization() {
     if (optimization.running) return
     setFittedParameterValues({})
@@ -654,12 +876,8 @@ function App() {
       }
       const result = await response.json()
       const fitted = Object.fromEntries((result.parameters ?? []).map((param) => [param.key, String(Number(param.value).toPrecision(8))]))
-      setFittedParameterValues(fitted)
-      setPredictionSettings((current) => ({
-        ...current,
-        modeKeys: preferredPredictionKeys(authorModes, result.modes ?? modes),
-      }))
-      setOptimization({
+      const predictionKeys = preferredPredictionKeys(authorModes, result.modes ?? modes)
+      const optimizationSnapshot = {
         status: result.success ? "Converged" : "Finished",
         running: false,
         progress: 100,
@@ -674,6 +892,45 @@ function App() {
           `${result.success ? "Converged" : "Finished"} after ${result.iterations ?? 0} iterations: loss ${Number(result.loss ?? 0).toExponential(2)}, R2 ${Number(result.r2 ?? 0).toFixed(4)}.`,
           `Fitted ${result.parameters?.length ?? 0} parameter${result.parameters?.length === 1 ? "" : "s"} with ${solverSettings.method}.`,
         ],
+      }
+      setFittedParameterValues(fitted)
+      setPredictionSettings((current) => ({ ...current, modeKeys: predictionKeys }))
+      setOptimization(optimizationSnapshot)
+
+      // Archive the finished calibration as a start-page session card.
+      const activeBranches = branches.filter((branch) => branch.enabled)
+      const modelNames = activeBranches.map((branch) => {
+        const model = buildConfiguredModel(modelCatalog.find((item) => item.key === branch.modelKey), branch.modelConfig)
+        return model?.name ?? branch.modelKey
+      })
+      const category = activeBranches.length > 1
+        ? "network"
+        : (modelCatalog.find((item) => item.key === activeBranches[0]?.modelKey)?.category ?? "phenomenological")
+      const sourceName = preview.metadata?.source ?? author
+      persistSession({
+        id: currentSessionId ?? undefined,
+        name: `${sourceName} · ${modelNames.join(" + ")}`,
+        summary: {
+          author,
+          source: sourceName,
+          modeShort: preview.metadata?.selectedModeShort ?? "",
+          modeCount: modes.length,
+          points: preview.metadata?.rows ?? 0,
+          models: modelNames,
+          category,
+          method: solverSettings.method,
+          r2: Number(result.r2 ?? 0),
+          loss: Number(result.loss ?? 0),
+          iterations: Number(result.iterations ?? 0),
+          exp: downsamplePoints(preview.series?.[0]?.points ?? preview.points, 20),
+          fit: downsamplePoints(result.prediction?.curves?.[0]?.points ?? [], 32),
+        },
+        state: buildSessionSnapshot({
+          activeStep: "optimization",
+          fittedParameterValues: fitted,
+          optimization: optimizationSnapshot,
+          predictionSettings: { ...predictionSettings, modeKeys: predictionKeys },
+        }),
       })
     } catch (error) {
       setOptimization((current) => ({
@@ -817,10 +1074,22 @@ function App() {
     return () => window.clearInterval(timer)
   }, [optimization.running])
 
+  if (view === "start") {
+    return (
+      <StartPage
+        sessions={sessions}
+        onNew={startNewCalibration}
+        onOpen={openSession}
+        onDelete={removeSession}
+        onDuplicate={duplicateSessionCard}
+      />
+    )
+  }
+
   return (
     <div className="min-h-screen bg-background text-text-primary">
       <div className="grid min-h-screen grid-cols-[260px_minmax(0,1fr)]">
-        <Sidebar activeStep={activeStep} onStepChange={setActiveStep} />
+        <Sidebar activeStep={activeStep} onStepChange={setActiveStep} onHome={() => setView("start")} />
         <div className="flex min-w-0 flex-col">
           <Topbar activeStep={activeStep} />
           <main className="min-w-0 flex-1 overflow-x-hidden p-5 pb-24">
@@ -838,6 +1107,9 @@ function App() {
                 onAuthorChange={handleAuthorChange}
                 onBuddayRegionChange={handleBuddayRegionChange}
                 onModeClick={handleModeClick}
+                myDatasets={myDatasets}
+                onUploaded={handleUploaded}
+                onDeleteUserDataset={handleDeleteUserDataset}
               />
             ) : activeStep === "models" ? (
               <ModelArchitecturePage
@@ -853,6 +1125,7 @@ function App() {
                 onParameterChange={handleParameterChange}
                 onResetParameters={resetSelectedParameters}
                 selectedDataCount={modes.length}
+                onModelsRefresh={refreshModels}
               />
             ) : activeStep === "optimization" ? (
               <OptimizationPage
@@ -900,6 +1173,225 @@ function App() {
   )
 }
 
+const UPLOAD_FAMILIES = [
+  { key: "UT", label: "Uniaxial Tension (UT)", columns: "λ, P", range: [2, 2] },
+  { key: "UC", label: "Uniaxial Compression (UC)", columns: "λ, P", range: [2, 2] },
+  { key: "ET", label: "Equibiaxial Tension (ET)", columns: "λ, P", range: [2, 2] },
+  { key: "PS", label: "Pure Shear (PS)", columns: "λ, P", range: [2, 2] },
+  { key: "SS", label: "Simple Shear (SS)", columns: "γ, P₁₂", range: [2, 2] },
+  { key: "BT", label: "Biaxial Tension (BT)", columns: "λ₁, λ₂, P₁₁ [, P₂₂]", range: [3, 4] },
+]
+
+function parseNumericTable(text) {
+  const rows = []
+  let skipped = 0
+  for (const rawLine of String(text).split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith("#") || line.startsWith("%") || line.startsWith("//")) continue
+    const values = line.split(/[\s,;\t]+/).filter(Boolean).map(Number)
+    if (!values.length || values.some((value) => !Number.isFinite(value))) {
+      skipped += 1
+      continue
+    }
+    rows.push(values)
+  }
+  return { rows, skipped }
+}
+
+function uploadValidationError(rows, familyKey) {
+  const family = UPLOAD_FAMILIES.find((item) => item.key === familyKey)
+  if (!rows.length) return "No numeric rows found in the file."
+  if (rows.length < 2) return "At least 2 data points are required."
+  const width = rows[0].length
+  if (rows.some((row) => row.length !== width)) return "Rows have inconsistent column counts."
+  const [min, max] = family.range
+  if (width < min || width > max) {
+    return `${family.key} expects ${min === max ? min : `${min}–${max}`} columns (${family.columns}), file has ${width}.`
+  }
+  return null
+}
+
+function MyDataPanel({ myDatasets, onUploaded, onDeleteDataset }) {
+  const [fileName, setFileName] = useState("")
+  const [rows, setRows] = useState([])
+  const [skipped, setSkipped] = useState(0)
+  const [material, setMaterial] = useState("")
+  const [family, setFamily] = useState("UT")
+  const [stressType, setStressType] = useState("PK1")
+  const [error, setError] = useState("")
+  const [saving, setSaving] = useState(false)
+
+  const materials = useMemo(() => [...new Set(myDatasets.map((item) => item.material))], [myDatasets])
+  const validation = rows.length ? uploadValidationError(rows, family) : null
+
+  function readFile(file) {
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const parsed = parseNumericTable(reader.result)
+      setFileName(file.name)
+      setRows(parsed.rows)
+      setSkipped(parsed.skipped)
+      setError(parsed.rows.length ? "" : "No numeric rows found in the file.")
+      if (!material && materials.length === 0) setMaterial("My Material")
+    }
+    reader.readAsText(file)
+  }
+
+  async function saveDataset() {
+    if (validation || !rows.length || saving) return
+    setSaving(true)
+    setError("")
+    try {
+      const response = await fetch(`${API_BASE}/api/user-datasets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          material: material.trim() || "My Material",
+          family,
+          stressType,
+          fileName,
+          points: rows,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.detail ?? `Upload failed (${response.status})`)
+      setFileName("")
+      setRows([])
+      setSkipped(0)
+      onUploaded(data.author, data.modeKey)
+    } catch (uploadError) {
+      setError(uploadError.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="mt-3 space-y-3">
+      <label
+        className="block cursor-pointer rounded-xl border-2 border-dashed border-border-strong bg-subtle px-4 py-5 text-center transition hover:border-primary hover:bg-selection-bg"
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          event.preventDefault()
+          readFile(event.dataTransfer.files?.[0])
+        }}
+      >
+        <input
+          type="file"
+          accept=".csv,.txt,.tsv,.dat"
+          className="hidden"
+          onChange={(event) => {
+            readFile(event.target.files?.[0])
+            event.target.value = ""
+          }}
+        />
+        <div className="text-sm font-semibold text-text-primary">Drop a CSV / TXT file here, or click to browse</div>
+        <div className="mt-1 text-xs text-text-muted">
+          UT/UC/ET/PS: λ, P · SS: γ, P₁₂ · BT: λ₁, λ₂, P₁₁ [, P₂₂] · units MPa
+        </div>
+      </label>
+
+      {rows.length > 0 && (
+        <div className="rounded-xl border border-border bg-surface p-3">
+          <div className="flex items-center justify-between text-xs font-semibold text-text-primary">
+            <span className="truncate">{fileName || "pasted data"}</span>
+            <span className="text-text-muted">
+              {rows.length} rows × {rows[0].length} cols{skipped ? ` · ${skipped} skipped` : ""}
+            </span>
+          </div>
+          <div className="mt-2 overflow-hidden rounded-lg border border-border">
+            {rows.slice(0, 4).map((row, index) => (
+              <div key={index} className="grid grid-cols-4 gap-1 border-b border-border bg-subtle px-2 py-1 font-mono text-[11px] text-text-muted last:border-b-0">
+                {row.slice(0, 4).map((value, column) => (
+                  <span key={column}>{Number(value).toPrecision(5)}</span>
+                ))}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <label className="col-span-2 block text-xs font-bold uppercase text-text-muted">
+              Material name
+              <input
+                className="mt-1 h-9 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm font-normal normal-case outline-none focus:border-primary"
+                value={material}
+                placeholder="My Material"
+                list="mydata-materials"
+                onChange={(event) => setMaterial(event.target.value)}
+              />
+              <datalist id="mydata-materials">
+                {materials.map((item) => (
+                  <option key={item} value={item} />
+                ))}
+              </datalist>
+            </label>
+            <label className="block text-xs font-bold uppercase text-text-muted">
+              Loading mode
+              <select
+                className="mt-1 w-full rounded-lg border border-border-strong bg-surface px-2 py-2 text-sm font-normal normal-case outline-none focus:border-primary"
+                value={family}
+                onChange={(event) => setFamily(event.target.value)}
+              >
+                {UPLOAD_FAMILIES.map((item) => (
+                  <option key={item.key} value={item.key}>{item.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-xs font-bold uppercase text-text-muted">
+              Stress type
+              <select
+                className="mt-1 w-full rounded-lg border border-border-strong bg-surface px-2 py-2 text-sm font-normal normal-case outline-none focus:border-primary"
+                value={stressType}
+                onChange={(event) => setStressType(event.target.value)}
+              >
+                <option value="PK1">First Piola-Kirchhoff (nominal)</option>
+                <option value="cauchy">Cauchy (true)</option>
+              </select>
+            </label>
+          </div>
+
+          {(validation || error) && (
+            <p className="mt-2 rounded-lg border border-[#F3C7C7] bg-[#FDF2F2] px-3 py-2 text-xs text-[#B91C1C]">{validation || error}</p>
+          )}
+          <button
+            className="mt-3 w-full rounded-xl primary-gradient px-4 py-2.5 text-sm font-bold text-white shadow-primary-glow transition hover:brightness-105 disabled:opacity-50"
+            disabled={Boolean(validation) || saving}
+            onClick={saveDataset}
+          >
+            {saving ? "Saving…" : "Save to My Data"}
+          </button>
+        </div>
+      )}
+
+      {myDatasets.length > 0 && (
+        <div>
+          <Label>Uploaded tests</Label>
+          <div className="flex max-h-44 flex-col gap-1.5 overflow-y-auto pr-1">
+            {myDatasets.map((item) => (
+              <div key={item.id} className="flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs">
+                <span className="min-w-0 flex-1 truncate">
+                  <b>{item.material}</b> · {item.modeKey} · {item.points} pts
+                  {item.fileName ? <span className="text-text-disabled"> · {item.fileName}</span> : null}
+                </span>
+                <button
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-border-strong text-text-muted transition hover:border-[#DC2626] hover:text-[#DC2626]"
+                  title="Delete dataset"
+                  onClick={() => {
+                    if (window.confirm(`Delete "${item.material} · ${item.modeKey}"?`)) onDeleteDataset(item.id)
+                  }}
+                >
+                  <Icon className="text-xs">delete</Icon>
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ExperimentalDataPage({
   datasets,
   author,
@@ -913,30 +1405,75 @@ function ExperimentalDataPage({
   onAuthorChange,
   onBuddayRegionChange,
   onModeClick,
+  myDatasets,
+  onUploaded,
+  onDeleteUserDataset,
 }) {
   const tensorGroups = groupPreviewSeries(preview, primaryModeMeta)
   const hasDisabledFittingModes = fittingModes.some((option) => fittingDisabledFamilies.has(option.family))
+  const isUserAuthor = author.startsWith("user:")
+  const [sourceTab, setSourceTab] = useState(isUserAuthor ? "mydata" : "database")
+  useEffect(() => {
+    setSourceTab(author.startsWith("user:") ? "mydata" : "database")
+  }, [author])
+  const databaseAuthors = datasets.filter((item) => !item.isUserData)
+  const userAuthors = datasets.filter((item) => item.isUserData)
+  const tabAuthors = sourceTab === "mydata" ? userAuthors : databaseAuthors
+
+  function switchTab(tab) {
+    setSourceTab(tab)
+    const pool = tab === "mydata" ? userAuthors : databaseAuthors
+    if (pool.length && !pool.some((item) => item.author === author)) {
+      onAuthorChange(pool[0].author)
+    }
+  }
+
   return (
     <div className="mx-auto grid min-h-[640px] max-w-[1240px] grid-cols-[minmax(360px,0.82fr)_minmax(520px,1.18fr)] gap-4">
       <section className="flex min-w-0 flex-col gap-3">
         <Card title="Data Source">
-          <div className="rounded-lg border border-border bg-subtle px-3 py-2">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <Icon className="text-lg text-primary">dns</Icon>
-              Database
-            </div>
-            <p className="mt-1 text-xs leading-5 text-text-muted">Built-in experimental datasets are the calibration source.</p>
+          <div className="grid grid-cols-2 gap-1 rounded-xl border border-border bg-subtle p-1">
+            {[
+              ["database", "dns", "Database"],
+              ["mydata", "save", "My Data"],
+            ].map(([tab, icon, label]) => (
+              <button
+                key={tab}
+                className={`flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                  sourceTab === tab ? "bg-surface text-primary shadow-panel" : "text-text-muted hover:text-text-primary"
+                }`}
+                onClick={() => switchTab(tab)}
+              >
+                <Icon className="text-base">{icon}</Icon>
+                {label}
+              </button>
+            ))}
           </div>
-          <label className="mt-3 block text-xs font-bold uppercase text-text-muted">
-            Publication / source
-            <select className="mt-1 w-full rounded-lg border border-border-strong bg-surface px-2 py-2 text-sm normal-case text-text-primary" value={author} onChange={(event) => onAuthorChange(event.target.value)}>
-              {datasets.map((item) => (
-                <option key={item.author} value={item.author}>
-                  {item.name ?? item.author}
-                </option>
-              ))}
-            </select>
-          </label>
+          <p className="mt-2 text-xs leading-5 text-text-muted">
+            {sourceTab === "mydata"
+              ? "Your uploaded experiments, grouped by material. Same workflow as the built-in database."
+              : "Built-in experimental datasets from the literature."}
+          </p>
+          {tabAuthors.length > 0 && (
+            <label className="mt-3 block text-xs font-bold uppercase text-text-muted">
+              {sourceTab === "mydata" ? "Material" : "Publication / source"}
+              <select className="mt-1 w-full rounded-lg border border-border-strong bg-surface px-2 py-2 text-sm normal-case text-text-primary" value={author} onChange={(event) => onAuthorChange(event.target.value)}>
+                {tabAuthors.map((item) => (
+                  <option key={item.author} value={item.author}>
+                    {item.name ?? item.author}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {sourceTab === "mydata" && userAuthors.length === 0 && (
+            <p className="mt-3 rounded-lg border border-border bg-subtle px-3 py-2 text-xs leading-5 text-text-muted">
+              No uploads yet — add your first experiment below.
+            </p>
+          )}
+          {sourceTab === "mydata" && (
+            <MyDataPanel myDatasets={myDatasets} onUploaded={onUploaded} onDeleteDataset={onDeleteUserDataset} />
+          )}
           {buddayRegions.length > 0 && (
             <label className="mt-3 block text-xs font-bold uppercase text-text-muted">
               Brain region
@@ -1004,12 +1541,40 @@ function ModelArchitecturePage({
   onParameterChange,
   onResetParameters,
   selectedDataCount,
+  onModelsRefresh,
 }) {
   const modelByKey = useMemo(
     () => Object.fromEntries(models.map((model) => [model.key, model])),
     [models],
   )
   const activeBranches = branches.filter((branch) => branch.enabled)
+  const [labBranchId, setLabBranchId] = useState(null)
+
+  async function handleModelSaved(savedKey) {
+    await onModelsRefresh()
+    if (labBranchId) {
+      onUpdateBranch(labBranchId, { modelKey: savedKey, modelConfig: {} })
+      onSelectBranch(labBranchId)
+    }
+    setLabBranchId(null)
+  }
+
+  async function handleModelDeleted(modelKey) {
+    const modelId = modelKey.replace("user-model:", "")
+    try {
+      await fetch(`${API_BASE}/api/user-models/${modelId}`, { method: "DELETE" })
+    } catch {
+      /* ignore */
+    }
+    const fresh = await onModelsRefresh()
+    const freshKeys = new Set((fresh ?? []).map((item) => item.key))
+    branches.forEach((branch) => {
+      if (!freshKeys.has(branch.modelKey)) {
+        const fallback = (fresh ?? []).find((item) => item.key === "NeoHookean") ?? (fresh ?? [])[0]
+        if (fallback) onUpdateBranch(branch.id, { modelKey: fallback.key, modelConfig: defaultConfigForModel(fallback) })
+      }
+    })
+  }
 
   return (
     <div className="mx-auto flex min-h-[640px] w-full max-w-[1280px] flex-col gap-4 overflow-x-hidden">
@@ -1038,10 +1603,19 @@ function ModelArchitecturePage({
                 onUpdate={(updates) => onUpdateBranch(branch.id, updates)}
                 onToggle={() => onUpdateBranch(branch.id, { enabled: !branch.enabled })}
                 onRemove={() => onRemoveBranch(branch.id)}
+                onDefineModel={() => setLabBranchId(branch.id)}
               />
             ))}
           </div>
         </Card>
+
+        <ModelLabModal
+          open={labBranchId !== null}
+          models={models}
+          onClose={() => setLabBranchId(null)}
+          onSaved={handleModelSaved}
+          onDeleted={handleModelDeleted}
+        />
 
         <Card title="Architecture Workspace" className="min-w-0">
           <div className="grid min-w-0 gap-5">
@@ -1880,7 +2454,255 @@ function ArchitectureSummary({ branches, activeBranches, selectedDataCount, sele
   )
 }
 
-function BranchCard({ branch, total, model, baseModel, models, active, onSelect, onUpdate, onToggle, onRemove }) {
+const MODEL_LAB_HINT = "Symbols: I1, I2 (invariant) or lambda_1..3 (stretch) · functions: exp, log, sqrt, sinh, cosh, tanh, atan… · everything else becomes a parameter"
+
+function ModelLabModal({ open, models, onClose, onSaved, onDeleted }) {
+  const [name, setName] = useState("")
+  const [kind, setKind] = useState("invariant")
+  const [expression, setExpression] = useState("")
+  const [notes, setNotes] = useState("")
+  const [paramValues, setParamValues] = useState({})
+  const [check, setCheck] = useState(null) // {latex, parameters, error}
+  const [feedback, setFeedback] = useState(null) // {errors, warnings}
+  const [saving, setSaving] = useState(false)
+
+  const userModels = models.filter((item) => item.isUserModel)
+
+  useEffect(() => {
+    if (!open) return undefined
+    if (!expression.trim()) {
+      setCheck(null)
+      return undefined
+    }
+    let alive = true
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/user-models/validate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind, expression }),
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!alive) return
+        if (!response.ok) {
+          setCheck({ error: data.detail ?? "Could not parse the expression." })
+        } else {
+          setCheck({ latex: data.latex, parameters: data.parameters ?? [] })
+        }
+      } catch {
+        if (alive) setCheck({ error: "Validation request failed." })
+      }
+    }, 450)
+    return () => {
+      alive = false
+      clearTimeout(timer)
+    }
+  }, [open, kind, expression])
+
+  if (!open) return null
+
+  const detected = check?.parameters ?? []
+  const latexHtml = check?.latex ? renderFormula(check.latex) : ""
+
+  function paramField(paramName, field, fallback = "") {
+    return paramValues[paramName]?.[field] ?? fallback
+  }
+
+  function setParamField(paramName, field, value) {
+    setParamValues((current) => ({
+      ...current,
+      [paramName]: { ...current[paramName], [field]: value },
+    }))
+  }
+
+  async function save() {
+    if (saving) return
+    setSaving(true)
+    setFeedback(null)
+    try {
+      const payload = {
+        name,
+        kind,
+        expression,
+        notes,
+        params: detected.map((paramName) => ({
+          name: paramName,
+          initial: Number(paramField(paramName, "initial", "1")) || 1,
+          lower: paramField(paramName, "lower") === "" ? null : Number(paramField(paramName, "lower")),
+          upper: paramField(paramName, "upper") === "" ? null : Number(paramField(paramName, "upper")),
+        })),
+      }
+      const response = await fetch(`${API_BASE}/api/user-models`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setFeedback({ errors: [data.detail ?? `Save failed (${response.status})`], warnings: [] })
+        return
+      }
+      setFeedback({ errors: [], warnings: data.warnings ?? [] })
+      setName("")
+      setExpression("")
+      setNotes("")
+      setParamValues({})
+      setCheck(null)
+      onSaved(data.key, data.warnings ?? [])
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#0E1B33]/45 p-6 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="max-h-[88vh] w-full max-w-[760px] overflow-y-auto rounded-2xl border border-border bg-surface p-5 shadow-float"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="flex items-center gap-2 text-[16px] font-semibold tracking-[-0.01em]">
+            <span className="h-3.5 w-1 rounded-full primary-gradient" />
+            Define Custom Model
+          </h3>
+          <button className="grid h-8 w-8 place-items-center rounded-lg border border-border-strong text-text-muted hover:bg-subtle" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="grid grid-cols-[1fr_auto] gap-3">
+          <label className="block text-xs font-bold uppercase text-text-muted">
+            Model name
+            <input
+              className="mt-1 h-10 w-full rounded-lg border border-border-strong bg-surface px-2.5 text-sm font-normal normal-case outline-none focus:border-primary"
+              value={name}
+              placeholder="e.g. Gent"
+              onChange={(event) => setName(event.target.value)}
+            />
+          </label>
+          <div className="block text-xs font-bold uppercase text-text-muted">
+            Formulation
+            <div className="mt-1 grid grid-cols-2 gap-1 rounded-xl border border-border bg-subtle p-1">
+              {[
+                ["invariant", "Ψ(I₁, I₂)"],
+                ["stretch", "Ψ(λ₁, λ₂, λ₃)"],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  className={`rounded-lg px-3 py-1.5 text-sm font-semibold normal-case transition ${
+                    kind === value ? "bg-surface text-primary shadow-panel" : "text-text-muted hover:text-text-primary"
+                  }`}
+                  onClick={() => setKind(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <label className="mt-3 block text-xs font-bold uppercase text-text-muted">
+          Strain-energy expression Ψ
+          <textarea
+            className="mt-1 min-h-[76px] w-full rounded-lg border border-border-strong bg-surface px-2.5 py-2 font-mono text-[13px] font-normal normal-case leading-relaxed outline-none focus:border-primary"
+            value={expression}
+            placeholder={kind === "invariant" ? "-(mu*Jm/2) * log(1 - (I1-3)/Jm)" : "(mu/alpha)*(lambda_1**alpha + lambda_2**alpha + lambda_3**alpha - 3)"}
+            spellCheck={false}
+            onChange={(event) => setExpression(event.target.value)}
+          />
+        </label>
+        <p className="mt-1 text-[11px] leading-4 text-text-disabled">{MODEL_LAB_HINT}</p>
+
+        {check?.error && (
+          <p className="mt-2 rounded-lg border border-[#F3C7C7] bg-[#FDF2F2] px-3 py-2 text-xs text-[#B91C1C]">{check.error}</p>
+        )}
+        {latexHtml && (
+          <div className="formula-block mt-2 overflow-x-auto rounded-lg border border-border bg-subtle px-4 py-3" dangerouslySetInnerHTML={{ __html: latexHtml }} />
+        )}
+
+        {detected.length > 0 && (
+          <div className="mt-3">
+            <Label>Parameters (auto-detected)</Label>
+            <div className="overflow-hidden rounded-lg border border-border">
+              <div className="grid grid-cols-[1fr_1.1fr_1fr_1fr] border-b border-border bg-subtle px-3 py-1.5 text-[11px] font-bold uppercase text-text-muted">
+                <span>Name</span><span>Initial</span><span>Lower</span><span>Upper</span>
+              </div>
+              {detected.map((paramName) => (
+                <div key={paramName} className="grid grid-cols-[1fr_1.1fr_1fr_1fr] items-center gap-2 border-b border-border px-3 py-1.5 text-sm last:border-b-0">
+                  <span className="font-semibold"><LatexInline value={parameterSymbol(paramName)} fallback={paramName} /></span>
+                  {["initial", "lower", "upper"].map((field) => (
+                    <input
+                      key={field}
+                      className="h-8 w-full rounded-lg border border-border-strong bg-surface px-2 text-sm outline-none focus:border-primary"
+                      type="number"
+                      step="any"
+                      placeholder={field === "initial" ? "1" : "—"}
+                      value={paramField(paramName, field)}
+                      onChange={(event) => setParamField(paramName, field, event.target.value)}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <label className="mt-3 block text-xs font-bold uppercase text-text-muted">
+          Notes / reference (optional)
+          <input
+            className="mt-1 h-9 w-full rounded-lg border border-border-strong bg-surface px-2.5 text-sm font-normal normal-case outline-none focus:border-primary"
+            value={notes}
+            placeholder="e.g. Gent (1996), Rubber Chem. Technol."
+            onChange={(event) => setNotes(event.target.value)}
+          />
+        </label>
+
+        {feedback?.errors?.length > 0 && (
+          <p className="mt-3 rounded-lg border border-[#F3C7C7] bg-[#FDF2F2] px-3 py-2 text-xs text-[#B91C1C]">{feedback.errors.join(" ")}</p>
+        )}
+        {feedback?.warnings?.length > 0 && (
+          <p className="mt-3 rounded-lg border border-[#F3DFBB] bg-[#FDF8EC] px-3 py-2 text-xs text-[#92600A]">{feedback.warnings.join(" ")}</p>
+        )}
+
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <button className="rounded-xl border border-border-strong bg-surface px-4 py-2 text-sm font-semibold hover:bg-subtle" onClick={onClose}>Cancel</button>
+          <button
+            className="rounded-xl primary-gradient px-5 py-2 text-sm font-bold text-white shadow-primary-glow transition hover:brightness-105 disabled:opacity-50"
+            disabled={!name.trim() || !expression.trim() || Boolean(check?.error) || !detected.length || saving}
+            onClick={save}
+          >
+            {saving ? "Checking & saving…" : "Save Model"}
+          </button>
+        </div>
+
+        {userModels.length > 0 && (
+          <div className="mt-5 border-t border-dashed border-border pt-3">
+            <Label>My models</Label>
+            <div className="flex max-h-44 flex-col gap-1.5 overflow-y-auto pr-1">
+              {userModels.map((item) => (
+                <div key={item.key} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-1.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold">{item.name}</div>
+                    <div className="formula-compact truncate" dangerouslySetInnerHTML={{ __html: renderFormula(item.formula, false) }} />
+                  </div>
+                  <button
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-border-strong text-text-muted transition hover:border-[#DC2626] hover:text-[#DC2626]"
+                    title="Delete model"
+                    onClick={() => {
+                      if (window.confirm(`Delete model "${item.name}"?`)) onDeleted(item.key)
+                    }}
+                  >
+                    <Icon className="text-xs">delete</Icon>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function BranchCard({ branch, total, model, baseModel, models, active, onSelect, onUpdate, onToggle, onRemove, onDefineModel }) {
   return (
     <div
       className={`rounded-lg border p-3 text-left transition ${active ? "border-primary bg-selection-bg" : branch.enabled ? "border-border-strong bg-surface hover:bg-subtle" : "border-border bg-subtle opacity-70"}`}
@@ -1919,10 +2741,26 @@ function BranchCard({ branch, total, model, baseModel, models, active, onSelect,
             })
           }}
         >
-          {models.map((item) => (
-            <option key={item.key} value={item.key}>{item.name}</option>
-          ))}
+          <optgroup label="Built-in">
+            {models.filter((item) => !item.isUserModel).map((item) => (
+              <option key={item.key} value={item.key}>{item.name}</option>
+            ))}
+          </optgroup>
+          {models.some((item) => item.isUserModel) && (
+            <optgroup label="My Models">
+              {models.filter((item) => item.isUserModel).map((item) => (
+                <option key={item.key} value={item.key}>{item.name}</option>
+              ))}
+            </optgroup>
+          )}
         </select>
+        <button
+          className="mt-1.5 flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+          onClick={onDefineModel}
+        >
+          <Icon className="text-sm">add</Icon>
+          Define custom model…
+        </button>
       </label>
       <div className="mt-3" onClick={(event) => event.stopPropagation()}>
         <ModelConfigurationPanel
@@ -2123,7 +2961,263 @@ function BrandMark({ className = "h-8 w-8" }) {
   )
 }
 
-function Sidebar({ activeStep, onStepChange }) {
+function SessionSparkline({ summary }) {
+  const exp = summary?.exp ?? []
+  const fit = summary?.fit ?? []
+  const all = [...exp, ...fit]
+  if (all.length < 2) {
+    return <div className="grid h-full place-items-center text-[11px] text-text-disabled">No curve</div>
+  }
+  const xs = all.map((p) => p[0])
+  const ys = all.map((p) => p[1])
+  const xMin = Math.min(...xs)
+  const xMax = Math.max(...xs)
+  const yMin = Math.min(...ys)
+  const yMax = Math.max(...ys)
+  const sx = (x) => 10 + ((x - xMin) / (xMax - xMin || 1)) * 130
+  const sy = (y) => 56 - ((y - yMin) / (yMax - yMin || 1)) * 48
+  const fitPath = fit.map((p, i) => `${i ? "L" : "M"} ${sx(p[0]).toFixed(1)} ${sy(p[1]).toFixed(1)}`).join(" ")
+  const dotStep = Math.max(1, Math.floor(exp.length / 5))
+  const dots = exp.filter((_, i) => i % dotStep === 0).slice(0, 6)
+  return (
+    <svg viewBox="0 0 150 64" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
+      {fitPath && <path d={fitPath} fill="none" stroke="#2563EB" strokeWidth="2.4" strokeLinecap="round" />}
+      <g fill="#fff" stroke="#DC2626" strokeWidth="1.6">
+        {dots.map((p, i) => (
+          <circle key={i} cx={sx(p[0]).toFixed(1)} cy={sy(p[1]).toFixed(1)} r="2.6" />
+        ))}
+      </g>
+    </svg>
+  )
+}
+
+function StartPage({ sessions, onNew, onOpen, onDelete, onDuplicate }) {
+  const [query, setQuery] = useState("")
+  const [sourceFilter, setSourceFilter] = useState("")
+  const [modelFilter, setModelFilter] = useState("")
+  const loading = sessions === null
+  const list = sessions ?? []
+
+  const sourceCounts = useMemo(() => {
+    const counts = new Map()
+    list.forEach((item) => {
+      const source = item.summary?.source ?? "Other"
+      counts.set(source, (counts.get(source) ?? 0) + 1)
+    })
+    return [...counts.entries()]
+  }, [list])
+
+  const modelCounts = useMemo(() => {
+    const counts = new Map()
+    list.forEach((item) => {
+      const names = item.summary?.models?.length ? item.summary.models : ["Unknown model"]
+      new Set(names).forEach((name) => counts.set(name, (counts.get(name) ?? 0) + 1))
+    })
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  }, [list])
+
+  const filtered = useMemo(() => {
+    const text = query.trim().toLowerCase()
+    return list.filter((item) => {
+      if (sourceFilter && (item.summary?.source ?? "Other") !== sourceFilter) return false
+      if (modelFilter && !(item.summary?.models ?? []).includes(modelFilter)) return false
+      if (!text) return true
+      const haystack = [item.name, item.summary?.source, item.summary?.modeShort, ...(item.summary?.models ?? [])]
+        .join(" ")
+        .toLowerCase()
+      return haystack.includes(text)
+    })
+  }, [list, query, sourceFilter, modelFilter])
+
+  const groups = useMemo(() => {
+    const order = ["Today", "Earlier this week", "Earlier"]
+    const bucket = new Map(order.map((key) => [key, []]))
+    filtered.forEach((item) => bucket.get(sessionDateGroup(item.updatedAt)).push(item))
+    return order.map((key) => [key, bucket.get(key)]).filter(([, items]) => items.length)
+  }, [filtered])
+
+  const bestR2 = list.length ? Math.max(...list.map((item) => item.summary?.r2 ?? 0)) : null
+
+  return (
+    <div className="grid min-h-screen grid-cols-[270px_minmax(0,1fr)] bg-background text-text-primary">
+      <aside className="surface-rail sticky top-0 flex h-screen flex-col border-r border-border px-5 py-6">
+        <div className="mb-6 flex items-center gap-3">
+          <BrandMark className="h-11 w-11 shrink-0 rounded-[12px] shadow-card" />
+          <div className="min-w-0">
+            <h1 className="truncate text-[15px] font-semibold leading-tight">Hyperelastic</h1>
+            <h1 className="truncate text-[15px] font-semibold leading-tight">Calibration</h1>
+          </div>
+        </div>
+        <button
+          className="w-full rounded-xl primary-gradient px-4 py-3 text-sm font-bold text-white shadow-primary-glow transition hover:brightness-105"
+          onClick={onNew}
+        >
+          + New Calibration
+        </button>
+
+        <div className="mb-2 mt-6 text-[10.5px] font-extrabold uppercase tracking-[0.13em] text-text-disabled">Data Sources</div>
+        <button
+          className={`flex items-center justify-between rounded-lg px-2.5 py-2 text-[13px] ${!sourceFilter ? "bg-selection-bg font-semibold text-primary" : "text-text-muted hover:bg-subtle"}`}
+          onClick={() => setSourceFilter("")}
+        >
+          <span>All sessions</span>
+          <span className="rounded-full border border-border bg-surface px-2 text-[11px] text-text-disabled">{list.length}</span>
+        </button>
+        {sourceCounts.map(([source, count]) => (
+          <button
+            key={source}
+            className={`flex items-center justify-between rounded-lg px-2.5 py-2 text-[13px] ${sourceFilter === source ? "bg-selection-bg font-semibold text-primary" : "text-text-muted hover:bg-subtle"}`}
+            onClick={() => setSourceFilter(sourceFilter === source ? "" : source)}
+          >
+            <span className="truncate">{source}</span>
+            <span className="rounded-full border border-border bg-surface px-2 text-[11px] text-text-disabled">{count}</span>
+          </button>
+        ))}
+
+        {modelCounts.length > 0 && (
+          <>
+            <div className="mb-2 mt-5 text-[10.5px] font-extrabold uppercase tracking-[0.13em] text-text-disabled">Models</div>
+            {modelCounts.map(([name, count]) => (
+              <button
+                key={name}
+                className={`flex items-center justify-between rounded-lg px-2.5 py-2 text-[13px] ${modelFilter === name ? "bg-selection-bg font-semibold text-primary" : "text-text-muted hover:bg-subtle"}`}
+                onClick={() => setModelFilter(modelFilter === name ? "" : name)}
+              >
+                <span className="truncate">{name}</span>
+                <span className="rounded-full border border-border bg-surface px-2 text-[11px] text-text-disabled">{count}</span>
+              </button>
+            ))}
+          </>
+        )}
+
+        <div className="flex-1" />
+        <div className="border-t border-dashed border-border pt-4 text-[11.5px] leading-relaxed text-text-disabled">
+          Sessions capture the full calibration state — dataset selection, model composition, parameters and result curves. Click any row to restore it.
+        </div>
+      </aside>
+
+      <main className="min-w-0 px-9 py-8">
+        <div className="mb-4 flex items-end justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-semibold tracking-[-0.02em]">Calibration Ledger</h1>
+            <p className="mt-1 text-[13px] text-text-muted">
+              {loading ? "Loading sessions…" : `${list.length} session${list.length === 1 ? "" : "s"}${bestR2 !== null ? ` · best R² ${bestR2.toFixed(4)}` : ""}`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <div className="relative">
+              <Icon className="absolute left-3 top-1/2 -translate-y-1/2 text-base text-text-disabled">search</Icon>
+              <input
+                className="h-10 w-64 rounded-xl border border-border-strong bg-surface pl-9 pr-3 text-[13.5px] outline-none focus:border-primary"
+                placeholder="Search sessions, models, sources…"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+
+        {!loading && list.length === 0 && (
+          <div className="grid place-items-center rounded-2xl border-2 border-dashed border-border-strong px-8 py-24 text-center">
+            <div>
+              <BrandMark className="mx-auto h-16 w-16 rounded-[16px] shadow-card" />
+              <h2 className="mt-5 text-[17px] font-semibold">No saved calibrations yet</h2>
+              <p className="mx-auto mt-2 max-w-sm text-[13px] leading-relaxed text-text-muted">
+                Finish a calibration and it will appear here automatically — dataset selection, model composition, fitted parameters and curves are all saved and can be restored any time.
+              </p>
+              <button
+                className="mt-6 rounded-xl primary-gradient px-6 py-3 text-sm font-bold text-white shadow-primary-glow transition hover:brightness-105"
+                onClick={onNew}
+              >
+                + Start Your First Calibration
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!loading && list.length > 0 && filtered.length === 0 && (
+          <div className="rounded-2xl border border-border bg-surface px-8 py-16 text-center text-[13px] text-text-muted shadow-card">
+            No matching sessions — try a different keyword or clear the filters.
+          </div>
+        )}
+
+        {groups.map(([groupName, items]) => (
+          <div key={groupName}>
+            <div className="mb-3 mt-6 flex items-center gap-3 text-[11.5px] font-extrabold uppercase tracking-[0.11em] text-text-disabled">
+              {groupName}
+              <span className="h-px flex-1 bg-border" />
+            </div>
+            {items.map((item) => (
+              <div
+                key={item.id}
+                className="mb-2.5 grid cursor-pointer grid-cols-[150px_minmax(0,1fr)_auto_auto] items-center gap-5 rounded-xl border border-border bg-surface p-3 pr-4 shadow-card transition hover:translate-x-0.5 hover:border-primary"
+                onClick={() => onOpen(item.id)}
+              >
+                <div className="relative h-16 overflow-hidden rounded-lg border border-border bg-gradient-to-b from-[#F7FAFF] to-[#F0F5FD]">
+                  <SessionSparkline summary={item.summary} />
+                </div>
+                <div className="min-w-0">
+                  <div className="truncate text-[14.5px] font-semibold tracking-[-0.01em]">{item.name}</div>
+                  <div className="mt-0.5 truncate text-xs text-text-muted">
+                    {item.summary?.source}
+                    {item.summary?.modeShort ? ` · ${item.summary.modeShort}` : ""}
+                    {item.summary?.points ? ` · ${item.summary.points} pts` : ""}
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {(item.summary?.models ?? []).map((model) => (
+                      <span key={model} className="rounded-md border border-[#CBDBFA] bg-selection-bg px-2 py-0.5 text-[10.5px] font-semibold text-primary">
+                        {model}
+                      </span>
+                    ))}
+                    {item.summary?.method && (
+                      <span className="rounded-md border border-border bg-subtle px-2 py-0.5 text-[10.5px] font-semibold text-text-muted">{item.summary.method}</span>
+                    )}
+                    {item.summary?.iterations ? (
+                      <span className="rounded-md border border-border bg-subtle px-2 py-0.5 text-[10.5px] font-semibold text-text-muted">{item.summary.iterations} iters</span>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className={`text-[16px] font-bold ${((item.summary?.r2 ?? 0) >= 0.98) ? "text-success" : "text-[#D97706]"}`}>
+                    {(item.summary?.r2 ?? 0).toFixed(4)}
+                  </div>
+                  <div className="mt-0.5 text-[11.5px] text-text-disabled">{sessionDateLabel(item.updatedAt)}</div>
+                </div>
+                <div className="flex items-center gap-1.5" onClick={(event) => event.stopPropagation()}>
+                  <button
+                    className="grid h-8 w-8 place-items-center rounded-lg border border-border-strong bg-surface text-text-muted transition hover:border-primary hover:text-primary"
+                    title="Duplicate session"
+                    onClick={() => onDuplicate(item.id)}
+                  >
+                    <Icon className="text-sm">copy</Icon>
+                  </button>
+                  <button
+                    className="grid h-8 w-8 place-items-center rounded-lg border border-border-strong bg-surface text-text-muted transition hover:border-[#DC2626] hover:text-[#DC2626]"
+                    title="Delete session"
+                    onClick={() => {
+                      if (window.confirm(`Delete session "${item.name}"? This cannot be undone.`)) onDelete(item.id)
+                    }}
+                  >
+                    <Icon className="text-sm">delete</Icon>
+                  </button>
+                  <button
+                    className="grid h-8 w-8 place-items-center rounded-lg primary-gradient text-white shadow-primary-glow"
+                    title="Open session"
+                    onClick={() => onOpen(item.id)}
+                  >
+                    <Icon className="text-sm">arrow_forward</Icon>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </main>
+    </div>
+  )
+}
+
+function Sidebar({ activeStep, onStepChange, onHome }) {
   const items = [
     ["experimental", "Experimental Data", "Select source datasets"],
     ["models", "Model Architecture", "Compose the energy model"],
@@ -2133,13 +3227,18 @@ function Sidebar({ activeStep, onStepChange }) {
   const activeIndex = items.findIndex(([key]) => key === activeStep)
   return (
     <aside className="surface-rail sticky top-0 flex h-screen flex-col border-r border-border px-4 py-5">
-      <div className="flex items-center gap-3 px-1 pb-6">
+      <button
+        className="group -mx-1 mb-6 flex items-center gap-3 rounded-xl px-2 py-1.5 text-left transition hover:bg-subtle"
+        onClick={onHome}
+        title="Back to start page"
+      >
         <BrandMark className="h-10 w-10 shrink-0 rounded-[11px] shadow-card" />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h1 className="truncate text-[15px] font-semibold leading-tight">Hyperelastic</h1>
           <h1 className="truncate text-[15px] font-semibold leading-tight">Calibration</h1>
         </div>
-      </div>
+        <Icon className="text-base text-text-disabled opacity-0 transition group-hover:opacity-100">home</Icon>
+      </button>
 
       <div className="mb-2 px-1 text-[10px] font-bold uppercase tracking-[0.14em] text-text-disabled">Workflow</div>
       <nav className="relative flex flex-1 flex-col gap-1">
