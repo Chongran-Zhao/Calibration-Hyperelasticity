@@ -1767,10 +1767,10 @@ function OptimizationPage({
 
 function MetricCard({ label, value, active }) {
   return (
-    <div className={`rounded-lg border bg-surface p-3 shadow-panel ${active ? "border-primary" : "border-border"}`}>
-      <div className="text-[11px] font-bold uppercase text-text-muted">{label}</div>
-      <div className="mt-1 flex items-center gap-2 text-lg font-semibold">
-        {active && <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />}
+    <div className="glass-panel rounded-xl p-3 px-4">
+      <div className="text-[10.5px] font-semibold text-text-disabled">{label}</div>
+      <div className="mt-1 flex items-center gap-2 text-[19px] font-semibold tracking-[-0.02em]">
+        {active && <span className="h-2 w-2 animate-pulse rounded-full bg-primary shadow-[0_0_0_3px_rgba(10,132,255,0.18)]" />}
         {value}
       </div>
     </div>
@@ -2525,7 +2525,7 @@ function ModelLabModal({ open, models, onClose, onSaved, onDeleted }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-[#0E1B33]/45 p-6 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="max-h-[88vh] w-full max-w-[760px] overflow-y-auto rounded-2xl border border-border bg-surface p-5 shadow-float"
+        className="max-h-[88vh] w-full max-w-[760px] overflow-y-auto rounded-2xl bg-white/90 p-5 shadow-float backdrop-blur-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
@@ -3118,7 +3118,7 @@ function StartPage({ sessions, onNew, onOpen, onDelete, onDuplicate }) {
             {items.map((item) => (
               <div
                 key={item.id}
-                className="mb-2.5 grid cursor-pointer grid-cols-[150px_minmax(0,1fr)_auto_auto] items-center gap-5 rounded-xl border border-border bg-surface p-3 pr-4 shadow-card transition hover:translate-x-0.5 hover:border-primary"
+                className="glass-panel mb-2.5 grid cursor-pointer grid-cols-[150px_minmax(0,1fr)_auto_auto] items-center gap-5 rounded-xl p-3 pr-4 transition hover:translate-x-0.5 hover:!outline-primary"
                 onClick={() => onOpen(item.id)}
               >
                 <div className="relative h-16 overflow-hidden rounded-lg border border-border bg-gradient-to-b from-[#F7FAFF] to-[#F0F5FD]">
@@ -3208,47 +3208,40 @@ function Sidebar({ activeStep, onStepChange, onHome }) {
         <Icon className="text-base text-text-disabled opacity-0 transition group-hover:opacity-100">home</Icon>
       </button>
 
-      <div className="mb-2 px-1 text-[10px] font-bold uppercase tracking-[0.14em] text-text-disabled">Workflow</div>
-      <nav className="relative flex flex-1 flex-col gap-1">
-        {items.map(([key, label, description], index) => {
+      <div className="mb-1.5 px-1 text-[10.5px] font-bold text-text-disabled">Workflow</div>
+      <nav className="flex flex-1 flex-col gap-1">
+        {items.map(([key, label], index) => {
           const active = activeStep === key
           const passed = activeIndex > -1 && index < activeIndex
-          const isLast = index === items.length - 1
           return (
             <button
               key={key}
               onClick={() => onStepChange(key)}
-              className={`group relative flex items-start gap-3 rounded-xl px-2.5 py-2.5 text-left transition ${
-                active ? "bg-selection-bg" : "hover:bg-subtle"
+              className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium transition ${
+                active
+                  ? "primary-gradient text-white shadow-primary-glow"
+                  : "text-text-primary hover:bg-selection-bg"
               }`}
             >
-              {!isLast && (
-                <span
-                  className="absolute left-[26px] top-[42px] h-[calc(100%-24px)] w-0.5 rounded-full"
-                  style={{ backgroundColor: passed ? "var(--color-primary)" : "var(--color-border-strong)" }}
-                />
-              )}
               <span
-                className={`relative z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full text-[12px] font-bold transition ${
+                className={`grid h-5 w-5 shrink-0 place-items-center rounded-md text-[11px] font-bold ${
                   active
-                    ? "primary-gradient text-white shadow-primary-glow"
+                    ? "bg-white/25 text-white"
                     : passed
-                      ? "bg-primary text-white"
-                      : "border border-border-strong bg-surface text-text-muted group-hover:border-primary group-hover:text-primary"
+                      ? "text-white"
+                      : "bg-[#C7CDD8] text-white"
                 }`}
+                style={passed && !active ? { backgroundColor: "var(--color-success)" } : undefined}
               >
-                {passed ? <Icon className="text-sm">check</Icon> : index + 1}
+                {passed ? <Icon className="text-xs">check</Icon> : index + 1}
               </span>
-              <span className="min-w-0 flex-1 pt-0.5">
-                <span className={`block truncate text-sm font-semibold ${active ? "text-primary" : "text-text-primary"}`}>{label}</span>
-                <span className="mt-0.5 block truncate text-[11px] leading-4 text-text-muted">{description}</span>
-              </span>
+              <span className="min-w-0 flex-1 truncate">{label}</span>
             </button>
           )
         })}
       </nav>
 
-      <div className="mt-3 rounded-xl border border-border bg-surface/80 p-3 shadow-panel">
+      <div className="glass-panel mt-3 rounded-xl p-3">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-text-disabled">Author</div>
@@ -3319,13 +3312,8 @@ function Topbar({ activeStep }) {
 
 function Card({ title, children, className = "" }) {
   return (
-    <div className={`min-w-0 rounded-xl border border-border bg-surface p-4 shadow-card ${className}`}>
-      {title && (
-        <h3 className="mb-3 flex items-center gap-2 text-[15px] font-semibold tracking-[-0.01em]">
-          <span className="h-3.5 w-1 rounded-full primary-gradient" />
-          {title}
-        </h3>
-      )}
+    <div className={`glass-panel min-w-0 rounded-2xl p-4 ${className}`}>
+      {title && <h3 className="mb-3 text-[13.5px] font-bold tracking-[-0.01em]">{title}</h3>}
       {children}
     </div>
   )

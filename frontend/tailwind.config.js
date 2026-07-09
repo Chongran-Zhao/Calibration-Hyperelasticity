@@ -4,21 +4,21 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Ink & Azure — a precision calibration instrument.
-        background: "#EFF2F8",
-        surface: "#FFFFFF",
-        subtle: "#F3F6FC",
-        border: "#E3E9F2",
-        "border-strong": "#CBD5E6",
-        primary: "#2563EB",
-        "primary-hover": "#1D4ED8",
-        "primary-soft": "#DCE7FF",
-        "selection-bg": "#ECF2FE",
-        "text-primary": "#0E1B33",
-        "text-muted": "#5B6B84",
-        "text-disabled": "#98A4B8",
-        error: "#DC2626",
-        success: "#0F9D6B",
+        // Glass — a native macOS instrument: wallpaper, vibrancy, system blue.
+        background: "#E7EDF7",
+        surface: "rgba(255,255,255,0.72)",
+        subtle: "rgba(240,245,252,0.72)",
+        border: "rgba(23,35,61,0.10)",
+        "border-strong": "rgba(23,35,61,0.18)",
+        primary: "#0A84FF",
+        "primary-hover": "#0774E8",
+        "primary-soft": "rgba(10,132,255,0.16)",
+        "selection-bg": "rgba(10,132,255,0.10)",
+        "text-primary": "#1D2433",
+        "text-muted": "#5D6B82",
+        "text-disabled": "#8B97AB",
+        error: "#E5484D",
+        success: "#30A46C",
       },
       fontFamily: {
         sans: [
@@ -33,10 +33,10 @@ export default {
         mono: ["SF Mono", "ui-monospace", "Menlo", "Consolas", "monospace"],
       },
       boxShadow: {
-        panel: "0 1px 2px rgba(15, 27, 52, 0.05), 0 1px 1px rgba(15, 27, 52, 0.03)",
-        card: "0 1px 3px rgba(15, 27, 52, 0.06), 0 6px 18px -8px rgba(15, 27, 52, 0.10)",
-        float: "0 8px 30px -6px rgba(15, 27, 52, 0.16)",
-        "primary-glow": "0 6px 16px -4px rgba(37, 99, 235, 0.45)",
+        panel: "0 1px 3px rgba(23, 35, 61, 0.08)",
+        card: "0 2px 10px -4px rgba(23, 35, 61, 0.12)",
+        float: "0 18px 50px -14px rgba(23, 35, 61, 0.35)",
+        "primary-glow": "0 3px 12px rgba(10, 132, 255, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.35)",
       },
       borderRadius: {
         xl: "0.875rem",

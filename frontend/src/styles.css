@@ -3,24 +3,24 @@
 @tailwind utilities;
 
 :root {
-  /* Ink & Azure — a precision calibration instrument. */
-  --color-background: #eff2f8;
-  --color-surface: #ffffff;
-  --color-subtle: #f3f6fc;
-  --color-border: #e3e9f2;
-  --color-border-strong: #cbd5e6;
-  --color-primary: #2563eb;
-  --color-primary-hover: #1d4ed8;
-  --color-primary-soft: #dce7ff;
-  --color-selection-bg: #ecf2fe;
-  --color-text-primary: #0e1b33;
-  --color-text-muted: #5b6b84;
-  --color-text-disabled: #98a4b8;
-  --color-error: #dc2626;
-  --color-success: #0f9d6b;
+  /* Glass — a native macOS instrument: wallpaper, vibrancy, system blue. */
+  --color-background: #e7edf7;
+  --color-surface: rgba(255, 255, 255, 0.72);
+  --color-subtle: rgba(240, 245, 252, 0.72);
+  --color-border: rgba(23, 35, 61, 0.1);
+  --color-border-strong: rgba(23, 35, 61, 0.18);
+  --color-primary: #0a84ff;
+  --color-primary-hover: #0774e8;
+  --color-primary-soft: rgba(10, 132, 255, 0.16);
+  --color-selection-bg: rgba(10, 132, 255, 0.1);
+  --color-text-primary: #1d2433;
+  --color-text-muted: #5d6b82;
+  --color-text-disabled: #8b97ab;
+  --color-error: #e5484d;
+  --color-success: #30a46c;
 
-  --shadow-card: 0 1px 3px rgba(15, 27, 52, 0.06), 0 6px 18px -8px rgba(15, 27, 52, 0.1);
-  --shadow-float: 0 8px 30px -6px rgba(15, 27, 52, 0.16);
+  --shadow-card: 0 2px 10px -4px rgba(23, 35, 61, 0.12);
+  --shadow-float: 0 18px 50px -14px rgba(23, 35, 61, 0.35);
 }
 
 * {
@@ -36,10 +36,12 @@ body,
 body {
   margin: 0;
   color: var(--color-text-primary);
+  /* macOS wallpaper: soft blue washes over a cool grey base. */
   background:
-    radial-gradient(1200px 680px at 8% -8%, #f7faff 0%, rgba(247, 250, 255, 0) 55%),
-    radial-gradient(1000px 620px at 108% 4%, #eef3fd 0%, rgba(238, 243, 253, 0) 50%),
-    var(--color-background);
+    radial-gradient(900px 600px at 12% -6%, rgba(122, 178, 255, 0.4), transparent 55%),
+    radial-gradient(800px 560px at 96% 2%, rgba(186, 205, 255, 0.48), transparent 52%),
+    radial-gradient(900px 700px at 55% 115%, rgba(160, 225, 255, 0.32), transparent 58%),
+    linear-gradient(180deg, #eaf0fb, #e3e9f5);
   background-attachment: fixed;
   font-family:
     "SF Pro Text",
@@ -77,21 +79,43 @@ body {
 .shadow-card { box-shadow: var(--shadow-card); }
 .shadow-float { box-shadow: var(--shadow-float); }
 
-/* Signature surfaces: subtle depth for the workflow shell. */
+/* Signature surfaces: layered vibrancy for the workflow shell. */
 .surface-rail {
-  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 60%, #f6f9ff 100%);
+  background: rgba(255, 255, 255, 0.42);
+  backdrop-filter: blur(28px) saturate(1.7);
+  -webkit-backdrop-filter: blur(28px) saturate(1.7);
 }
 .surface-topbar {
-  background: color-mix(in srgb, var(--color-surface) 85%, transparent);
-  backdrop-filter: saturate(1.4) blur(10px);
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
 }
 .primary-gradient {
-  background-image: linear-gradient(180deg, #3b82f6 0%, #2563eb 55%, #1d4ed8 100%);
+  background-image: linear-gradient(180deg, #2e96ff 0%, #0a84ff 60%, #0774e8 100%);
+}
+
+/* Frosted panel: the basic material of the workbench. */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(18px) saturate(1.5);
+  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  outline: 1px solid rgba(23, 35, 61, 0.08);
+  outline-offset: -1px;
+  box-shadow: 0 8px 26px -14px rgba(23, 35, 61, 0.28);
+}
+
+/* Fields need more opacity than the panels they sit on. */
+input.bg-surface,
+select.bg-surface,
+textarea.bg-surface {
+  background-color: rgba(255, 255, 255, 0.85);
+  box-shadow: inset 0 1px 2px rgba(23, 35, 61, 0.05);
 }
 
 /* Global focus ring for keyboard users. */
 :where(button, a, input, select, [tabindex]):focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
+  outline: 2.5px solid rgba(10, 132, 255, 0.45);
   outline-offset: 2px;
   border-radius: 8px;
 }
