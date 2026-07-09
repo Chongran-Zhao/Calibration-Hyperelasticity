@@ -31,6 +31,7 @@ desktop = [
 plot = ["matplotlib>=3.5.0"]
 cli = ["tqdm>=4.60.0"]
 dev = ["pytest>=7.0"]
+release = ["pyinstaller>=6.14,<7"]
 
 [project.scripts]
 hyperfit-app = "hyperfit.desktop:main"

@@ -16,10 +16,11 @@ from ..kinematics import Kinematics
 from ..models import MaterialModels
 from ..network import ParallelNetwork
 from ..optimizer import MaterialOptimizer
+from ..paths import resource_root
 from ..strains import STRAIN_CONFIGS, STRAIN_FORMULAS
 from . import meta, user_data, user_models
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = resource_root()
 
 
 def resolve_data_file() -> Path:
